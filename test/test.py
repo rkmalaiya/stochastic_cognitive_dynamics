@@ -13,7 +13,7 @@ import numpy as np
 #hdlr = logging.StreamHandler(sys.stdout)
 #log.addHandler(hdlr)
 
-log = cl.get_logger("util")
+log = cl.get_logger("test")
 
 def get_posterior(model, samples_n = 10, chains=2):
     posterior, posterior_pred = ut.sample_posterior(model, samples_n=samples_n, chains=chains)
@@ -59,6 +59,3 @@ if __name__ == "__main__":
       test_qdiffusion_posterior(10,4)  
 
 # %%
-log.debug("hi")
-# %%
-print("hi")
