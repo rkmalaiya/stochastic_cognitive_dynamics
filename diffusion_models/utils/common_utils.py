@@ -13,9 +13,12 @@ def sample_posterior(model, samples_n, chains, tune=10, cores=8):
         target_accept=0.99, cores=cores, progressbar=False)
         #posterior = pm.sample(10000, step = pm.Metropolis(), return_inferencedata=True, cores=4)
 
+    return posterior 
+
+def sample_post_pred(model, posterior, samples_n, cores=8):
+    with model:
         posterior_pred = pm.sample_posterior_predictive(posterior)
-        
-    return posterior, posterior_pred 
+    return posterior_pred
 
 def sample_prior(model, samples_n=100):
     with model:
@@ -40,3 +43,18 @@ def hessian(state, grad2, posterior_chain, K, J):
     #state = get_state(df_posterior, K, J)
     hess_cov = grad2(state)
     return hess_cov
+
+def extract_var(posterior_chains, var="", axis=-2):
+    var_mat_c, var_mat_ic = None, None
+    for p_c, p_ic in posterior_chains:
+        if var_mat_c is not None:
+            var_mat_c = np.append(var_mat_c, p_c.posterior[var].values, axis=axis)
+        else:
+            var_mat_c = p_c.posterior[var].values
+        
+        if var_mat_ic is not None:
+            var_mat_ic = np.append(var_mat_ic, p_ic.posterior[var].values, axis=axis)
+        else:
+            var_mat_ic = p_ic.posterior[var].values
+    
+    return var_mat_c, var_mat_ic

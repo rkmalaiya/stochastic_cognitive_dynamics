@@ -1,7 +1,7 @@
 import logging
 import sys
 
-def get_logger(lib_name):
+def get_logger(lib_name = None):
 
     # can get details from https://docs.python.org/3/library/logging.html#logrecord-objects
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

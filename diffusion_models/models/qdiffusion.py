@@ -155,3 +155,6 @@ def gen_sample_data(model):
     prior_data_ra = prior_data.prior["X_kj"].values.squeeze()[1,:,:]
     return(prior_data_rt, prior_data_ra)
 
+def sample_posterior(model, samples_n, chains):
+    return ut.sample_posterior(model, samples_n=samples_n, chains=chains)
+
