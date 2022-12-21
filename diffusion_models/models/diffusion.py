@@ -6,9 +6,11 @@ import scipy as sp
 import diffusion_models.utils.common_logging as cl
 from diffusion_models.utils import common_utils as ut
 import arviz as az
+import xarray as xa
 
 log = cl.get_logger("diffusion")
 eps = 0.001 # for numerical stability
+tune = 100
 def _diffusion_01w(t, a, w, K):
     tt=t/(a**2)
     prob_rt_std = np.pi * K * (np.exp( -((K*np.pi)**2) * tt/2 ) + eps) * np.sin( K * np.pi * w )
@@ -33,7 +35,7 @@ def _diffusion_sv_logp(RT, v, a, w, t_er, sv):
     #t[np.where(t <= 0)] = 0
 
     prob_rt_std = _diffusion_01w(t, a, w, K)
-    prob_rt = np.exp(np.log(prob_rt_std) + ((a*w*a*sv)**2 - 2*a*v*w*a - (v**2)*t ) / (2*(sv**2)*t+2) )
+    prob_rt = np.exp(np.log(prob_rt_std) + ((a*w*a*sv)**2 - 2*a*v*w*a - (v**2)*t ) / (2*(sv**2)*t+2) + eps) #eps for numerical stability
     prob_rt = prob_rt / (np.sqrt( (sv**2)*t+1 )) / a**2
     return prob_rt
 
@@ -166,11 +168,11 @@ def get_models_n_vars(I = None, J = None, data_rt=None, data_ra=None, sv=False, 
         else:
             yield (model_correct, vars_c), (model_incorrect,vars_ic)
 
-def accumulate_RT(RT_new, RT = None):
+def accumulate_RT(RT_new, RT = None, axis=1):
     if(RT is None):
         RT = RT_new
     else:
-        RT = np.append(RT, RT_new, axis=1)
+        RT = np.append(RT, RT_new, axis=axis)
     return RT
 
 def sample_prior_data(samples_n = 100, models=[]):
@@ -192,14 +194,16 @@ def sample_prior_data(samples_n = 100, models=[]):
     return(RT_correct, RT_incorrect)
 
 
-def sample_posterior_params(samples_n, chains,tune, models=[], X=None, RT=None):
+def sample_posterior_params(samples_n, chains, tune=tune, models=[], X=None, RT=None):
 
     """
     Arguments:
         models=[]: parameter should have tuples of correct and incorrect responses for each participant
     """
     posterior_chain = [] # per participant
-    
+    posterior_chain_correct = None
+    posterior_chain_incorrect = None
+
     if(len(models) == 0): # Default model creation (X=1)
         models = [[m_c, m_ic] for (m_c, _), (m_ic,_)  in get_models_n_vars(data_rt=RT, data_ra=X)] # 4 response times for correct responses of 2 participants
 
@@ -208,36 +212,40 @@ def sample_posterior_params(samples_n, chains,tune, models=[], X=None, RT=None):
         p_c_c = ut.sample_posterior(model=model_correct, samples_n=samples_n,chains=chains,tune=tune)
         p_c_ic = ut.sample_posterior(model=model_incorrect, samples_n=samples_n,chains=chains,tune=tune)
 
-        #if(posterior_chain_correct != None):
-        #    posterior_chain_correct = az.concat(posterior_chain_correct, p_c_c, dim = "chain")
-        #    #posterior_chain_correct = posterior_chain_correct.extend(p_c_c) 
-        #else:
-        #    posterior_chain_correct = p_c_c
+        if(posterior_chain_correct != None):
+            posterior_chain_correct.posterior = xa.concat((posterior_chain_correct.posterior, p_c_c.posterior), dim="particpant")
+        else:
+            posterior_chain_correct = p_c_c.copy()
 
-        #if(posterior_chain_incorrect != None):
-        #    posterior_chain_incorrect = az.concat(posterior_chain_incorrect, p_c_ic, dim="chain")
-        #else:
-        #    posterior_chain_incorrect = p_c_ic
+        if(posterior_chain_incorrect != None):
+            posterior_chain_incorrect.posterior = xa.concat((posterior_chain_incorrect.posterior, p_c_ic.posterior), dim="particpant")
+        else:
+            posterior_chain_incorrect = p_c_ic.copy()
 
         posterior_chain.append((p_c_c, p_c_ic))
         
-    return posterior_chain, models
+    return (posterior_chain_correct, posterior_chain_incorrect), (posterior_chain, models)
 
 def sample_post_pred_data(posteriors=[], samples_n = 100, models=[]):
     if len(models) == 0:
         raise Exception("Need to provide the models corresponding to the posterior trace")
     
-    RT_correct = None
-    RT_incorrect = None
+    RT = []
+    
     
     for (m_c, m_ic), (p_c, p_ic) in zip(models, posteriors):
         post_pred_correct = ut.sample_post_pred(m_c, posterior=p_c,samples_n=samples_n)
         post_pred_incorrect = ut.sample_post_pred(m_ic, posterior=p_ic,samples_n=samples_n)
         
-        RT_correct = accumulate_RT(post_pred_correct.posterior_predictive.RT.values, RT_correct)
-        RT_incorrect = accumulate_RT(post_pred_incorrect.posterior_predictive.RT.values, RT_incorrect)
+        #RT_correct = accumulate_RT(post_pred_correct.posterior_predictive.RT.values, RT_correct, axis=-1)
+        #RT_incorrect = accumulate_RT(post_pred_incorrect.posterior_predictive.RT.values, RT_incorrect, axis=-1)
 
-    return RT_correct, RT_incorrect
+        RT.append((post_pred_correct.posterior_predictive.RT.values, post_pred_incorrect.posterior_predictive.RT.values))
+
+        #RT_correct_s = np.swapaxes(RT_correct, 0,2)
+        #RT_incorrect_s = np.swapaxes(RT_incorrect, 0,2)
+
+    return RT
 
 def _test_edge_cases():
 
@@ -256,7 +264,7 @@ def _test_edge_cases():
 
 #%%
 if __name__ == "__main__":
-    I,J = 5,(4,2,3,5,6)
+    I,J = 3,(4,2,3)
     log.debug("Starting test")
 
     _test_edge_cases()
@@ -285,18 +293,17 @@ if __name__ == "__main__":
         #log.debug(f"Starting Diffusion (X=0) (sv=True) for {i}, {j}")
         #_, model_incorrect = diffusion_model_both(X, RT, sv=True)
         #pm.sample(model=model_incorrect, draws=10, chains=2,tune=10)
-    
+
     log.debug(f"Starting posterior prediction distribution for size {posterior_chain.posterior.v.shape}")
     with model_correct:
-        postr_pred_chain = pm.sample_posterior_predictive(trace=posterior_chain)
+        postr_pred_chain = pm.sample_posterior_predictive(trace=posterior_chain.sel(chain =[0]))
     log.debug(f"Posterior RT {postr_pred_chain.posterior_predictive.RT.shape}")
     log.debug(f"Posterior max RT {np.max(postr_pred_chain.posterior_predictive.RT)}")
-    
+    assert postr_pred_chain.posterior_predictive.RT.shape[0:2] == (1,10) #chains=1, draw. Not RTs per participant because they may vary
 
-# %%pdb 1
 
 # %%
-X = np.random.randint(0,2,(2,3))
+"""X = np.random.randint(0,2,(2,3))
 RT = np.random.uniform(0,4,(2,3))
 model_correct, model_incorrect = [[m_c, m_ic] for (m_c, _), (m_ic, _) in get_models_n_vars(data_ra = X, data_rt = RT, sv=False)]
 posterior_chain_0 = pm.sample(model=model_correct[0], draws=10, chains=2,tune=10)
@@ -309,4 +316,9 @@ t = xa.concat((posterior_chain_0.posterior, posterior_chain_1.posterior), dim="p
 #dim=[v for v in posterior_chain_0.posterior.coords.keys()][2:3])
 #[v for v in posterior_chain_0.posterior.coords.keys()][2:]
 posterior_chain.posterior = t
+
 # %%
+with model_correct[0]:
+    pm.sample_posterior_predictive(posterior_chain_0, var_names = ["RT"])
+# %%
+"""

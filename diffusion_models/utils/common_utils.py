@@ -17,7 +17,7 @@ def sample_posterior(model, samples_n, chains, tune=10, cores=8):
 
 def sample_post_pred(model, posterior, samples_n, cores=8):
     with model:
-        posterior_pred = pm.sample_posterior_predictive(posterior)
+        posterior_pred = pm.sample_posterior_predictive(posterior.sel(chain=[0]))
     return posterior_pred
 
 def sample_prior(model, samples_n=100):
