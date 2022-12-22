@@ -15,38 +15,40 @@ err = 0.001
 tune = 200
 
 def _diffusion_01w(t, a, w, K):
-
+    #K_n = at.sqrt(-2 * at.log(np.pi * t * err) / (np.pi**2 * t) ) + 1
+    #K = np.asarray([1,2,3,4,5]) #at.arange(K_n)
     tt=t/(a**2)
     prob_rt_std = np.pi * K * (at.exp( - ((K*np.pi)**2 * tt/2) ) + eps) * at.sin( K * np.pi * w )
     
     return prob_rt_std#.sum()
 
-def _diffusion(t, v, a, w):
-    K = [1,2,3,4]
-    #prob_X = ( at.exp(-2*v*a) - at.exp(-2*v*w*a) ) / (at.exp(-2*v*a) - 1)
-    prob_rt_std,_ = ae.scan(_diffusion_01w, sequences=t,non_sequences=(a, w, K))
-    prob_rt = (1 / a**2) * at.exp( (-w*a*v) - (v**2 * t)/2 ) * prob_rt_std.sum()
-    prob_rt = prob_rt #/ prob_X
-    return prob_rt
-
-def _individual_logp(t, X, v, a, w):
+def _individual_logp(t, X, v, a, w, sv):
 
     t_correct = t[X]
     t_incorrect = t[1-X]
 
-    total_logp = _diffusion(t_correct, -v, a, 1-w) + _diffusion(t_incorrect, v, a, w)
+    total_logp = _diffusion_sv(t_correct, -v, a, 1-w, sv) + _diffusion_sv(t_incorrect, v, a, w, sv)
     return total_logp
 
-def _diffusion_RT_logp(RT, X, v, a, w, t_er):
+def _diffusion_sv_logp(RT, X, v, a, w, sv, t_er):
     t = RT-t_er
     t = at.switch(at.le(t,0), eps,t)
     w = at.switch(at.ge(w,1), 0.99,w) # to avoid instability during intial evaluation.
 
     X = at.as_tensor(X)
-    prob_rt, _ = ae.scan(lambda t_l, X_l, v_l, a_l, w_l: at.switch(at.le(t, 0), eps, _individual_logp(t_l, X_l, v_l, a_l, w_l)), sequences=[t,X, v, a, w])
+    prob_rt, _ = ae.scan(lambda t_l, X_l, v_l, a_l, w_l, sv_l: at.switch(at.le(t, 0), eps, _individual_logp(t_l, X_l, v_l, a_l, w_l, sv_l)), sequences=[t,X, v, a, w, sv])
     
     return prob_rt.sum()
 
+def _diffusion_sv(t, v, a, w, sv):
+    K = [1,2,3,4]
+    
+    prob_rt_std_all, _ = ae.scan(_diffusion_01w, sequences=t,non_sequences=(a, w, K))
+    prob_rt_std = prob_rt_std_all.sum()
+    prob_rt = np.exp(np.log(prob_rt_std) + ((a*w*a*sv)**2 - 2*a*v*w*a - (v**2)*t ) / (2*(sv**2)*t+2) + eps) #eps for numerical stability
+    prob_rt = prob_rt / (np.sqrt( (sv**2)*t+1 )) / a**2
+
+    return prob_rt
 
 def _diffusion_default_priors(parti_n):
     with pm.Model() as model:
@@ -55,55 +57,27 @@ def _diffusion_default_priors(parti_n):
         z = pm.Uniform("z", 0,a,shape=(parti_n,1)) # z ranges from 0 to a
         w = pm.Deterministic("w", z/a)
         t_er = pm.HalfNormal("t_er",2,shape=(parti_n,1))
+        sv = pm.HalfNormal("sv", 2,shape=(parti_n,1))
         
-    return model, v,a,w, t_er
+    return model, v,a,w,sv, t_er
 
 def _diffusion_draw(v,a,w, t_er, rng=None, size=None):
-    sample_counter = 1000
-
-    # To get how many response time samples are required for each participants.
-    if len(size) > 1: 
-        J = size[1]
-    else:
-        J = size[0]
-
-    samples_rejection = np.max((100 * J, 100))
-    RT_rvs = np.empty(shape=size)
-    #for i_l in zip(range(size[0])):
-
-    RT_arr = np.empty(shape=0)
-
-    while (RT_arr.shape[0] < J):
-        
-        RT = sp.stats.lognorm.rvs(1,0,1, size=samples_rejection) + t_er
-        u = sp.stats.uniform.rvs(0,1,size=samples_rejection)
-
-        pdf_lognorm = sp.stats.lognorm.pdf(RT,1,0,1)
-        pdf_diffusion = _diffusion_RT_logp(RT,v,a,w, t_er).eval()
-        
-        M = np.round(np.max(pdf_diffusion) + 1)
-        #log.debug(f"M: {M}:{np.max(pdf_diffusion)}")
-        idx = np.less_equal(u, pdf_diffusion / (M*pdf_lognorm))
-        RT_filter = RT[idx]
-        RT_arr = np.append(RT_arr, RT_filter)
-        sample_counter -= 1
-        if(sample_counter <= 0):
-            raise Exception(f"Could not sample for v:{v}, a:{a}, w:{w}, t_er:{t_er}, RT:{RT}, pdf_diffusion:{pdf_diffusion}")
-    #RT_rvs[i_l,:] = RT_arr[0:size[1]] 
-
-    return RT_arr[0:J] #RT_rvs
+    pass
 
 def _diffusion_model(obs_X = None, obs_RT=None):
     
-    model, v,a,w, t_er = _diffusion_default_priors(obs_X.shape[0])
-    vars = obs_X, v,a,w, t_er    
+    model, v,a,w, t_er, sv = _diffusion_default_priors(obs_X.shape[0])
+    vars = obs_X, v,a,w, t_er, sv
+    logp = _diffusion_sv_logp
 
     with model:
         pm.DensityDist(
             "RT",
             *vars,
-            logp=_diffusion_RT_logp,
-            observed=obs_RT
+            logp=logp,
+            observed=obs_RT,
+            #random=_diffusion_draw,
+            #size=(1,J) if obs_RT is None else obs_RT.shape
         )
         
     return model
@@ -129,6 +103,7 @@ def _test_edge_cases():
     w = np.repeat([0.44120144255887783] , 4)[:,np.newaxis]
     #t_er=0.7100510973761837], 4)
     t_er=np.repeat([0.07100510973761837], 4) [:,np.newaxis]
+    sv=np.repeat([-0.89], 4) [:,np.newaxis]
     RTs = [[0.09, 1.39385687, 1.55661403, 1.88891806, 2.23878542, 0.92574541, 3.56532722],
             [0.19, 1.59385687, 2.55661403, 3.88891806, 1.23878542, 1.92574541, 5.56532722]
     ]
@@ -136,9 +111,9 @@ def _test_edge_cases():
     X = np.random.randint(0,2,(4,5))
     RT = np.random.uniform(0,4,(4,5))
     
-    lp = _diffusion_RT_logp(RT, X, v,a,w,t_er)
+    lp = _diffusion_sv_logp(RT, X, v,a,w,sv,t_er)
 
-    log.debug(f"lp: {lp.eval()}")
+    print(f"lp: {lp.eval()}")
 
 
 #%%
@@ -146,7 +121,7 @@ if __name__ == "__main__":
     I,J = 3,(4,2,3)
     log.debug("Starting test")
 
-    _test_edge_cases()
+    #_test_edge_cases()
 
     for _,j in zip(range(1,I+1), J):
         X = np.random.randint(0,2,(4,j))
@@ -156,4 +131,3 @@ if __name__ == "__main__":
         model = _diffusion_model(obs_X = X, obs_RT=RT, sv = False)
         posterior_chain = pm.sample(model=model, draws=10, chains=2,tune=10)
         log.debug(f"Posterior model_correct {posterior_chain.posterior.v.shape}")
-
