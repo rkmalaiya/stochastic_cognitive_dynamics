@@ -1,6 +1,7 @@
 #%%
 import pymc as pm
 import numpy as np
+import aesara as ae
 from aesara import tensor as at
 import scipy as sp
 import diffusion_models.utils.common_logging as cl
@@ -10,21 +11,28 @@ import xarray as xa
 
 log = cl.get_logger("diffusion")
 eps = 0.001 # for numerical stability
+err = 0.001
 tune = 100
-def _diffusion_01w(t, a, w, K):
+def _diffusion_01w(t, a, w):
+    #t_max = t#np.min(t) #to use the most number of terms required.
+    #K_n = np.sqrt(-2 * np.log(np.pi * t_max * err) / (np.pi**2 * t_max) ) + 1
+    K = 1 #np.arange(1,K_n)
+    #K = np.transpose(K)
     tt=t/(a**2)
-    prob_rt_std = np.pi * K * (np.exp( -((K*np.pi)**2) * tt/2 ) + eps) * np.sin( K * np.pi * w )
-    return prob_rt_std
+    prob_rt_std = np.pi * K * (at.exp( - ((K*np.pi)**2 * tt/2) ) + eps) * np.sin( K * np.pi * w )
+    
+    return prob_rt_std.sum()
 
 def _diffusion_logp(RT, v, a, w, t_er):
-    #t_max = np.max(RT)
-    K = 1 #np.sqrt(-2 * np.log(np.pi * t_max * err) / (np.pi**2 * t_max) ) + 1
     
     t = RT-t_er
-    #prob_rt_std = at.switch(pm.math.le(t,0), 0, _diffusion_01w(t, a, w, K))
-    prob_X = ( np.exp(-2*v*a) - np.exp(-2*v*w*a) ) / (np.exp(-2*v*a) - 1)
-    prob_rt_std = _diffusion_01w(t, a, w, K)
-    prob_rt = (1 / a**2) * np.exp( (-w*a*v) - (v**2 * t)/2 ) * prob_rt_std
+
+    #prob_rt_std = at.switch(at.le(t,0), at.zeros_like(t), _diffusion_01w(t, a, w, K))
+    prob_rt_std, _ = ae.scan(lambda t_l: at.switch(at.le(t, 0), 0, _diffusion_01w(t_l, a, w)), sequences=t)
+    #prob_rt_std = _diffusion_01w(t, a, w, K)
+
+    prob_X = ( at.exp(-2*v*a) - at.exp(-2*v*w*a) ) / (at.exp(-2*v*a) - 1)
+    prob_rt = (1 / a**2) * at.exp( (-w*a*v) - (v**2 * t)/2 ) * prob_rt_std.sum()
     prob_rt = prob_rt / prob_X
 
     return prob_rt
@@ -113,8 +121,8 @@ def _diffusion_model(obs_X = None, obs_RT=None, sv = False, correct_resp = False
             *vars,
             logp=logp,
             observed=obs_RT,
-            random=_diffusion_draw,
-            size=(1,J) if obs_RT is None else obs_RT.shape
+            #random=_diffusion_draw,
+            #size=(1,J) if obs_RT is None else obs_RT.shape
         )
         
     return model, vars
@@ -254,11 +262,12 @@ def _test_edge_cases():
     v = -0.9249241152935039
     a = 0.023750197074163027
     w = 0.44120144255887783 
-    t_er=0.7100510973761837 
-    RTs = [1.39385687, 1.55661403, 1.88891806, 2.23878542, 0.92574541, 3.56532722]
+    #t_er=0.7100510973761837
+    t_er=0.07100510973761837 
+    RTs = [0.09, 1.39385687, 1.55661403, 1.88891806, 2.23878542, 0.92574541, 3.56532722]
 
     for RT in RTs:
-        lp = _diffusion_logp(RT, v,a,w,t_er)
+        lp = _diffusion_logp(np.asarray(RT), v,a,w,t_er)
         log.debug(f"lp: {lp}")
 
 
@@ -267,11 +276,11 @@ if __name__ == "__main__":
     I,J = 3,(4,2,3)
     log.debug("Starting test")
 
-    _test_edge_cases()
+    #_test_edge_cases()
 
-    (model, _),_ = _diffusion_model_both()
-    prior_chain = pm.sample_prior_predictive(model=model)
-    log.debug(f"Prior RT {prior_chain.prior.RT.shape}")#, " ***** min:", np.min(prior_chain.prior.RTs), " ***** max:", np.max(prior_chain.prior.RTs))
+    #(model, _),_ = _diffusion_model_both()
+    #prior_chain = pm.sample_prior_predictive(model=model)
+    #log.debug(f"Prior RT {prior_chain.prior.RT.shape}")#, " ***** min:", np.min(prior_chain.prior.RTs), " ***** max:", np.max(prior_chain.prior.RTs))
 
     for _,j in zip(range(1,I+1), J):
         X = np.random.randint(0,2,(1,j))
@@ -298,7 +307,7 @@ if __name__ == "__main__":
     with model_correct:
         postr_pred_chain = pm.sample_posterior_predictive(trace=posterior_chain.sel(chain =[0]))
     log.debug(f"Posterior RT {postr_pred_chain.posterior_predictive.RT.shape}")
-    log.debug(f"Posterior max RT {np.max(postr_pred_chain.posterior_predictive.RT)}")
+    log.debug(f"Posterior max RT {np.max(postr_pred_chain.posterior_predictive.RT.values)}")
     assert postr_pred_chain.posterior_predictive.RT.shape[0:2] == (1,10) #chains=1, draw. Not RTs per participant because they may vary
 
 
