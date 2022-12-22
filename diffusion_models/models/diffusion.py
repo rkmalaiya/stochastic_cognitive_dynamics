@@ -12,39 +12,39 @@ import xarray as xa
 log = cl.get_logger("diffusion")
 eps = 0.001 # for numerical stability
 err = 0.001
-tune = 100
+tune = 300
 def _diffusion_01w(t, a, w):
-    #t_max = t#np.min(t) #to use the most number of terms required.
-    K_n = at.sqrt(-2 * at.log(np.pi * t * err) / (np.pi**2 * t) ) + 1
-    K = 1#np.arange(1,K_n)
-    #K = np.transpose(K)
+    #K_n = at.sqrt(-2 * at.log(np.pi * t * err) / (np.pi**2 * t) ) + 1
+    K = np.asarray([1,2,3,4,5]) #at.arange(K_n)
     tt=t/(a**2)
     prob_rt_std = np.pi * K * (at.exp( - ((K*np.pi)**2 * tt/2) ) + eps) * at.sin( K * np.pi * w )
     
     return prob_rt_std.sum()
 
 def _diffusion_logp(RT, v, a, w, t_er):
-    
     t = RT-t_er
+    t = at.switch(at.le(t,0), eps,t)
+    w = at.switch(at.ge(w,1), 0.99,w) # to avoid instability during intial evaluation.
 
-    #prob_rt_std = at.switch(at.le(t,0), at.zeros_like(t), _diffusion_01w(t, a, w, K))
-    prob_rt_std, _ = ae.scan(lambda t_l: at.switch(at.le(t, 0), 0, _diffusion_01w(t_l, a, w)), sequences=t)
-    #prob_rt_std = _diffusion_01w(t, a, w, K)
-
+    prob_rt_std, _ = ae.scan(lambda t_l: at.switch(at.le(t, 0), eps, _diffusion_01w(t_l, a, w)), sequences=t)
     prob_X = ( at.exp(-2*v*a) - at.exp(-2*v*w*a) ) / (at.exp(-2*v*a) - 1)
     prob_rt = (1 / a**2) * at.exp( (-w*a*v) - (v**2 * t)/2 ) * prob_rt_std.sum()
     prob_rt = prob_rt / prob_X
 
     return prob_rt
-    
+ 
 def _diffusion_sv_logp(RT, v, a, w, t_er, sv):
-    K=1
     t = RT-t_er
-    #t[np.where(t <= 0)] = 0
-
-    prob_rt_std = _diffusion_01w(t, a, w, K)
+    t = at.switch(at.le(t,0), eps,t)
+    w = at.switch(at.ge(w,1), 0.99,w)
+    
+    prob_rt_std_all, _ = ae.scan(lambda t_l: at.switch(at.le(t, 0), eps, _diffusion_01w(t_l, a, w)), sequences=t)
+    prob_rt_std = prob_rt_std_all.sum()
     prob_rt = np.exp(np.log(prob_rt_std) + ((a*w*a*sv)**2 - 2*a*v*w*a - (v**2)*t ) / (2*(sv**2)*t+2) + eps) #eps for numerical stability
     prob_rt = prob_rt / (np.sqrt( (sv**2)*t+1 )) / a**2
+    prob_X = ( at.exp(-2*v*a) - at.exp(-2*v*w*a) ) / (at.exp(-2*v*a) - 1)
+    prob_rt = prob_rt / prob_X
+
     return prob_rt
 
 
@@ -77,7 +77,7 @@ def _diffusion_draw(v,a,w, t_er, rng=None, size=None):
     else:
         J = size[0]
 
-    samples_rejection = np.max((100 * J, 100000))
+    samples_rejection = np.max((100 * J, 100))
     RT_rvs = np.empty(shape=size)
     #for i_l in zip(range(size[0])):
 
@@ -89,13 +89,13 @@ def _diffusion_draw(v,a,w, t_er, rng=None, size=None):
         u = sp.stats.uniform.rvs(0,1,size=samples_rejection)
 
         pdf_lognorm = sp.stats.lognorm.pdf(RT,1,0,1)
-        pdf_diffusion = _diffusion_logp(RT,v,a,w, t_er)
+        pdf_diffusion = _diffusion_logp(RT,v,a,w, t_er).eval()
         
-        M = at.round(at.max(pdf_diffusion) + 1)
+        M = np.round(np.max(pdf_diffusion) + 1)
         #log.debug(f"M: {M}:{np.max(pdf_diffusion)}")
-        
-        RT_filter = RT[at.lt(u, pdf_diffusion / (M*pdf_lognorm))]
-        RT_arr = at.append(RT_arr, RT_filter)
+        idx = np.less_equal(u, pdf_diffusion / (M*pdf_lognorm))
+        RT_filter = RT[idx]
+        RT_arr = np.append(RT_arr, RT_filter)
         sample_counter -= 1
         if(sample_counter <= 0):
             raise Exception(f"Could not sample for v:{v}, a:{a}, w:{w}, t_er:{t_er}, RT:{RT}, pdf_diffusion:{pdf_diffusion}")
@@ -265,10 +265,24 @@ def _test_edge_cases():
     #t_er=0.7100510973761837
     t_er=0.07100510973761837 
     RTs = [0.09, 1.39385687, 1.55661403, 1.88891806, 2.23878542, 0.92574541, 3.56532722]
+    lp = _diffusion_logp(np.asarray(RTs), v,a,w,t_er)
+    sample = _diffusion_draw(v,a,w,t_er,size=(1,5))
+    
+    #for RT in RTs:
+    #    lp = _diffusion_logp(np.asarray(RT), v,a,w,t_er)
+    log.debug(f"lp: {lp.eval()}")
+    log.debug(f"samples: {sample}")
 
-    for RT in RTs:
-        lp = _diffusion_logp(np.asarray(RT), v,a,w,t_er)
-        log.debug(f"lp: {lp}")
+def _test_edge_cases_sc():
+    v = -1.01
+    a = -0.9 
+    z = -1.51 
+    t_er = -0.75
+    sv = -0.89
+    RTs = [2.81207854, 2.3956247 , 0.007444]
+    #{'v': -0.97, 'a': -1.28, 'z': -1.47, 't_er': -1.01, 'sv': -2.04, 'RT': nan}
+    lp = _diffusion_sv_logp(np.asarray(RTs),v,a,z/a,t_er,sv)
+    log.debug(f"lp: {lp.eval()}")
 
 
 #%%
@@ -276,11 +290,12 @@ if __name__ == "__main__":
     I,J = 3,(4,2,3)
     log.debug("Starting test")
 
-    #_test_edge_cases()
+    _test_edge_cases()
+    _test_edge_cases_sc()
 
-    (model, _),_ = _diffusion_model_both()
-    prior_chain = pm.sample_prior_predictive(model=model)
-    log.debug(f"Prior RT {prior_chain.prior.RT.shape}")#, " ***** min:", np.min(prior_chain.prior.RTs), " ***** max:", np.max(prior_chain.prior.RTs))
+    #(model, _),_ = _diffusion_model_both()
+    #prior_chain = pm.sample_prior_predictive(model=model)
+    #log.debug(f"Prior RT {prior_chain.prior.RT.shape}")#, " ***** min:", np.min(prior_chain.prior.RTs), " ***** max:", np.max(prior_chain.prior.RTs))
 
     for _,j in zip(range(1,I+1), J):
         X = np.random.randint(0,2,(1,j))
@@ -295,13 +310,13 @@ if __name__ == "__main__":
         _, (model_incorrect,_) = _diffusion_model_both(X, RT, sv=False)
         pm.sample(model=model_incorrect, draws=10, chains=2,tune=10)
 
-        #log.debug(f"Starting Diffusion (X=1) (sv=True) for {i}, {j}")
-        #model_correct, _ = diffusion_model_both(X, RT, sv=True)
-        #pm.sample(model=model_correct, draws=10, chains=2,tune=10)
+        log.debug(f"Starting Diffusion (X=1) (sv=True) for {j}")
+        (model_correct, _), _ = _diffusion_model_both(X, RT, sv=True)
+        pm.sample(model=model_correct, draws=10, chains=2,tune=10)
 
-        #log.debug(f"Starting Diffusion (X=0) (sv=True) for {i}, {j}")
-        #_, model_incorrect = diffusion_model_both(X, RT, sv=True)
-        #pm.sample(model=model_incorrect, draws=10, chains=2,tune=10)
+        log.debug(f"Starting Diffusion (X=0) (sv=True) for {j}")
+        _, (model_incorrect,_) = _diffusion_model_both(X, RT, sv=True)
+        pm.sample(model=model_incorrect, draws=10, chains=2,tune=10)
 
     log.debug(f"Starting posterior prediction distribution for size {posterior_chain.posterior.v.shape}")
     with model_correct:

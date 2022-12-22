@@ -53,11 +53,11 @@ def test_post_samples_n_post_pred(X,RT,samples_n):
 if __name__ == "__main__":   
     test_diffusion_prior_predictive_default()
     test_diffusion_prior_predictive(10,4, 100)
-    I,J = 10, 7
-    for i,j in zip(range(2,I,2), range(3,J,2)):
+    I,J = 600, 20
+    for i,j in zip(range(2,I,50), range(3,J,4)):
         X = np.random.randint(0,2,(i,j))
         RT = np.random.uniform(0,4,(i,j))
         log.debug(f"Data generated of size {i}, {j}")
-        test_post_samples_n_post_pred(X, RT, 100)
+        test_post_samples_n_post_pred(X, RT, 300)
         
 # %%
