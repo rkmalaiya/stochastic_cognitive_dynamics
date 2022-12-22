@@ -15,11 +15,11 @@ err = 0.001
 tune = 100
 def _diffusion_01w(t, a, w):
     #t_max = t#np.min(t) #to use the most number of terms required.
-    #K_n = np.sqrt(-2 * np.log(np.pi * t_max * err) / (np.pi**2 * t_max) ) + 1
-    K = 1 #np.arange(1,K_n)
+    K_n = at.sqrt(-2 * at.log(np.pi * t * err) / (np.pi**2 * t) ) + 1
+    K = 1#np.arange(1,K_n)
     #K = np.transpose(K)
     tt=t/(a**2)
-    prob_rt_std = np.pi * K * (at.exp( - ((K*np.pi)**2 * tt/2) ) + eps) * np.sin( K * np.pi * w )
+    prob_rt_std = np.pi * K * (at.exp( - ((K*np.pi)**2 * tt/2) ) + eps) * at.sin( K * np.pi * w )
     
     return prob_rt_std.sum()
 
@@ -91,11 +91,11 @@ def _diffusion_draw(v,a,w, t_er, rng=None, size=None):
         pdf_lognorm = sp.stats.lognorm.pdf(RT,1,0,1)
         pdf_diffusion = _diffusion_logp(RT,v,a,w, t_er)
         
-        M = np.round(np.max(pdf_diffusion) + 1)
+        M = at.round(at.max(pdf_diffusion) + 1)
         #log.debug(f"M: {M}:{np.max(pdf_diffusion)}")
         
-        RT_filter = RT[np.where(u < pdf_diffusion / (M*pdf_lognorm))]
-        RT_arr = np.append(RT_arr, RT_filter)
+        RT_filter = RT[at.lt(u, pdf_diffusion / (M*pdf_lognorm))]
+        RT_arr = at.append(RT_arr, RT_filter)
         sample_counter -= 1
         if(sample_counter <= 0):
             raise Exception(f"Could not sample for v:{v}, a:{a}, w:{w}, t_er:{t_er}, RT:{RT}, pdf_diffusion:{pdf_diffusion}")
@@ -121,8 +121,8 @@ def _diffusion_model(obs_X = None, obs_RT=None, sv = False, correct_resp = False
             *vars,
             logp=logp,
             observed=obs_RT,
-            #random=_diffusion_draw,
-            #size=(1,J) if obs_RT is None else obs_RT.shape
+            random=_diffusion_draw,
+            size=(1,J) if obs_RT is None else obs_RT.shape
         )
         
     return model, vars
@@ -278,9 +278,9 @@ if __name__ == "__main__":
 
     #_test_edge_cases()
 
-    #(model, _),_ = _diffusion_model_both()
-    #prior_chain = pm.sample_prior_predictive(model=model)
-    #log.debug(f"Prior RT {prior_chain.prior.RT.shape}")#, " ***** min:", np.min(prior_chain.prior.RTs), " ***** max:", np.max(prior_chain.prior.RTs))
+    (model, _),_ = _diffusion_model_both()
+    prior_chain = pm.sample_prior_predictive(model=model)
+    log.debug(f"Prior RT {prior_chain.prior.RT.shape}")#, " ***** min:", np.min(prior_chain.prior.RTs), " ***** max:", np.max(prior_chain.prior.RTs))
 
     for _,j in zip(range(1,I+1), J):
         X = np.random.randint(0,2,(1,j))
