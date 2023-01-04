@@ -1,4 +1,5 @@
 README.md
+license
 setup.py
 Computational_models_of_Reasoning.egg-info/PKG-INFO
 Computational_models_of_Reasoning.egg-info/SOURCES.txt

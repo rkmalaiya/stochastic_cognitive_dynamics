@@ -1,33 +1,38 @@
 #%%
 import pymc as pm
 import numpy as np
-import aesara as ae
-from aesara import tensor as at
+import pytensor as ae
+from pytensor import tensor as at
 import scipy as sp
 import diffusion_models.utils.common_logging as cl
 from diffusion_models.utils import common_utils as ut
-import arviz as az
-import xarray as xa
+
 
 log = cl.get_logger("diffusion")
 eps = 0.001 # for numerical stability
 err = 0.001
 tune = 200
 
-def _diffusion_01w(t, a, w, K):
+def _diffusion_01w(t, a, w):
+
+    K = at.arange(10) #should be calculated using Navarro and Fuss 2009 paper.
 
     tt=t/(a**2)
     prob_rt_std = np.pi * K * (at.exp( - ((K*np.pi)**2 * tt/2) ) + eps) * at.sin( K * np.pi * w )
     
-    return prob_rt_std#.sum()
+    return prob_rt_std.sum()
 
 def _diffusion(t, v, a, w):
-    K = [1,2,3,4]
-    #prob_X = ( at.exp(-2*v*a) - at.exp(-2*v*w*a) ) / (at.exp(-2*v*a) - 1)
-    prob_rt_std,_ = ae.scan(_diffusion_01w, sequences=t,non_sequences=(a, w, K))
-    prob_rt = (1 / a**2) * at.exp( (-w*a*v) - (v**2 * t)/2 ) * prob_rt_std.sum()
-    prob_rt = prob_rt #/ prob_X
-    return prob_rt
+        
+    prob_X = ( at.exp(-2*v*a) - at.exp(-2*v*w*a) ) / (at.exp(-2*v*a) - 1)
+    prob_rt_std,_ = ae.scan(fn = _diffusion_01w, 
+                            sequences=t, 
+                            non_sequences=(a, w))
+    
+    #prob_rt = (1 / a**2) * at.exp( (-w*a*v) - (v**2 * t)/2 ) * prob_rt_std
+    prob_rt = (1 / a*a) * at.exp( (-w*a*v) - (v*v * t)/2 ) * prob_rt_std
+    
+    return prob_rt/prob_X
 
 def _individual_logp(t, X, v, a, w):
 
@@ -43,7 +48,8 @@ def _diffusion_RT_logp(RT, X, v, a, w, t_er):
     w = at.switch(at.ge(w,1), 0.99,w) # to avoid instability during intial evaluation.
 
     X = at.as_tensor(X)
-    prob_rt, _ = ae.scan(lambda t_l, X_l, v_l, a_l, w_l: at.switch(at.le(t, 0), eps, _individual_logp(t_l, X_l, v_l, a_l, w_l)), sequences=[t,X, v, a, w])
+    prob_rt, _ = ae.scan(fn = lambda t_l, X_l, v_l, a_l, w_l: at.switch(at.le(t, 0), eps, _individual_logp(t_l, X_l, v_l, a_l, w_l)), 
+                        sequences=[t,X, v, a, w])
     
     return prob_rt.sum()
 
@@ -53,7 +59,7 @@ def _diffusion_default_priors(parti_n):
         v = pm.Normal("v",1,1,shape=(parti_n,1)) #v = ae.tensor.tile(v, (1,J))
         a = pm.Gamma("a",2,2,shape=(parti_n,1))
         z = pm.Uniform("z", 0,a,shape=(parti_n,1)) # z ranges from 0 to a
-        w = pm.Deterministic("w", z/a)
+        w = z/a #pm.Deterministic("w", z/a)
         t_er = pm.HalfNormal("t_er",2,shape=(parti_n,1))
         
     return model, v,a,w, t_er
@@ -111,10 +117,10 @@ def _diffusion_model(obs_X = None, obs_RT=None):
 def sample_prior_data(samples_n = 100):
     pass
 
-def sample_posterior_params(RT, X, samples_n, chains):
+def sample_posterior_params(RT, X, samples_n, chains, tune=tune, sampler="PYMC", acceptance_rate = 0.85):
 
     model = _diffusion_model(obs_X = X, obs_RT=RT)
-    posterior_chain = ut.sample_posterior(model,samples_n, chains,tune)
+    posterior_chain = ut.sample_posterior(model,samples_n, chains,tune, sampler=sampler)
     return posterior_chain, model
 
 def sample_post_pred_data(posterior_chain, model, samples_n = 100):
@@ -143,17 +149,19 @@ def _test_edge_cases():
 
 #%%
 if __name__ == "__main__":
-    I,J = 3,(4,2,3)
+    J = (2,20)
     log.debug("Starting test")
 
-    _test_edge_cases()
+    #_test_edge_cases()
 
-    for _,j in zip(range(1,I+1), J):
-        X = np.random.randint(0,2,(4,j))
-        RT = np.random.uniform(0,4,(4,j))
+    for j in J:
+        X = np.random.randint(0,2,(700,j))
+        RT = np.random.uniform(0,4,(700,j))
 
-        log.debug(f"Starting Diffusion (sv=False) for {j}")
-        model = _diffusion_model(obs_X = X, obs_RT=RT, sv = False)
+        log.debug(f"Starting Diffusion (sv=False) for {j} trials")
+        model = _diffusion_model(obs_X = X, obs_RT=RT)
         posterior_chain = pm.sample(model=model, draws=10, chains=2,tune=10)
+        with model:
+            posterior = pm.sampling_jax.sample_numpyro_nuts(10, tune = 10, chains=2)
         log.debug(f"Posterior model_correct {posterior_chain.posterior.v.shape}")
 

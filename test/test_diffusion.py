@@ -27,7 +27,7 @@ def test_posterior_samples(X,RT,samples_n):
     chains = 4
     log.debug("Starting test for diffusion")
     
-    posterior_chain,_ = dd.sample_posterior_params(RT, X, samples_n,chains=chains)
+    posterior_chain,_ = dd.sample_posterior_params(RT, X, samples_n,chains=chains, sampler="PYMC")
 
     assert posterior_chain.posterior.v.shape == (chains, samples_n, RT.shape[0], 1) #for all the trials / items per participant only 1 parameter is estimated
 
@@ -40,8 +40,8 @@ def test_posterior_samples(X,RT,samples_n):
 if __name__ == "__main__":   
     #test_diffusion_prior_predictive_default()
     #test_diffusion_prior_predictive(10,4, 100)
-    I,J = 600, 20
-    for i,j in zip(range(2,I,50), range(3,J,4)):
+    I,J = 600, 25
+    for i,j in zip(range(2,I,100), range(3,J,4)): # Both ranges will produce 6 elements
         X = np.random.randint(0,2,(i,j))
         RT = np.random.uniform(0,4,(i,j))
         log.debug(f"Data generated of size {i}, {j}")
