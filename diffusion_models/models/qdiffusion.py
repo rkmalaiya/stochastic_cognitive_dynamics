@@ -2,7 +2,9 @@
 import pymc as pm
 import numpy as np
 from diffusion_models.utils import common_utils as ut
-
+import diffusion_models.utils.common_logging as cl
+import pymc.sampling.jax as jx
+log = cl.get_logger("diffusion")
 
 type = 3
 
@@ -28,64 +30,24 @@ a_p_mu=0
 v_p_mu=0
 
 
-
-def q_diffusion_model_1_1(K,J, mu, RT = None, X=None):
-    
-    with pm.Model() as qdiffusion:
-        a_i = pm.Uniform("a_i",0,0.5)
-        v_i = pm.Uniform("v_i",0,100)
-
-        a_p = pm.Lognormal("a_p",a_p_mu,1)
-        v_p = pm.Lognormal("v_p",v_p_mu,1)
-
-        t_er = pm.Lognormal("t_er",0,1)
-
-        mu_kj, sigma_kj, p_kj = q_diffusion(a_i, v_i, a_p, v_p, t_er)
-
-        X_kj = pm.Bernoulli("X_kj", pm.invlogit(p_kj), shape = (K,J), observed = X)
-        RT_kj = pm.Normal("RT_kj",mu_kj, sigma_kj, shape = (K,J), observed = RT)
-        
-
-    return qdiffusion, (a_i, v_i, a_p, v_p, t_er, RT_kj, X_kj)
-
-
-
-def q_diffusion_model_K_1(K,J, RT = None, X=None):
-    
-    with pm.Model() as qdiffusion:
-        a_i = pm.Uniform("a_i",0,0.5)
-        v_i = pm.Uniform("v_i",0,100)
-
-        a_p = pm.Lognormal("a_p",a_p_mu,1, shape = (K,1))
-        v_p = pm.Lognormal("v_p",v_p_mu,1, shape = (K,1))
-
-        t_er = pm.Lognormal("t_er",0,1, shape = (K,1))
-
-        mu_kj, sigma_kj, p_kj = q_diffusion(a_i, v_i, a_p, v_p, t_er)
-
-        RT_kj = pm.Normal("RT_kj",mu_kj, sigma_kj, shape = (K,J), observed = RT)
-        X_kj = pm.Bernoulli("X_kj", pm.invlogit(p_kj), shape = (K,J), observed = X)
-
-    return qdiffusion, (a_i, v_i, a_p, v_p, t_er, RT_kj, X_kj)
-
-def q_diffusion_model(K,J, mu, RT = None, X=None):
+def get_model(I,J, RT = None, X=None):
     
     with pm.Model() as qdiffusion:
         a_i = pm.Uniform("a_i",0,0.5, shape = (1,J))
         v_i = pm.Uniform("v_i",0,0.5, shape = (1,J))
 
-        a_p = pm.Lognormal("a_p",a_p_mu,1,shape = (K,1))
-        v_p = pm.Lognormal("v_p",v_p_mu,1,shape = (K,1))
+        a_p = pm.Lognormal("a_p",a_p_mu,1,shape = (I,1))
+        v_p = pm.Lognormal("v_p",v_p_mu,1,shape = (I,1))
         #v_p = pm.Gamma("v_p",mu,2,shape = (K,1))
         
-        t_er = pm.Lognormal("t_er",0,1,shape = (K,1))
+        t_er = pm.Lognormal("t_er",0,1,shape = (I,1))
 
         mu_kj, sigma_kj, p_kj = q_diffusion(a_i, v_i, a_p, v_p, t_er)
 
-        RT_kj = pm.Normal("RT_kj",mu_kj, sigma_kj, shape = (K,J), observed = RT)
-        X_kj = pm.Bernoulli("X_kj", pm.invlogit(p_kj), shape = (K,J), observed = X)
+        RT_kj = pm.Normal("RT_kj",mu_kj, sigma_kj, shape = (I,J), observed = RT)
+        X_kj = pm.Bernoulli("X_kj", pm.invlogit(p_kj), shape = (I,J), observed = X)
 
-    return qdiffusion, (a_i, v_i, a_p, v_p, t_er, RT_kj, X_kj)
+    return qdiffusion #, (a_i, v_i, a_p, v_p, t_er, RT_kj, X_kj)
 
 def q_diffusion(a_i, v_i, a_p, v_p, t_er, grad=False):
 
@@ -117,16 +79,6 @@ def q_diffusion(a_i, v_i, a_p, v_p, t_er, grad=False):
     )
     return mu_kj, sigma_kj, p_jk
 
-
-def get_model_vars(K,J, mu=0, data_rt=None, data_ra=None, type=type):
-    if type == 1:
-        return q_diffusion_model_1_1(K,J, mu, data_rt, data_ra)
-    #elif type == 2:
-    #    return q_diffusion_model_K_1(K,J, mu, data_rt, data_ra)
-    elif type == 3:
-        return q_diffusion_model(K,J, mu, data_rt, data_ra)
-
-
 def get_state(df_posterior, K, J):
 
     state = {}
@@ -155,6 +107,26 @@ def gen_sample_data(model):
     prior_data_ra = prior_data.prior["X_kj"].values.squeeze()[1,:,:]
     return(prior_data_rt, prior_data_ra)
 
-def sample_posterior(model, samples_n, chains):
-    return ut.sample_posterior(model, samples_n=samples_n, chains=chains)
+def sample_posterior_params(RT, X, samples_n, chains, tune, sampler="PYMC", acceptance_rate=0.90):
+    model = get_model(*X.shape, X = X, RT=RT)
+    posterior_chain = ut.sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate)
+    return posterior_chain, model
 
+def _quick_test():
+    X = np.random.randint(0,2,(70,5))
+    RT = np.random.uniform(0,4,(70,5))
+
+    log.debug(f"Starting Diffusion test")
+    model = get_model(*X.shape, X = X, RT=RT)
+    posterior_chain = pm.sample(model=model, draws=10, chains=2,tune=10)
+    with model:
+        posterior_jax = jx.sample_numpyro_nuts(1000, tune = 500, chains=4, chain_method="parallel")
+    log.debug(f"Posterior model v_correct {posterior_chain.posterior.v_p.shape}")
+    assert posterior_chain.posterior.v_p.shape == (2,10,70,1)
+    assert posterior_jax.posterior.v_p.shape == (2,10,70,1)
+
+
+if __name__ == "__main__":
+    
+    log.debug("Starting test")
+    _quick_test()

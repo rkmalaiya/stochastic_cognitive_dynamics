@@ -1,20 +1,21 @@
 import pymc as pm
-import pymc.sampling_jax
 import arviz as az
+import pymc.sampling.jax as jx
 import numpy as np
-import logging
-log = logging.getLogger("util")
+import pandas as pd
+import diffusion_models.utils.common_logging as cl
+log = cl.get_logger("Common-Utils")
 
 
-def sample_posterior(model, samples_n, chains, tune=10, cores=8, sampler = "PYMC",acceptance_rate=0.85):
+def sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, cores=4):
     if sampler == "PYMC":
-        return _sample_posterior_PyMC(model, samples_n, chains, tune, cores)
+        return _sample_posterior_PyMC(model, samples_n, chains, tune, cores, acceptance_rate)
     elif sampler == "JAX":
-        return _sample_posterior_JAX(model, samples_n, chains, tune, cores)
-
-def _sample_posterior_PyMC(model, samples_n, chains, tune=10, cores=8,acceptance_rate=0.85):
+        return _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate)
+    
+def _sample_posterior_PyMC(model, samples_n, chains, tune, cores, acceptance_rate):
     with model:
-        log.debug("************ ",model.free_RVs)
+        log.debug(model.free_RVs)
         posterior = pm.sample(samples_n, tune = tune, 
         return_inferencedata=True, chains=chains,
         target_accept=acceptance_rate, cores=cores, progressbar=True)
@@ -22,15 +23,13 @@ def _sample_posterior_PyMC(model, samples_n, chains, tune=10, cores=8,acceptance
 
     return posterior 
 
-def _sample_posterior_JAX(model, samples_n, chains, tune=10, cores=8,acceptance_rate=0.85):
-#    with model:
-#        log.debug("************ ",model.free_RVs)
-#        posterior = pm.sampling_jax.sample_numpyro_nuts(samples_n, tune = tune, 
-#         chains=chains, target_accept=acceptance_rate)
-#        #posterior = pm.sample(10000, step = pm.Metropolis(), return_inferencedata=True, cores=4)
-
-#    return posterior 
-    pass
+def _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate):
+    with model:
+        log.debug(model.free_RVs)
+        posterior = jx.sample_numpyro_nuts(samples_n, tune = tune, chains=chains, target_accept=acceptance_rate)
+        
+    return posterior 
+    
     
 
 def sample_post_pred(model, posterior, samples_n, cores=8):
@@ -76,3 +75,10 @@ def extract_var(posterior_chains, var="", axis=-2):
             var_mat_ic = p_ic.posterior[var].values
     
     return var_mat_c, var_mat_ic
+
+def get_rhat(posterior_chain):
+    return az.summary(posterior_chain).loc[:,["r_hat"]].T
+
+def get_chains_for_param(posterior_chain, param):
+    t = posterior_chain.posterior[param].to_numpy()
+    return pd.DataFrame(t.reshape((t.shape[0],-1 )).T)

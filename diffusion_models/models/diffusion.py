@@ -6,108 +6,120 @@ from pytensor import tensor as at
 import scipy as sp
 import diffusion_models.utils.common_logging as cl
 from diffusion_models.utils import common_utils as ut
+import pandas as pd
+import os
+import pymc.sampling.jax as jx
 
+# enable on-the-fly graph computations
+# ae.config.compute_test_value = 'warn'
 
 log = cl.get_logger("diffusion")
-eps = 0.001 # for numerical stability
+eps = 0.0001 # for numerical stability
 err = 0.001
-tune = 200
+
+def _get_count(t):
+    return at.sqrt((-2) * at.log(np.pi * t * err) / ((np.pi**2) * t) )
 
 def _diffusion_01w(t, a, w):
 
-    K = at.arange(10) #should be calculated using Navarro and Fuss 2009 paper.
-
+    K_n = 10 #at.max(_get_count(t))
+    
+    K=at.arange(1,K_n)[:,np.newaxis, np.newaxis]
     tt=t/(a**2)
-    prob_rt_std = np.pi * K * (at.exp( - ((K*np.pi)**2 * tt/2) ) + eps) * at.sin( K * np.pi * w )
+    prob_rt_std = np.pi * K * (at.exp( - ((K*np.pi)**2 * tt/2) )) * at.sin( K * np.pi * w ) #exp becomes zero for large tt, hence adding eps
+    x_printed_8 = ae.printing.Print('K')(K )
     
-    return prob_rt_std.sum()
+    x_printed_7 = ae.printing.Print('tt')(tt )
+    x_printed_6 = ae.printing.Print('t')(t )
+    x_printed_5 = ae.printing.Print('w')(w )
+    x_printed_8 = ae.printing.Print('prob_rt_std for all Ks')(prob_rt_std )
+    x_printed_9 = ae.printing.Print('prob_rt_final for all Ks')(prob_rt_std.sum(axis=0) )
+    
+    prob_rt_final = prob_rt_std #at.switch(at.le(prob_rt_std,0),0,prob_rt_std) #at.switch(at.le(t,0),0, prob_rt_std )
+    return prob_rt_final.sum(axis=0) #should return a scaler
 
-def _diffusion(t, v, a, w):
-        
+def _diffusion_X_logp(X, v, a, z):
+    w = z/a
     prob_X = ( at.exp(-2*v*a) - at.exp(-2*v*w*a) ) / (at.exp(-2*v*a) - 1)
-    prob_rt_std,_ = ae.scan(fn = _diffusion_01w, 
-                            sequences=t, 
-                            non_sequences=(a, w))
+    return prob_X
+
+def _diffusion_RT_logp(RT, v, a, z, t_er):
     
+    #X = at.as_tensor(X)
+        
+    w = z #z/a  
+    #w = at.switch(at.ge(w,1), 0.99,w) # to avoid instability during intial evaluation.
+
+    t = RT-t_er
+    t = at.switch(at.le(t,0),0,t)
+    x_printed_2 = ae.printing.Print('RT-t_re')(t)
+
+    #prob_rt = _diffusion(t, v, w, a)
+    
+    prob_rt_std = _diffusion_01w(t,a,w)
+    
+    x_printed_3 = ae.printing.Print('prob_rt_std all trial')(prob_rt_std)
+
     #prob_rt = (1 / a**2) * at.exp( (-w*a*v) - (v**2 * t)/2 ) * prob_rt_std
     prob_rt = (1 / a*a) * at.exp( (-w*a*v) - (v*v * t)/2 ) * prob_rt_std
     
-    return prob_rt/prob_X
-
-def _individual_logp(t, X, v, a, w):
-
-    t_correct = t[X]
-    t_incorrect = t[1-X]
-
-    total_logp = _diffusion(t_correct, -v, a, 1-w) + _diffusion(t_incorrect, v, a, w)
-    return total_logp
-
-def _diffusion_RT_logp(RT, X, v, a, w, t_er):
-    t = RT-t_er
-    t = at.switch(at.le(t,0), eps,t)
-    w = at.switch(at.ge(w,1), 0.99,w) # to avoid instability during intial evaluation.
-
-    X = at.as_tensor(X)
-    prob_rt, _ = ae.scan(fn = lambda t_l, X_l, v_l, a_l, w_l: at.switch(at.le(t, 0), eps, _individual_logp(t_l, X_l, v_l, a_l, w_l)), 
-                        sequences=[t,X, v, a, w])
     
-    return prob_rt.sum()
+    
+    #all though care has been taken to not process pdf for -ve time that results in -ve pdf, some -ve pdf are still creeping up
+    prob_rt = at.switch(at.le(t,0),0,prob_rt) #Removing pdfs for t <= 0 because t <=0 is not supported
+
+    x_printed_13 = ae.printing.Print('per individual all trial logp')(prob_rt)
+
+    total_logp = prob_rt.sum(axis=1)
+
+    x_printed_12 = ae.printing.Print('***all individual final sum logp')(prob_rt)
+    return total_logp 
 
 
-def _diffusion_default_priors(parti_n):
+def _diffusion_default_priors(I, X):
+        
     with pm.Model() as model:
-        v = pm.Normal("v",1,1,shape=(parti_n,1)) #v = ae.tensor.tile(v, (1,J))
-        a = pm.Gamma("a",2,2,shape=(parti_n,1))
-        z = pm.Uniform("z", 0,a,shape=(parti_n,1)) # z ranges from 0 to a
-        w = z/a #pm.Deterministic("w", z/a)
-        t_er = pm.HalfNormal("t_er",2,shape=(parti_n,1))
         
-    return model, v,a,w, t_er
-
-def _diffusion_draw(v,a,w, t_er, rng=None, size=None):
-    sample_counter = 1000
-
-    # To get how many response time samples are required for each participants.
-    if len(size) > 1: 
-        J = size[1]
-    else:
-        J = size[0]
-
-    samples_rejection = np.max((100 * J, 100))
-    RT_rvs = np.empty(shape=size)
-    #for i_l in zip(range(size[0])):
-
-    RT_arr = np.empty(shape=0)
-
-    while (RT_arr.shape[0] < J):
+        v_c = pm.LogNormal("v_c",0,1,shape=(I,1)) #v = ae.tensor.tile(v, (1,J))
+        a_c = pm.Gamma("a_c",2,2,shape=(I,1))
+        z_c = pm.Beta("z_c", 1,1,shape=(I,1)) # z ranges from 0 to a
+        t_er_c = pm.HalfNormal("t_er_c",2,shape=(I,1))
         
-        RT = sp.stats.lognorm.rvs(1,0,1, size=samples_rejection) + t_er
-        u = sp.stats.uniform.rvs(0,1,size=samples_rejection)
+        v_ic = pm.LogNormal("v_ic",0,1,shape=(I,1)) #v = ae.tensor.tile(v, (1,J))
+        a_ic = pm.Gamma("a_ic",2,2,shape=(I,1))
+        z_ic = pm.Beta("z_ic", 1,1,shape=(I,1)) # z ranges from 0 to a
+        t_er_ic = pm.HalfNormal("t_er_ic",2,shape=(I,1))
 
-        pdf_lognorm = sp.stats.lognorm.pdf(RT,1,0,1)
-        pdf_diffusion = _diffusion_RT_logp(RT,v,a,w, t_er).eval()
+        v = at.switch(at.eq(X,1), -v_c, v_ic)
+        a = at.switch(at.eq(X,1), a_c, a_ic)
+        z = at.switch(at.eq(X,1), z_c, z_ic)
+        t_er = at.switch(at.eq(X,1), t_er_c, t_er_ic)
         
-        M = np.round(np.max(pdf_diffusion) + 1)
-        #log.debug(f"M: {M}:{np.max(pdf_diffusion)}")
-        idx = np.less_equal(u, pdf_diffusion / (M*pdf_lognorm))
-        RT_filter = RT[idx]
-        RT_arr = np.append(RT_arr, RT_filter)
-        sample_counter -= 1
-        if(sample_counter <= 0):
-            raise Exception(f"Could not sample for v:{v}, a:{a}, w:{w}, t_er:{t_er}, RT:{RT}, pdf_diffusion:{pdf_diffusion}")
-    #RT_rvs[i_l,:] = RT_arr[0:size[1]] 
+        x_printed_12 = ae.printing.Print('v')(v)
+        x_printed_14 = ae.printing.Print('a')(a)
+        x_printed_15 = ae.printing.Print('z')(z)
+        x_printed_16 = ae.printing.Print('t_er')(t_er)
 
-    return RT_arr[0:J] #RT_rvs
+    return model, v, a, z, t_er
 
-def _diffusion_model(obs_X = None, obs_RT=None):
+def get_model(I, obs_X = None, obs_RT=None):
     
-    model, v,a,w, t_er = _diffusion_default_priors(obs_X.shape[0])
-    vars = obs_X, v,a,w, t_er    
+    model, v, a, z, t_er = _diffusion_default_priors(I, obs_X)
+    vars_RT = v, a, z, t_er
+    vars_X = v, a, z
 
     with model:
         pm.DensityDist(
-            "RT",
-            *vars,
+            "X_pdf",
+            *vars_X,
+            logp=_diffusion_X_logp,
+            observed=obs_X
+        )
+
+    with model:
+        pm.DensityDist(
+            "RT_pdf",
+            *vars_RT,
             logp=_diffusion_RT_logp,
             observed=obs_RT
         )
@@ -117,51 +129,88 @@ def _diffusion_model(obs_X = None, obs_RT=None):
 def sample_prior_data(samples_n = 100):
     pass
 
-def sample_posterior_params(RT, X, samples_n, chains, tune=tune, sampler="PYMC", acceptance_rate = 0.85):
+def sample_posterior_params(RT, X, samples_n, chains, tune, sampler="PYMC", acceptance_rate=0.90):
 
-    model = _diffusion_model(obs_X = X, obs_RT=RT)
-    posterior_chain = ut.sample_posterior(model,samples_n, chains,tune, sampler=sampler)
+    model = get_model(I = X.shape[0], obs_X = X, obs_RT=RT)
+    posterior_chain = ut.sample_posterior(model,samples_n, chains,tune, sampler=sampler, acceptance_rate= acceptance_rate)
     return posterior_chain, model
 
 def sample_post_pred_data(posterior_chain, model, samples_n = 100):
     pass
 
-def _test_edge_cases():
+def _test_diffusion_01w():
 
-    #v:-1.2002378916969234, a:0.017329851659947146, w:0.8280975715451416, t_er:0.6342687555621264, RT:[1.15521305 3.05237406 1.16819656 ... 2.47025695 2.03251366 2.46823881]
+    log.debug(f"Starting Diffusion test")
+    t = at.as_tensor(2.01281869)
+    a = at.as_tensor(0.10357323)
+    z = at.as_tensor(0.01953739)
+    w = z/a
 
-    v = np.repeat([-0.9249241152935039], 4)[:,np.newaxis]
-    a = np.repeat([0.023750197074163027], 4)[:,np.newaxis]
-    w = np.repeat([0.44120144255887783] , 4)[:,np.newaxis]
-    #t_er=0.7100510973761837], 4)
-    t_er=np.repeat([0.07100510973761837], 4) [:,np.newaxis]
-    RTs = [[0.09, 1.39385687, 1.55661403, 1.88891806, 2.23878542, 0.92574541, 3.56532722],
-            [0.19, 1.59385687, 2.55661403, 3.88891806, 1.23878542, 1.92574541, 5.56532722]
-    ]
+    logp_per_trial = _diffusion_01w(t,a,w).eval()
+
+    log.debug(f"Log per Trial: {np.round(logp_per_trial, decimals=5)}")
+    assert np.round(logp_per_trial, decimals=5) == 0.00
+
+def _test_likelihood_using_error():
+    v = at.as_tensor([[-4.7455195,  3.5246989, -4.7455195,  3.5246989, -4.7455195]])
+    a = at.as_tensor([[0.10100832, 0.48082409, 0.10100832, 0.48082409, 0.10100832]])
+    z = at.as_tensor([[0.03027856, 0.33936817, 0.03027856, 0.33936817, 0.03027856]])
+    t_er = at.as_tensor([[2.17066536, 0.17037338, 2.17066536, 0.17037338, 2.17066536]])
+
+    RT = at.as_tensor([[0.36327581, 0.77126385, 1.02809235, 3.05141406, 0.37536871]])
+    X = at.as_tensor([[1, 0, 1, 0, 1]])
+
+    rt_logp = _diffusion_RT_logp(RT, v, a, z, t_er)
+    log.debug(f"rt_logp:{rt_logp}")
+
+    assert rt_logp >= 0
+    log.info("Test Successful!")
+
+def _test_likelihood_using_prior(parti_n):
+    """
+    Testing likelihood function
+    """
+
+    log.debug(f"Starting Diffusion test")
+    #v_c,a_c,z_c, t_er_c, v_ic, a_ic, z_ic, t_er_ic = pm.draw([v_c,a_c,z_c, t_er_c, v_ic, a_ic, z_ic, t_er_ic])
+
+    X = at.as_tensor(np.random.randint(0,2,(parti_n,5)))
+    model, v, a, z, t_er = _diffusion_default_priors(X.shape[0], X)
+    RT = at.as_tensor(np.random.uniform(0,4,(parti_n,5)))
+
+    lp = _diffusion_RT_logp(RT, v, a, z, t_er)
+
+    lp_v = lp.eval()
+
+    log.debug(f"lp: {lp_v}")
+    #log.debug(f"priors:{prior_sample}")
+    log.debug(f"X:{X.eval()}")
+    log.debug(f"RT:{RT.eval()}")
+    #log.debug(f"data shape: {RT.eval().shape}")
     
-    X = np.random.randint(0,2,(4,5))
-    RT = np.random.uniform(0,4,(4,5))
-    
-    lp = _diffusion_RT_logp(RT, X, v,a,w,t_er)
+    assert (lp_v[0] >= 0)#.all()
+    log.info("Test Successful!")
 
-    log.debug(f"lp: {lp.eval()}")
+def _quick_test():
+    X = np.random.randint(0,2,(70,5))
+    RT = np.random.uniform(0,4,(70,5))
+
+    log.debug(f"Starting Diffusion test")
+    model = get_model(I = X.shape[0], obs_X = X, obs_RT=RT)
+    posterior_chain = pm.sample(model=model, draws=10, chains=2,tune=10)
+    with model:
+        posterior_jax = jx.sample_numpyro_nuts(10, tune = 20, chains=2)
+    log.debug(f"Posterior model v_correct {posterior_chain.posterior.v_c.shape}")
+    assert posterior_chain.posterior.v_c.shape == (2,10,70,1)
+    assert posterior_jax.posterior.v_c.shape == (2,10,70,1)
 
 
 #%%
 if __name__ == "__main__":
-    J = (2,20)
+    
     log.debug("Starting test")
-
-    #_test_edge_cases()
-
-    for j in J:
-        X = np.random.randint(0,2,(700,j))
-        RT = np.random.uniform(0,4,(700,j))
-
-        log.debug(f"Starting Diffusion (sv=False) for {j} trials")
-        model = _diffusion_model(obs_X = X, obs_RT=RT)
-        posterior_chain = pm.sample(model=model, draws=10, chains=2,tune=10)
-        with model:
-            posterior = pm.sampling_jax.sample_numpyro_nuts(10, tune = 10, chains=2)
-        log.debug(f"Posterior model_correct {posterior_chain.posterior.v.shape}")
-
+    _test_diffusion_01w()
+    _test_likelihood_using_prior(10)
+    _quick_test()
+    
+# %%
