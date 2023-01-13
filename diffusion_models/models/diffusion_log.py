@@ -45,8 +45,9 @@ def _diffusion_01w_s(tt, a, w):
     x_printed_8 = ae.printing.Print('s K_m')(K_m)
     x_printed_7 = ae.printing.Print('s tt')(tt )
 
-    prob_rt_std = (w + 2*K) * (at.exp( (w+2*K)*(w+2*K)/(2*tt) ))
-    prob_rt_std = prob_rt_std * 1/(at.sqrt(2*np.pi*tt*tt*tt))
+    prob_rt_std = at.log(w + 2*K) + (( (w+2*K)*(w+2*K)/(2*tt) ))
+    prob_rt_std = prob_rt_std * 1/(at.log(at.sqrt(2*np.pi*tt*tt*tt)))
+
     x_printed_8 = ae.printing.Print('s prob_rt_std for each Ks')(prob_rt_std )
     return prob_rt_std.sum(axis=0)
 
@@ -63,9 +64,9 @@ def _diffusion_01w_l(tt, a, w):
     x_printed_7 = ae.printing.Print('l tt')(tt )
 
 
-    prob_rt_std = K * (at.exp( - ((K*np.pi)**2 * tt/2) )) * at.sin( K * np.pi * w ) #exp becomes zero for large tt, hence adding eps
+    prob_rt_std = at.log(K) + (( - ((K*np.pi)**2 * tt/2) )) + at.log(at.sin( K * np.pi * w )) #exp becomes zero for large tt, hence adding eps
     x_printed_8 = ae.printing.Print('l prob_rt_std for each Ks')(prob_rt_std )
-    return prob_rt_std.sum(axis=0)
+    return  at.log(np.pi) + prob_rt_std.sum(axis=0)
 
 def _diffusion_01w(t,a,w):
 
@@ -78,7 +79,7 @@ def _diffusion_01w(t,a,w):
     x_printed_5 = ae.printing.Print('w')(w )
    
     
-    prob_rt_final = np.pi * prob_rt_std.sum(axis=0) #at.switch(at.le(prob_rt_std,0),0,prob_rt_std) #at.switch(at.le(t,0),0, prob_rt_std )
+    prob_rt_final = prob_rt_std.sum(axis=0) #at.switch(at.le(prob_rt_std,0),0,prob_rt_std) #at.switch(at.le(t,0),0, prob_rt_std )
     x_printed_9 = ae.printing.Print('prob_rt_final summed over all Ks')(prob_rt_final )
 
     return prob_rt_final #should return a scaler
@@ -119,7 +120,7 @@ def _RT_logp(RT, obs_X, v, a, z, t_er):
     x_printed_3 = ae.printing.Print(f'prob_rt_std all {obs_X.shape}')(prob_rt_std)
 
     #prob_rt = (1 / a**2) * at.exp( (-w*a*v) - (v**2 * t)/2 ) * prob_rt_std
-    prob_rt = (1 / A*A) * at.exp( (-W*A*V) - (V*V * DT)/2 ) * prob_rt_std
+    prob_rt = at.log(1 / A*A) + ( (-W*A*V) - (V*V * DT)/2 ) * prob_rt_std
     
     
     #prob_X = _diffusion_X_logp(obs_X, V, A, Z)

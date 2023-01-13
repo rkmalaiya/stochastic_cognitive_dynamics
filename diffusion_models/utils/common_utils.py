@@ -6,19 +6,24 @@ import pandas as pd
 import diffusion_models.utils.common_logging as cl
 log = cl.get_logger("Common-Utils")
 
+_cores=4
 
-def sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, cores=4):
+
+def sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate):
     if sampler == "PYMC":
-        return _sample_posterior_PyMC(model, samples_n, chains, tune, cores, acceptance_rate)
+        return _sample_posterior_PyMC(model, samples_n, chains, tune, acceptance_rate)
     elif sampler == "JAX":
         return _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate)
+    elif sampler == "SMC":
+        return _sample_posterior_SMC(model, samples_n, chains)
     
-def _sample_posterior_PyMC(model, samples_n, chains, tune, cores, acceptance_rate):
+def _sample_posterior_PyMC(model, samples_n, chains, tune, acceptance_rate):
     with model:
         log.debug(model.free_RVs)
-        posterior = pm.sample(samples_n, tune = tune, 
+        posterior = pm.sample(samples_n, tune = tune, #step = pm.Metropolis(),
         return_inferencedata=True, chains=chains,
-        target_accept=acceptance_rate, cores=cores, progressbar=True)
+        #target_accept=acceptance_rate, 
+        cores=_cores, progressbar=True)
         #posterior = pm.sample(10000, step = pm.Metropolis(), return_inferencedata=True, cores=4)
 
     return posterior 
@@ -30,7 +35,10 @@ def _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate):
         
     return posterior 
     
-    
+def _sample_posterior_SMC(model, samples_n, chains):
+    with model:
+        posterior = pm.sample_smc(samples_n,chains=chains)
+    return posterior
 
 def sample_post_pred(model, posterior, samples_n, cores=8):
     with model:
@@ -39,8 +47,8 @@ def sample_post_pred(model, posterior, samples_n, cores=8):
 
 def sample_prior(model, samples_n=100):
     with model:
-        X_prior = pm.sample_prior_predictive(samples=samples_n)
-    return X_prior
+        prior_chain = pm.sample_prior_predictive(samples=samples_n)
+    return prior_chain
 
 def get_gradient(model, vars):
     return model.compile_dlogp(vars)
@@ -82,3 +90,8 @@ def get_rhat(posterior_chain):
 def get_chains_for_param(posterior_chain, param):
     t = posterior_chain.posterior[param].to_numpy()
     return pd.DataFrame(t.reshape((t.shape[0],-1 )).T)
+
+def get_individuals_for_param(posterior_chain, param):
+    t = posterior_chain.posterior[param].to_numpy()
+    chain, samples, I, J = t.shape
+    return pd.DataFrame(t.reshape((-1,I)))
