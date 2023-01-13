@@ -151,7 +151,8 @@ def _diffusion_default_priors(I, X):
         v = pm.Normal("v", v_m, v_s, shape=(I,2)) #v = ae.tensor.tile(v, (1,J))
         #v = pm.Normal("v", 1,1, shape=(I,2)) #v = ae.tensor.tile(v, (1,J))
 
-        a_m = pm.Gamma("a_m",1.5, 0.75, shape=(1,2))
+        #a_m = pm.Gamma("a_m",1.5, 0.75, shape=(1,2))
+        a_m = pm.Gamma("a_m",0.1, 0.1, shape=(1,2))
         a_s = pm.HalfNormal("a_s",0.1, shape=(1,2))
         a = pm.Gamma("a",a_m,a_s,shape=(I,2))
         #a = pm.Gamma("a",2,2,shape=(I,2))
@@ -164,8 +165,8 @@ def _diffusion_default_priors(I, X):
         #z = pm.invlogit(z)
 
         ter_m = pm.Gamma("ter_m",0.4, 0.2, shape=(1,2))
-        ter_s = pm.HalfNormal("ter_s",1, shape=(1,2))
-        t_er = pm.Normal("t_er",ter_m,ter_s,shape=(I,2))
+        ter_s = pm.HalfNormal("ter_s",0.1, shape=(1,2))
+        t_er = pm.LogNormal("t_er",ter_m,ter_s,shape=(I,2))
         #t_er = pm.Normal("t_er",1,1,shape=(I,2))
         
         #X = pm.Deterministic("X", X)
