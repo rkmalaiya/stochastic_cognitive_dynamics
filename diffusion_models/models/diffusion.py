@@ -11,7 +11,7 @@ import os
 import pymc.sampling.jax as jx
 
 # enable on-the-fly graph computations
-#ae.config.compute_test_value = 'warn'
+# ae.config.compute_test_value = 'warn'
 
 log = cl.get_logger("diffusion")
 eps = 0.1 # for numerical stability
@@ -42,10 +42,11 @@ def _diffusion_01w_s(tt, a, w):
     x_printed_8 = ae.printing.Print('s K_n')(K_n)
 
     K=at.arange( -at.floor((K_n-1)/2), at.ceil((K_n-1)/2) + 1 )[:,np.newaxis, np.newaxis]
+    #K=at.arange( -10, 10 )[:,np.newaxis, np.newaxis]
     x_printed_8 = ae.printing.Print('s K_m')(K_m)
     x_printed_7 = ae.printing.Print('s tt')(tt )
 
-    prob_rt_std = (w + 2*K) * (at.exp( (w+2*K)*(w+2*K)/(2*tt) ))
+    prob_rt_std = (w + 2*K) * (at.exp( - (w+2*K)*(w+2*K)/(2*tt) ))
     prob_rt_std = prob_rt_std * 1/(at.sqrt(2*np.pi*tt*tt*tt))
     x_printed_8 = ae.printing.Print('s prob_rt_std for each Ks')(prob_rt_std )
     return prob_rt_std.sum(axis=0)
@@ -59,6 +60,7 @@ def _diffusion_01w_l(tt, a, w):
     x_printed_8 = ae.printing.Print('l K')(K_n)
 
     K=at.arange(1,K_n+1)[:,np.newaxis, np.newaxis]
+    #K=at.arange(1,10)[:,np.newaxis, np.newaxis]
     x_printed_8 = ae.printing.Print('l K_m')(K_m)
     x_printed_7 = ae.printing.Print('l tt')(tt )
 
@@ -70,7 +72,8 @@ def _diffusion_01w_l(tt, a, w):
 def _diffusion_01w(t,a,w):
 
     tt = t/(a**2)
-    tt= at.switch(tt <= eps, eps, tt)
+    #tt = at.as_tensor(1.5/0.01**2)
+    #tt= at.switch(tt <= eps, eps, tt)
     
     #prob_rt_std = _diffusion_01w_l(tt, a, w)
     prob_rt_std = at.switch(at.lt(_get_lambda(tt), 0), _diffusion_01w_s(tt, a, w), _diffusion_01w_l(tt, a, w))
@@ -108,7 +111,7 @@ def _RT_logp(RT, obs_X, v, a, z, t_er):
     W = Z #z/a  
     #w = at.switch(at.ge(w,1), 0.99,w) # to avoid instability during intial evaluation.
 
-    DT = RT-T_er
+    DT = at.switch(at.gt(RT, T_er), RT-T_er, eps)
     #DT = 
     x_printed_2 = ae.printing.Print('RT-t_re')(DT)
 
@@ -134,10 +137,11 @@ def _diffusion_RT_logp(RT, obs_X, v, a, z, t_er):
 
     prob_rt = _RT_logp(RT, obs_X, v, a, z, t_er)
 
-    total_logp = prob_rt.sum(axis=1) 
+    total_logp = prob_rt.sum()#axis=1) 
+    total_logp = at.log(total_logp)
 
-    x_printed_12 = ae.printing.Print('***all individual final sum logp')(prob_rt)
-    return total_logp 
+    x_printed_12 = ae.printing.Print('***per individual final sum logp')(total_logp)
+    return total_logp
 
 
 

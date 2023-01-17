@@ -63,10 +63,10 @@ def _diffusion_01w_l(tt, a, w):
     x_printed_8 = ae.printing.Print('l K_m')(K_m)
     x_printed_7 = ae.printing.Print('l tt')(tt )
 
-
-    prob_rt_std = at.log(K) + (( - ((K*np.pi)**2 * tt/2) )) + at.log(at.sin( K * np.pi * w )) #exp becomes zero for large tt, hence adding eps
+    prob_rt_std_sin = at.log(at.sin( K * np.pi * w ).sum(axis=0))
+    prob_rt_std = at.log(K).sum(axis=0) + (( - ((K*np.pi)**2 * tt/2) )).sum(axis=0) + prob_rt_std_sin #exp becomes zero for large tt, hence adding eps
     x_printed_8 = ae.printing.Print('l prob_rt_std for each Ks')(prob_rt_std )
-    return  at.log(np.pi) + prob_rt_std.sum(axis=0)
+    return  at.log(np.pi) + prob_rt_std
 
 def _diffusion_01w(t,a,w):
 
