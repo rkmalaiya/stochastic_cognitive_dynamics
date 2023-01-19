@@ -97,9 +97,11 @@ def _RT_logp(RT, obs_X, v, a, z, t_er):
     
     #X = at.as_tensor(X)
 
-    V = at.switch(at.eq(obs_X,1), -v[:,[0]], v[:,[1]])
+    #V = at.switch(at.eq(obs_X,1), -v[:,[0]], v[:,[1]])
+    V = at.switch(at.eq(obs_X,1), v[:,[0]], v[:,[1]])
     A = at.switch(at.eq(obs_X,1), a[:,[0]], a[:,[1]])
-    Z = at.switch(at.eq(obs_X,1), 1-z[:,[0]], z[:,[1]])
+    #Z = at.switch(at.eq(obs_X,1), 1-z[:,[0]], z[:,[1]])
+    Z = at.switch(at.eq(obs_X,1), z[:,[0]], z[:,[1]])
     T_er = at.switch(at.eq(obs_X,1), t_er[:,[0]], t_er[:,[1]])
     
     x_printed_12 = ae.printing.Print('v')(V)
