@@ -6,7 +6,7 @@ import diffusion_models.utils.common_logging as cl
 import pymc.sampling.jax as jx
 log = cl.get_logger("diffusion")
 
-name = "qdiffusion"
+type = 3
 
 vars_transf_item = ["a_i_interval__",
 "v_i_interval__"
@@ -33,35 +33,32 @@ v_p_mu=0
 def get_model(I,J, RT = None, X=None):
     
     with pm.Model() as qdiffusion:
-        a_i = pm.Uniform("a_i",0,0.5, shape = (1,J))
-        v_i = pm.Uniform("v_i",0,0.5, shape = (1,J))
+
         a_p = pm.Lognormal("a_p",a_p_mu,1,shape = (I,1))
         v_p = pm.Lognormal("v_p",v_p_mu,1,shape = (I,1))
+        #v_p = pm.Gamma("v_p",mu,2,shape = (K,1))
         
         t_er = pm.Lognormal("t_er",0,1,shape = (I,1))
 
-        mu_kj, sigma_kj, p_kj = q_diffusion(a_i, v_i, a_p, v_p, t_er)
+        mu_kj, sigma_kj, p_kj = _ez_diffusion(a_p, v_p, t_er)
 
         RT_kj = pm.Normal("RT_kj",mu_kj, sigma_kj, shape = (I,J), observed = np.log(RT))
         X_kj = pm.Bernoulli("X_kj", pm.invlogit(p_kj), shape = (I,J), observed = X)
 
     return qdiffusion #, (a_i, v_i, a_p, v_p, t_er, RT_kj, X_kj)
 
-def q_diffusion(a_i, v_i, a_p, v_p, t_er, grad=False):
+def _ez_diffusion(a_p, v_p, t_er, grad=False):
 
-    p_jk = np.dot((v_p * a_p), (1 / (v_i * a_i)))
+    p_jk = v_p * a_p
     h_jk = -p_jk 
     
-    E_RT_kj = (1/2) * (
-        np.dot((a_p * (1/v_p)),
-        (v_i * (1/a_i)))
+    E_RT_kj = ((1/2) * (a_p * (1/v_p))
     ) * (
         (1 - np.exp(h_jk) ) / (1+np.exp(h_jk))
     ) + t_er
 
     V_RT_kj = (1/2) * (
-        ( np.dot(a_p , (1/a_i))) * 
-        np.power(np.dot((1/v_p), v_i),3) * (
+        a_p * np.power(1/v_p,3) * (
             ( 2 * h_jk * np.exp(h_jk) - np.exp(2*h_jk) + 1) / (
                 np.power((np.exp(h_jk) + 1),2)
             )
@@ -105,22 +102,10 @@ def gen_sample_data(model):
     prior_data_ra = prior_data.prior["X_kj"].values.squeeze()[1,:,:]
     return(prior_data_rt, prior_data_ra)
 
-def sample_posterior_params(RT, X, samples_n, chains, tune, sampler="PYMC", acceptance_rate=0.90, likelihood=False):
+def sample_posterior_params(RT, X, samples_n, chains, tune, sampler="PYMC", acceptance_rate=0.90):
     model = get_model(*X.shape, X = X, RT=RT)
-    posterior_chain = ut.sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, likelihood=likelihood)
+    posterior_chain = ut.sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate)
     return posterior_chain, model
-
-def sample_predictive_dist(model, posterior_chain):
-    posterior_chain = ut.sample_post_pred(model, posterior_chain)
-    return posterior_chain
-
-def post_process_posterior(posterior_chain, method = "None|WAIC|LOO", **kwargs):
-    summ = ut.get_summary(posterior_chain)
-    if method is not None:
-        w = ut.relative_model_fit(posterior_chain, method, **kwargs)
-        print("***********", "w.elpd_waic", w.elpd_waic)
-        summ = summ.assign(elpd_waic=w.elpd_waic).assign(elpd_se = w.se).assign(p_waic = w.p_waic)
-    return summ
 
 def _quick_test():
     X = np.random.randint(0,2,(70,5))

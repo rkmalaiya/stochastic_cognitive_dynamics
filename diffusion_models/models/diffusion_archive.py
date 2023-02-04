@@ -5,18 +5,19 @@ import pytensor as ae
 from pytensor import tensor as at
 import scipy as sp
 import diffusion_models.utils.common_logging as cl
+#from diffusion_models.models import DriftDiffusion
 from diffusion_models.utils import common_utils as ut
 import pandas as pd
 import os
 import pymc.sampling.jax as jx
 
 # enable on-the-fly graph computations
-#ae.config.compute_test_value = 'warn'
+# ae.config.compute_test_value = 'warn'
 
 log = cl.get_logger("diffusion")
 eps = 0.1 # for numerical stability
 err = 10e-10
-max_k = 30
+max_k = 50
 
 def _get_count_l(tt):
 
@@ -42,12 +43,12 @@ def _diffusion_01w_s(tt, a, w):
     x_printed_8 = ae.printing.Print('s K_n')(K_n)
 
     K=at.arange( -at.floor((K_n-1)/2), at.ceil((K_n-1)/2) + 1 )[:,np.newaxis, np.newaxis]
+    #K=at.arange( -10, 10 )[:,np.newaxis, np.newaxis]
     x_printed_8 = ae.printing.Print('s K_m')(K_m)
     x_printed_7 = ae.printing.Print('s tt')(tt )
 
-    prob_rt_std = at.log(w + 2*K) + (( (w+2*K)*(w+2*K)/(2*tt) ))
-    prob_rt_std = prob_rt_std * 1/(at.log(at.sqrt(2*np.pi*tt*tt*tt)))
-
+    prob_rt_std = (w + 2*K) * (at.exp( - (w+2*K)*(w+2*K)/(2*tt) ))
+    prob_rt_std = prob_rt_std * 1/(at.sqrt(2*np.pi*tt*tt*tt))
     x_printed_8 = ae.printing.Print('s prob_rt_std for each Ks')(prob_rt_std )
     return prob_rt_std.sum(axis=0)
 
@@ -60,18 +61,20 @@ def _diffusion_01w_l(tt, a, w):
     x_printed_8 = ae.printing.Print('l K')(K_n)
 
     K=at.arange(1,K_n+1)[:,np.newaxis, np.newaxis]
+    #K=at.arange(1,10)[:,np.newaxis, np.newaxis]
     x_printed_8 = ae.printing.Print('l K_m')(K_m)
     x_printed_7 = ae.printing.Print('l tt')(tt )
 
-    prob_rt_std_sin = at.log(at.sin( K * np.pi * w ).sum(axis=0))
-    prob_rt_std = at.log(K).sum(axis=0) + (( - ((K*np.pi)**2 * tt/2) )).sum(axis=0) + prob_rt_std_sin #exp becomes zero for large tt, hence adding eps
+
+    prob_rt_std = K * (at.exp( - ((K*np.pi)**2 * tt/2) )) * at.sin( K * np.pi * w ) #exp becomes zero for large tt, hence adding eps
     x_printed_8 = ae.printing.Print('l prob_rt_std for each Ks')(prob_rt_std )
-    return  at.log(np.pi) + prob_rt_std
+    return prob_rt_std.sum(axis=0)
 
 def _diffusion_01w(t,a,w):
 
     tt = t/(a**2)
-    tt= at.switch(tt <= eps, eps, tt)
+    #tt = at.as_tensor(1.5/0.01**2)
+    #tt= at.switch(tt <= eps, eps, tt)
     
     #prob_rt_std = _diffusion_01w_l(tt, a, w)
     prob_rt_std = at.switch(at.lt(_get_lambda(tt), 0), _diffusion_01w_s(tt, a, w), _diffusion_01w_l(tt, a, w))
@@ -79,7 +82,7 @@ def _diffusion_01w(t,a,w):
     x_printed_5 = ae.printing.Print('w')(w )
    
     
-    prob_rt_final = prob_rt_std.sum(axis=0) #at.switch(at.le(prob_rt_std,0),0,prob_rt_std) #at.switch(at.le(t,0),0, prob_rt_std )
+    prob_rt_final = np.pi * prob_rt_std.sum(axis=0) #at.switch(at.le(prob_rt_std,0),0,prob_rt_std) #at.switch(at.le(t,0),0, prob_rt_std )
     x_printed_9 = ae.printing.Print('prob_rt_final summed over all Ks')(prob_rt_final )
 
     return prob_rt_final #should return a scaler
@@ -91,14 +94,16 @@ def _diffusion_X_logp(X, v, a, z):
     prob_X = ( at.exp(-2*v*a) - at.exp(-2*v*w*a) ) / (at.exp(-2*v*a) - 1)
     return prob_X
 
-def _RT_logp(RT, obs_X, v, a, z, t_er):
+def _RT_logp(RT, obs_X, V, A, Z, T_er):
     
     #X = at.as_tensor(X)
 
-    V = at.switch(at.eq(obs_X,1), -v[:,[0]], v[:,[0]])
-    A = at.switch(at.eq(obs_X,1), a[:,[0]], a[:,[0]])
-    Z = at.switch(at.eq(obs_X,1), 1-z[:,[0]], z[:,[0]])
-    T_er = at.switch(at.eq(obs_X,1), t_er[:,[0]], t_er[:,[0]])
+    #V = at.switch(at.eq(obs_X,1), -v[:,[0]], v[:,[1]])
+    #V = at.switch(at.eq(obs_X,1), v[:,[0]], v[:,[1]])
+    #A = at.switch(at.eq(obs_X,1), a[:,[0]], a[:,[1]])
+    #Z = at.switch(at.eq(obs_X,1), 1-z[:,[0]], z[:,[1]])
+    #Z = at.switch(at.eq(obs_X,1), z[:,[0]], z[:,[1]])
+    #T_er = at.switch(at.eq(obs_X,1), t_er[:,[0]], t_er[:,[1]])
     
     x_printed_12 = ae.printing.Print('v')(V)
     x_printed_14 = ae.printing.Print('a')(A)
@@ -109,7 +114,7 @@ def _RT_logp(RT, obs_X, v, a, z, t_er):
     W = Z/A #z/a  
     #w = at.switch(at.ge(w,1), 0.99,w) # to avoid instability during intial evaluation.
 
-    DT = RT-T_er
+    DT = at.switch(at.gt(RT, T_er), RT-T_er, eps)
     #DT = 
     x_printed_2 = ae.printing.Print('RT-t_re')(DT)
 
@@ -120,7 +125,7 @@ def _RT_logp(RT, obs_X, v, a, z, t_er):
     x_printed_3 = ae.printing.Print(f'prob_rt_std all {obs_X.shape}')(prob_rt_std)
 
     #prob_rt = (1 / a**2) * at.exp( (-w*a*v) - (v**2 * t)/2 ) * prob_rt_std
-    prob_rt = at.log(1 / A*A) + ( (-W*A*V) - (V*V * DT)/2 ) * prob_rt_std
+    prob_rt = (1 / A*A) * at.exp( (-W*A*V) - (V*V * DT)/2 ) * prob_rt_std
     
     
     #prob_X = _diffusion_X_logp(obs_X, V, A, Z)
@@ -135,26 +140,67 @@ def _diffusion_RT_logp(RT, obs_X, v, a, z, t_er):
 
     prob_rt = _RT_logp(RT, obs_X, v, a, z, t_er)
 
-    total_logp = prob_rt.sum(axis=1) 
+    total_logp = prob_rt.sum()#axis=1) 
+    total_logp = at.log(total_logp)
 
-    x_printed_12 = ae.printing.Print('***all individual final sum logp')(prob_rt)
-    return total_logp 
+    x_printed_12 = ae.printing.Print('***per individual final sum logp')(total_logp)
+    return total_logp
 
+
+
+def _diffusion_priors_correct_incorrect(I, X):
+        
+    with pm.Model() as model:
+
+        v_m = pm.Normal("v_m", 2,3, shape=(1,2))
+        v_s = pm.HalfNormal("v_s", 2, shape=(1,2))
+        v = pm.Normal("v", v_m, v_s, shape=(I,2)) #v = ae.tensor.tile(v, (1,J))
+        #v = pm.Normal("v", 1,1, shape=(I,2)) #v = ae.tensor.tile(v, (1,J))
+
+        a_m = pm.Gamma("a_m",1.5, 0.75, shape=(1,2))
+        a_s = pm.HalfNormal("a_s",0.1, shape=(1,2))
+        a = pm.Gamma("a",a_m,a_s,shape=(I,2))
+        #a = pm.Gamma("a",2,2,shape=(I,2))
+
+        z_m = pm.Normal("z_m",0.5,0.5,shape=(1,2))
+        z_s = pm.HalfNormal("z_s",0.05,shape=(1,2))
+        z = pm.LogitNormal("z",z_m,z_s,shape=(I,2)) # z ranges from 0 to a
+        #z = pm.Normal("z",1,1,shape=(I,2)) # z ranges from 0 to a
+
+        #z = pm.invlogit(z)
+
+        ter_m = pm.Gamma("ter_m",0.4, 0.2, shape=(1,2))
+        ter_s = pm.HalfNormal("ter_s",1, shape=(1,2))
+        t_er = pm.Normal("t_er",ter_m,ter_s,shape=(I,2))
+        #t_er = pm.Normal("t_er",1,1,shape=(I,2))
+        
+        #X = pm.Deterministic("X", X)
+
+        #v_ic = pm.LogNormal("v_ic",0,1,shape=(I,1)) #v = ae.tensor.tile(v, (1,J))
+        #a_ic = pm.Gamma("a_ic",2,2,shape=(I,1))
+        #z_ic = pm.Beta("z_ic", 1,1,shape=(I,1)) # z ranges from 0 to a
+        #t_er_ic = pm.HalfNormal("t_er_ic",2,shape=(I,1))
+
+        V = at.switch(at.eq(X,1), -v[:,[0]], v[:,[1]])
+        A = at.switch(at.eq(X,1), a[:,[0]], a[:,[1]])
+        Z = at.switch(at.eq(X,1), 1-z[:,[0]], z[:,[1]])
+        T_er = at.switch(at.eq(X,1), t_er[:,[0]], t_er[:,[1]])
+        
+        
+    return model, V, A, Z, T_er
 
 
 def _diffusion_default_priors(I, X):
         
     with pm.Model() as model:
 
-        v_m = pm.Normal("v_m", 0.5,1)
-        v_s = pm.HalfNormal("v_s",0.01)
+        v_m = pm.Normal("v_m", 2,3)
+        v_s = pm.HalfNormal("v_s", 2)
         v = pm.Normal("v", v_m, v_s, shape=(I,1)) #v = ae.tensor.tile(v, (1,J))
         #v = pm.Normal("v", 1,1, shape=(I,2)) #v = ae.tensor.tile(v, (1,J))
 
-        #a_m = pm.Gamma("a_m",1.5, 0.75, shape=(1,2))
-        a_m = pm.Gamma("a_m",0.1, 0.1)
+        a_m = pm.Gamma("a_m",1.5, 0.75)
         a_s = pm.HalfNormal("a_s",0.1)
-        #a_s = pm.TruncatedNormal("a_s",5,1)
         a = pm.Gamma("a",a_m,a_s,shape=(I,1))
         #a = pm.Gamma("a",2,2,shape=(I,2))
 
@@ -165,10 +211,9 @@ def _diffusion_default_priors(I, X):
 
         #z = pm.invlogit(z)
 
-        #ter_m = pm.Gamma("ter_m",0.4, 0.2)
-        ter_s = pm.HalfNormal("ter_s",0.1)
-        t_er = pm.LogNormal("t_er",0,ter_s,shape=(I,1))
-        #t_er = pm.LogNormal("t_er",ter_m,ter_s,shape=(I,1))
+        ter_m = pm.Gamma("ter_m",0.4, 0.2)
+        ter_s = pm.HalfNormal("ter_s",1)
+        t_er = pm.Normal("t_er",ter_m,ter_s,shape=(I,1))
         #t_er = pm.Normal("t_er",1,1,shape=(I,2))
         
         #X = pm.Deterministic("X", X)
@@ -178,14 +223,14 @@ def _diffusion_default_priors(I, X):
         #z_ic = pm.Beta("z_ic", 1,1,shape=(I,1)) # z ranges from 0 to a
         #t_er_ic = pm.HalfNormal("t_er_ic",2,shape=(I,1))
 
-        #V = at.switch(at.eq(X,1), -v[:,[0]], v[:,[1]])
-        #A = at.switch(at.eq(X,1), a[:,[0]], a[:,[1]])
-        #Z = at.switch(at.eq(X,1), 1-z[:,[0]], z[:,[1]])
-        #T_er = at.switch(at.eq(X,1), t_er[:,[0]], t_er[:,[1]])
+        V = at.switch(at.eq(X,1), -v[:,[0]], v[:,[0]])
+        A = at.switch(at.eq(X,1), a[:,[0]], a[:,[0]])
+        Z = at.switch(at.eq(X,1), 1-z[:,[0]], z[:,[0]])
+        T_er = at.switch(at.eq(X,1), t_er[:,[0]], t_er[:,[0]])
         
         
-
-    return model, v, a, z, t_er
+    return model, V, A, Z, T_er
+    #return model, v, a, z, t_er
 
 def _draw_RT(*args, rng, size):
     obs_X, v, a, z, t_er = args
@@ -231,8 +276,8 @@ def _draw_RT(*args, rng, size):
 
 def get_model(I, obs_X, obs_RT=None):
     
-    model, v, a, z, t_er = _diffusion_default_priors(I, obs_X)
-       
+    #model, v, a, z, t_er = _diffusion_default_priors(I, obs_X)
+    model, v, a, z, t_er = _diffusion_priors_correct_incorrect(I, obs_X)   
     
     vars_RT = obs_X, v, a, z, t_er
 
@@ -245,6 +290,7 @@ def get_model(I, obs_X, obs_RT=None):
             observed=obs_RT,
             #size = obs_X.shape
         )
+        
         
     return model
 

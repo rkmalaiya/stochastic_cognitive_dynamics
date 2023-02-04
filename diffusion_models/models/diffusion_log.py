@@ -106,7 +106,7 @@ def _RT_logp(RT, obs_X, v, a, z, t_er):
     x_printed_16 = ae.printing.Print('t_er')(T_er)
 
 
-    W = Z #z/a  
+    W = Z/A #z/a  
     #w = at.switch(at.ge(w,1), 0.99,w) # to avoid instability during intial evaluation.
 
     DT = RT-T_er
