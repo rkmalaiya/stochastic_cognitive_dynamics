@@ -14,9 +14,9 @@ import pymc.sampling.jax as jx
 #ae.config.compute_test_value = 'warn'
 
 log = cl.get_logger("diffusion")
-eps = 0.1 # for numerical stability
+eps = 0.05 # for numerical stability
 err = 10e-10
-max_k = 30
+max_k = 20
 
 def _get_count_l(tt):
 
@@ -143,31 +143,31 @@ def _diffusion_RT_logp(RT, obs_X, v, a, z, t_er):
 
 
 def _diffusion_default_priors(I, X):
-        
+
     with pm.Model() as model:
 
-        v_m = pm.Normal("v_m", 0.5,1)
-        v_s = pm.HalfNormal("v_s",0.01)
-        v = pm.Normal("v", v_m, v_s, shape=(I,1)) #v = ae.tensor.tile(v, (1,J))
+        v_m = pm.Normal("v_m", 2,3)
+        v_s = pm.HalfNormal("v_s",2)
+        v = pm.Normal("v", v_m, v_s**2, shape=(I,1)) #v = ae.tensor.tile(v, (1,J))
         #v = pm.Normal("v", 1,1, shape=(I,2)) #v = ae.tensor.tile(v, (1,J))
 
         #a_m = pm.Gamma("a_m",1.5, 0.75, shape=(1,2))
-        a_m = pm.Gamma("a_m",0.1, 0.1)
-        a_s = pm.HalfNormal("a_s",0.1)
+        a_m = pm.Gamma("a_m",1.5,0.75)
+        #a_s = pm.HalfNormal("a_s",0.1)
         #a_s = pm.TruncatedNormal("a_s",5,1)
-        a = pm.Gamma("a",a_m,a_s,shape=(I,1))
+        a = pm.Gamma("a",a_m,1,shape=(I,1))
         #a = pm.Gamma("a",2,2,shape=(I,2))
 
         z_m = pm.Normal("z_m",0.5,0.5)
         z_s = pm.HalfNormal("z_s",0.05)
-        z = pm.LogitNormal("z",z_m,z_s,shape=(I,1)) # z ranges from 0 to a
+        z = pm.LogitNormal("z",z_m,z_s**2,shape=(I,1)) # z ranges from 0 to a
         #z = pm.Normal("z",1,1,shape=(I,2)) # z ranges from 0 to a
 
         #z = pm.invlogit(z)
 
         #ter_m = pm.Gamma("ter_m",0.4, 0.2)
-        ter_s = pm.HalfNormal("ter_s",0.1)
-        t_er = pm.LogNormal("t_er",0,ter_s,shape=(I,1))
+        #ter_s = pm.HalfNormal("ter_s",1)
+        t_er = pm.LogNormal("t_er",0.1,1,shape=(I,1))
         #t_er = pm.LogNormal("t_er",ter_m,ter_s,shape=(I,1))
         #t_er = pm.Normal("t_er",1,1,shape=(I,2))
         

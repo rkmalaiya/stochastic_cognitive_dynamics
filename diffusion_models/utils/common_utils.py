@@ -16,6 +16,8 @@ def sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, l
         return _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate)
     elif sampler == "SMC":
         return _sample_posterior_SMC(model, samples_n, chains)
+    elif sampler == "VI":
+        return _sample_posterior_VI(model, samples_n)
     
 def calculate_r_star(df_posterior, group_var, group_std_name, var_name, idx_name):
     
@@ -34,7 +36,7 @@ def relative_model_fit(posterior_chain, method="WAIC|LOO", **kwargs):
         return _calculate_waic(posterior_chain, var_name)
 
 def _calculate_waic(posterior_chain, var_name):
-    w = az.waic(posterior_chain, var_name=var_name,scale='negative_log')
+    w = az.waic(posterior_chain, var_name=var_name)#,scale='negative_log')
     return w
 
 
@@ -62,6 +64,12 @@ def _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate):
 def _sample_posterior_SMC(model, samples_n, chains):
     with model:
         posterior = pm.sample_smc(samples_n,chains=chains)
+    return posterior
+
+def _sample_posterior_VI(model, samples_n):
+    with model:
+        mean_field = pm.fit()
+        posterior = mean_field.sample(samples_n)
     return posterior
 
 def _calculate_likelihood(posterior,model):

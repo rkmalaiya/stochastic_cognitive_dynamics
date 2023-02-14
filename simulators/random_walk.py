@@ -24,9 +24,12 @@ def _create_pWiener_Q(n_states, alpha, tau, sigma, mu):
     Q = zeros((n_states, n_states))
     rows_ = arange(1,n_states)
     cols_ = arange(0,n_states-1)
-    Q[rows_,cols_] = 1/(2*alpha)*(1-mu*sqrt(tau)/sigma**2)[cols_]
-    Q[cols_, rows_] =  1/(2*alpha)*(1+mu*sqrt(tau)/sigma**2)[rows_]
+
+    mu_t = mu*sqrt(tau)/sigma**2
+    Q[rows_,cols_] = 1/(2*alpha)*(1-mu_t)[rows_]
+    Q[cols_, rows_] =  1/(2*alpha)*(1+mu_t)[cols_]
     Q[arange(n_states), arange(n_states)] = 1-(1/alpha)
+    
     return Q
 
 def _create_OU_Q(n_states, alpha, tau, sigma, delta, gamma):
@@ -48,7 +51,7 @@ def _create_OU_Q(n_states, alpha, tau, sigma, delta, gamma):
     return Q
 
 def _get_initial_state(n_states):
-   p_0 = dirichlet.rvs(repeat(0.5,n_states-int(n_states/2)))
+   p_0 = dirichlet(repeat(0.5,n_states-int(n_states/2))).rvs()
    p_0 = around(p_0.squeeze(), decimals=2) #concatenate(([[0.0]], p_0, [[0.0]]), axis=1) #dirichlet.rvs(repeat(0.5,n_states))
    z = sum(p_0)
    while (z>1):
@@ -64,8 +67,10 @@ def _random_walk_next_step(s_t, Q):
    p_t = Q[ind_t,:]
    p_t = around(p_t.squeeze(),decimals=2)
    z=sum(p_t)
-   if(z>1):
+   while(z>1):
       p_t = p_t/z
+      z=sum(p_t+0.01)
+      print(f"$$$$$$$$$$$ Floating point error $$$$$$$$$$$$$$$$$$$ {z}")
    
    s_t_1 = multinomial.rvs(n=1, p=p_t) 
    
@@ -136,29 +141,105 @@ def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", in
             break 
     return RT_arr, X_arr, steps_arr
 
-def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU", initial="EZ|Any"):
+def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU|DiffusionIRT", initial="EZ|Any"):
+   
    X = zeros((I,J))
    RT = zeros((I,J))
+   v_arr = []
+
+   print("Generating data for participant")
+
    for i in range(I):
-      rt, x,_ = gen_rt_x(theta, alpha, tau, sigma, *params, samples=J, process=process, initial=initial)
-      X[i,:] = x
-      RT[i,:] = rt
-   return RT, X
+      print(f"{i}")
+      if (len(params) == 1):
+         v_s, = params   
+         v_s = v_s + random.default_rng().normal(0,0.1**2)
+         params = (v_s,)
+      else:
+         v_s, oths = params
+         v_s = v_s + random.default_rng().normal(0,0.1**2)
+         params = (v_s, oths)
+
+      # To vary for each participant
+      
+      #params[0] = v_s, oths
+      
+      if process == "DiffusionIRT":
+         v_p_s, v_i_s = params
+         v_l = len(v_i_s)
+
+         if(J % v_l > 0):
+            raise Exception("Total number of items should be a multiple of the length of possible item drift rates")
+         
+         batch = J//v_l
+         v_arr_ind = []
+         for v_i in v_i_s:
+            params_for_gen = [v_p_s / v_i]
+            v_arr_ind.append(params_for_gen)
+            for ind in range(0,J, batch):
+               rt, x, _ = gen_rt_x(theta, alpha, tau, sigma, *params_for_gen, samples=batch, process="Wiener", initial=initial)
+               X[i,ind:ind+batch] = x
+               RT[i,ind:ind+batch] = rt      
+         v_arr.append(v_arr_ind)      
+      else:
+         v_arr.append(params[0])
+         rt, x,_ = gen_rt_x(theta, alpha, tau, sigma, *params, samples=J, process=process, initial=initial)
+         X[i,:] = x
+         RT[i,:] = rt
+      
+   return RT, X, v_arr
 
 if __name__ == "__main__":
     theta, alpha, tau, sigma = 100, 1.5, 0.01, 1
-    mu=0.2
-    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener")
-    assert len(RT_arr) == 10
-    assert len(X_arr) == 10
-    log.debug(X_arr)
-    log.debug(RT_arr)
 
-    mu=-0.2
+
+    mu=asarray([0.2])
     RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener")
     assert len(RT_arr) == 10
     assert len(X_arr) == 10
     log.debug(X_arr)
     log.debug(RT_arr)
     log.debug("test successful")
+
+
+    mu=asarray([-0.2])
+    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener")
+    assert len(RT_arr) == 10
+    assert len(X_arr) == 10
+    log.debug(X_arr)
+    log.debug(RT_arr)
+    log.debug("test successful")
+
+
+    v_p=asarray([0.2])
+    RT_mat, X_mat,v_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, I=10, J = 5, process="Wiener")
+    log.debug(X_mat.shape)
+    log.debug(RT_mat.shape)
+    assert RT_mat.shape == (10,5)
+    assert X_mat.shape == (10,5)
+    assert len(v_arr) == 10
+    log.debug("test successful")
     
+
+    v_p=asarray([0.2])
+    #v_i=asarray([2,0.5])
+    v_i = asarray([0.5, 0.75, 1, 1.25])
+    RT_mat, X_mat,v_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, v_i,I=10, J = 8, process="DiffusionIRT")
+    log.debug(X_mat.shape)
+    log.debug(RT_mat.shape)
+    assert RT_mat.shape == (10,6)
+    assert X_mat.shape == (10,6)
+    assert asarray(v_arr).squeeze().shape == (10,2)
+    log.debug("test successful")
+
+
+    v_p=repeat([0.01,0.02,0.05,0.08], (theta+2)/ 4)[0:theta+10]
+    #v_i=asarray([2,0.5])
+    v_i = asarray([0.5, 0.75, 1, 1.25])
+    RT_mat, X_mat,v_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, v_i,I=10, J = 8, process="DiffusionIRT")
+    log.debug(X_mat.shape)
+    log.debug(RT_mat.shape)
+    assert RT_mat.shape == (10,6)
+    assert X_mat.shape == (10,6)
+    assert asarray(v_arr).squeeze().shape == (10,2)
+    log.debug("test successful")
