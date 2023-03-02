@@ -90,19 +90,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
    
    n_states = theta #_get_n_states(alpha, theta, tau, sigma)
 
-   if (process=="Wiener"):
-      mu, = params
-      if(len(mu) == 1):
-         Q = _create_Wiener_Q(n_states,alpha,tau,sigma,mu)
-      elif(len(mu) > 1):
-         Q = _create_pWiener_Q(n_states,alpha,tau,sigma,mu)
-      else:
-         raise Exception("Missing mu")
-   elif (process == "OU"):
-      delta, gamma = params
-      Q = _create_OU_Q(n_states,alpha,tau, sigma, delta, gamma)
-   else:
-      raise Exception("Only Wiener | OU process is allowed")
+   Q = get_transition_matrix(alpha, tau, sigma, params, process, n_states)
    
    if(initial == "EZ"):
       s_t = zeros(n_states)
@@ -124,6 +112,22 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
          X = 0
          break
    return(steps, RT, X)
+
+def get_transition_matrix(alpha, tau, sigma, params, process, n_states):
+    if (process=="Wiener"):
+       mu, = params
+       if(len(mu) == 1):
+          Q = _create_Wiener_Q(n_states,alpha,tau,sigma,mu)
+       elif(len(mu) > 1):
+          Q = _create_pWiener_Q(n_states,alpha,tau,sigma,mu)
+       else:
+          raise Exception("Missing mu")
+    elif (process == "OU"):
+       delta, gamma = params
+       Q = _create_OU_Q(n_states,alpha,tau, sigma, delta, gamma)
+    else:
+       raise Exception("Only Wiener | OU process is allowed")
+    return Q
 
 
 def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Any"):

@@ -4,20 +4,21 @@ import pymc.sampling.jax as jx
 import numpy as np
 import pandas as pd
 import diffusion_models.utils.common_logging as cl
+import jax
+
 log = cl.get_logger("Common-Utils")
 
 _cores=4
 
-
-def sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, likelihood=True):
+def sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, likelihood=True, **kwargs):
     if sampler == "PYMC":
         return _sample_posterior_PyMC(model, samples_n, chains, tune, acceptance_rate, likelihood)
     elif sampler == "JAX":
-        return _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate)
+        return _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate, likelihood)
     elif sampler == "SMC":
         return _sample_posterior_SMC(model, samples_n, chains)
     elif sampler == "VI":
-        return _sample_posterior_VI(model, samples_n)
+        return _sample_posterior_VI(model, samples_n, kwargs["iter"] if "iter" in kwargs else 10000)
     
 def calculate_r_star(df_posterior, group_var, group_std_name, var_name, idx_name):
     
@@ -54,11 +55,13 @@ def _sample_posterior_PyMC(model, samples_n, chains, tune, acceptance_rate, like
 
     return posterior 
 
-def _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate):
+def _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate,likelihood):
+    log.debug(f"Total number of devices detected: {jax.local_device_count()}")
     with model:
         log.debug(model.free_RVs)
-        posterior = jx.sample_numpyro_nuts(samples_n, tune = tune, chains=chains, target_accept=acceptance_rate, chain_method="vectorized")
-        
+        posterior = jx.sample_numpyro_nuts(samples_n, tune = tune, chains=chains, target_accept=acceptance_rate, chain_method="parallel")
+    if likelihood:
+        posterior = _calculate_likelihood(posterior, model)
     return posterior 
 
 def _sample_posterior_SMC(model, samples_n, chains):
@@ -66,9 +69,9 @@ def _sample_posterior_SMC(model, samples_n, chains):
         posterior = pm.sample_smc(samples_n,chains=chains)
     return posterior
 
-def _sample_posterior_VI(model, samples_n):
+def _sample_posterior_VI(model, samples_n, iter):
     with model:
-        mean_field = pm.fit()
+        mean_field = pm.fit(method="svgd", n=iter)
         posterior = mean_field.sample(samples_n)
     return posterior
 
@@ -81,7 +84,7 @@ def sample_post_pred(model, posterior, extend=True):
         posterior_pred = pm.sample_posterior_predictive(posterior, extend_inferencedata=extend)
     return posterior_pred
 
-def sample_prior(model, samples_n=100):
+def sample_prior_pred(model, samples_n=1000):
     with model:
         prior_chain = pm.sample_prior_predictive(samples=samples_n)
     return prior_chain

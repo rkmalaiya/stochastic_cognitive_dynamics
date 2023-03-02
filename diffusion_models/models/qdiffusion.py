@@ -26,23 +26,20 @@ vars_pers = [
 "t_er"
 ]
 
-a_p_mu=0
-v_p_mu=0
+def get_model(I,J, RT = None, X=None, a_p_mu = 0):
 
-
-def get_model(I,J, RT = None, X=None):
-    
+    log.debug(f"Getting model for prior: {a_p_mu}")
     with pm.Model() as qdiffusion:
         a_i = pm.Uniform("a_i",0,0.5, shape = (1,J))
         v_i = pm.Uniform("v_i",0,0.5, shape = (1,J))
         a_p = pm.Lognormal("a_p",a_p_mu,1,shape = (I,1))
-        v_p = pm.Lognormal("v_p",v_p_mu,1,shape = (I,1))
+        v_p = pm.Lognormal("v_p",0,1,shape = (I,1))
         
         t_er = pm.Lognormal("t_er",0,1,shape = (I,1))
 
         mu_kj, sigma_kj, p_kj = q_diffusion(a_i, v_i, a_p, v_p, t_er)
 
-        RT_kj = pm.Normal("RT_kj",mu_kj, sigma_kj, shape = (I,J), observed = np.log(RT))
+        RT_kj = pm.Normal("RT_kj",mu_kj, sigma_kj, shape = (I,J), observed = np.log(RT) if RT is not None else None)
         X_kj = pm.Bernoulli("X_kj", pm.invlogit(p_kj), shape = (I,J), observed = X)
 
     return qdiffusion #, (a_i, v_i, a_p, v_p, t_er, RT_kj, X_kj)
@@ -105,14 +102,25 @@ def gen_sample_data(model):
     prior_data_ra = prior_data.prior["X_kj"].values.squeeze()[1,:,:]
     return(prior_data_rt, prior_data_ra)
 
-def sample_posterior_params(RT, X, samples_n, chains, tune, sampler="PYMC", acceptance_rate=0.90, likelihood=False):
-    model = get_model(*X.shape, X = X, RT=RT)
-    posterior_chain = ut.sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, likelihood=likelihood)
+def sample_posterior_params(RT, X, samples_n, chains, tune, sampler="PYMC", acceptance_rate=0.90, likelihood=False, **kwargs):
+    a_p_mu = 0
+    if ("a_p_mu" in kwargs):
+        a_p_mu = kwargs.get("a_p_mu")
+    model = get_model(*X.shape, X = X, RT=RT, a_p_mu = a_p_mu)
+    posterior_chain = ut.sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, likelihood=likelihood,**kwargs)
     return posterior_chain, model
 
-def sample_predictive_dist(model, posterior_chain):
-    posterior_chain = ut.sample_post_pred(model, posterior_chain)
-    return posterior_chain
+def sample_predictive_dist(model, posterior_chain=None, mode="Prior|Posterior|Both"):
+    pred_chain = None
+    
+    if(mode == "Prior" or mode=="Both"):
+        pred_chain = ut.sample_prior_pred(model)
+    if((mode == "Posterior" or mode=="Both") and posterior_chain is not None):
+        pred_chain = ut.sample_post_pred(model, posterior_chain)
+
+    if(pred_chain is None):
+        raise Exception("Either mode or posterior not provided")
+    return pred_chain
 
 def post_process_posterior(posterior_chain, method = "None|WAIC|LOO", **kwargs):
     summ = ut.get_summary(posterior_chain)

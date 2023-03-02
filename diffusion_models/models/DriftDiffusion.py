@@ -1,9 +1,10 @@
+#%%
 import pymc as pm
 import numpy as np
 import pytensor as ae
 from pytensor import tensor as at
 import scipy as sp
-from scipy.stats.sampling import TransformedDensityRejection
+from scipy.stats.sampling import SimpleRatioUniforms
 import diffusion_models.utils.common_logging as cl
 from diffusion_models.utils import common_utils as ut
 import pandas as pd
@@ -39,8 +40,9 @@ class DriftDiffusionRV(RandomVariable):
         obs_X=at.as_tensor_variable(obs_X)
         
         dd_logp = DriftDiffusionProb(v,a,z,t_er,obs_X)
-        ddm_gen = TransformedDensityRejection(dd_logp, domain=(0,np.inf), random_state=rng)
-        return ddm_gen.rvs(size)
+        #ddm_gen = SimpleRatioUniforms(dd_logp, random_state=rng)
+        #return ddm_gen.rvs(size)
+        smpl = dd_logp._draw_RT(rng=rng, size=size)
 
 class DriftDiffusion(PositiveContinuous):
     rv_op = DriftDiffusionRV()    
@@ -72,8 +74,9 @@ class DriftDiffusionProb():
         return self._diffusion_RT_p(RT).eval()
     
     def dpdf(self, RT):
+        RT = at.as_tensor(RT)
         gd = at.grad(self._diffusion_RT_logp(RT), RT)
-        gd_val = [g.eval() for g in gd]
+        gd_val = gd.eval() # [g.eval() for g in gd]
         return gd_val
 
     def _diffusion_RT_p(self, RT):
@@ -125,7 +128,7 @@ class DriftDiffusionProb():
     def _diffusion_01w_l(self,tt, a, w):
 
         K_m = self._get_count_l(tt)
-        K_n = at.max(at.floor(K_m))
+        K_n = at.max(at.floor(K_m)) + 1
         K_n = at.switch(at.gt(K_n,self.max_k), self.max_k, K_n)
 
         x_printed_8 = ae.printing.Print('l K')(K_n)
@@ -206,8 +209,51 @@ class DriftDiffusionProb():
 
         return prob_rt
 
- 
+    def _draw_RT(self, rng, size):
+        obs_X, v, a, z, t_er = self.obs_X, self.v, self.a, self.z, self.t_er
+        I, J = obs_X.shape
+        max_iter = 10000
+        
+        #RT_rand = rng.standard_normal(size)
+        RT_rvs = np.empty(shape=(I,J))
+        samples_rejection = J #100 * J
 
+        for i_l in range(I):
+            RT_arr = np.empty(shape=0)
+        
+            iter=0
+            while (RT_arr.shape[0] < J):
+                
+                RT_rand = sp.stats.lognorm.rvs(1, 0,1, size=samples_rejection)
+                u = sp.stats.uniform.rvs(0,1,size=samples_rejection)
+
+                pdf_lognorm = sp.stats.lognorm.pdf(RT_rand,1,0,1)
+                pdf_diffusion = self._RT_logp(RT_rand,obs_X[[i_l],:],v[[i_l],:],a[[i_l],:],z[[i_l],:],t_er[[i_l],:]).eval()
+                
+                M = np.round(np.max(pdf_diffusion) + 1)
+                
+
+                #pdf_X = _diffusion_X_logp(obs_X,v,a,z).eval()
+                #print("*****I_L",i_l)
+                #print("*****M",M)
+                #print("*****pdf_RT",pdf_diffusion)
+                RT_rand_accept = RT_rand[np.where(u < pdf_diffusion[0,:] / (M*pdf_lognorm))]
+                
+                
+                RT_arr = np.append(RT_arr, RT_rand_accept)
+                
+                iter += 1
+                if iter > max_iter:
+                    raise Exception("Could not find samples")
+
+            RT_rvs[i_l,:] = RT_arr[0:J] 
+        print("*****RT", RT_rvs.shape)
+
+        return RT_rvs
+
+
+ 
+#%%
 if __name__ == "__main__":
     #rv = DriftDiffusionRV()
     #rv(0.1,0.2,1,0.01,[1],size=(1,1)).eval()
@@ -215,7 +261,7 @@ if __name__ == "__main__":
     a = at.as_tensor_variable(0.4)
     z = at.as_tensor_variable(0.05)
     t_er = at.as_tensor_variable(0.01)
-    obs_X = at.as_tensor_variable([0.1])
+    obs_X = at.as_tensor_variable([1])
     RT = at.as_tensor_variable([1.2])
     
     p = DriftDiffusionProb(v,a,z,t_er,obs_X).pdf(RT)
@@ -223,6 +269,7 @@ if __name__ == "__main__":
     print(p)
     print(dp)
 
-    #rv = DriftDiffusionRV()
-    #s = rv.rng_fn(np.random.default_rng(),0.1,0.2,1,0.01,[1],size=(1,1))
-    #print(s)
+    rv = DriftDiffusionRV()
+    s = rv.rng_fn(np.random.default_rng(),0.1,0.2,1,0.01,[1],size=(1,1))
+    print(s)
+# %%

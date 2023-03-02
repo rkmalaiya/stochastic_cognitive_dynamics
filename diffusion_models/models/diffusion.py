@@ -16,7 +16,7 @@ import pymc.sampling.jax as jx
 log = cl.get_logger("diffusion")
 eps = 0.05 # for numerical stability
 err = 10e-10
-max_k = 20
+max_k = 40
 
 def _get_count_l(tt):
 
@@ -100,10 +100,10 @@ def _RT_logp(RT, obs_X, v, a, z, t_er):
     Z = at.switch(at.eq(obs_X,1), 1-z[:,[0]], z[:,[0]])
     T_er = at.switch(at.eq(obs_X,1), t_er[:,[0]], t_er[:,[0]])
     
-    x_printed_12 = ae.printing.Print('v')(V)
-    x_printed_14 = ae.printing.Print('a')(A)
-    x_printed_15 = ae.printing.Print('z')(Z)
-    x_printed_16 = ae.printing.Print('t_er')(T_er)
+    #x_printed_12 = ae.printing.Print('v')(V)
+    #x_printed_14 = ae.printing.Print('a')(A)
+    #x_printed_15 = ae.printing.Print('z')(Z)
+    #x_printed_16 = ae.printing.Print('t_er')(T_er)
 
 
     W = Z/A #z/a  
@@ -111,13 +111,13 @@ def _RT_logp(RT, obs_X, v, a, z, t_er):
 
     DT = RT-T_er
     #DT = 
-    x_printed_2 = ae.printing.Print('RT-t_re')(DT)
+    #x_printed_2 = ae.printing.Print('RT-t_re')(DT)
 
     #prob_rt = _diffusion(t, v, w, a)
     
     prob_rt_std = at.switch(at.le(DT,0),0, _diffusion_01w(DT,A,W))
     
-    x_printed_3 = ae.printing.Print(f'prob_rt_std all {obs_X.shape}')(prob_rt_std)
+    #x_printed_3 = ae.printing.Print(f'prob_rt_std all {obs_X.shape}')(prob_rt_std)
 
     #prob_rt = (1 / a**2) * at.exp( (-w*a*v) - (v**2 * t)/2 ) * prob_rt_std
     prob_rt = at.log(1 / A*A) + ( (-W*A*V) - (V*V * DT)/2 ) * prob_rt_std
@@ -127,7 +127,7 @@ def _RT_logp(RT, obs_X, v, a, z, t_er):
     #all though care has been taken to not process pdf for -ve time that results in -ve pdf, some -ve pdf are still creeping up
     prob_rt = at.switch(at.le(DT,0),0,prob_rt) #Removing pdfs for t <= 0 because t <=0 is not supported
 
-    x_printed_13 = ae.printing.Print('per individual all trial logp')(prob_rt)
+    #x_printed_13 = ae.printing.Print('per individual all trial logp')(prob_rt)
 
     return prob_rt
 
@@ -137,7 +137,7 @@ def _diffusion_RT_logp(RT, obs_X, v, a, z, t_er):
 
     total_logp = prob_rt.sum(axis=1) 
 
-    x_printed_12 = ae.printing.Print('***all individual final sum logp')(prob_rt)
+    #x_printed_12 = ae.printing.Print('***all individual final sum logp')(prob_rt)
     return total_logp 
 
 
@@ -153,9 +153,9 @@ def _diffusion_default_priors(I, X):
 
         #a_m = pm.Gamma("a_m",1.5, 0.75, shape=(1,2))
         a_m = pm.Gamma("a_m",1.5,0.75)
-        #a_s = pm.HalfNormal("a_s",0.1)
+        a_s = pm.HalfNormal("a_s",0.1)
         #a_s = pm.TruncatedNormal("a_s",5,1)
-        a = pm.Gamma("a",a_m,1,shape=(I,1))
+        a = pm.Gamma("a",a_m,a_s**2,shape=(I,1))
         #a = pm.Gamma("a",2,2,shape=(I,2))
 
         z_m = pm.Normal("z_m",0.5,0.5)
@@ -165,10 +165,10 @@ def _diffusion_default_priors(I, X):
 
         #z = pm.invlogit(z)
 
-        #ter_m = pm.Gamma("ter_m",0.4, 0.2)
-        #ter_s = pm.HalfNormal("ter_s",1)
-        t_er = pm.LogNormal("t_er",0.1,1,shape=(I,1))
-        #t_er = pm.LogNormal("t_er",ter_m,ter_s,shape=(I,1))
+        ter_m = pm.Gamma("ter_m",0.4, 0.2)
+        ter_s = pm.HalfNormal("ter_s",1)
+        #t_er = pm.LogNormal("t_er",0.1,1,shape=(I,1))
+        t_er = pm.Normal("t_er",ter_m,ter_s**2,shape=(I,1))
         #t_er = pm.Normal("t_er",1,1,shape=(I,2))
         
         #X = pm.Deterministic("X", X)
@@ -178,10 +178,10 @@ def _diffusion_default_priors(I, X):
         #z_ic = pm.Beta("z_ic", 1,1,shape=(I,1)) # z ranges from 0 to a
         #t_er_ic = pm.HalfNormal("t_er_ic",2,shape=(I,1))
 
-        #V = at.switch(at.eq(X,1), -v[:,[0]], v[:,[1]])
-        #A = at.switch(at.eq(X,1), a[:,[0]], a[:,[1]])
-        #Z = at.switch(at.eq(X,1), 1-z[:,[0]], z[:,[1]])
-        #T_er = at.switch(at.eq(X,1), t_er[:,[0]], t_er[:,[1]])
+        #V = at.switch(at.eq(X,1), -v[:,[0]], v[:,[0]])
+        #A = at.switch(at.eq(X,1), a[:,[0]], a[:,[0]])
+        #Z = at.switch(at.eq(X,1), 1-z[:,[0]], z[:,[0]])
+        #T_er = at.switch(at.eq(X,1), t_er[:,[0]], t_er[:,[0]])
         
         
 
@@ -254,10 +254,10 @@ def sample_prior_data(I, J, samples_n):
     return ut.sample_prior(model, samples_n)
 
 
-def sample_posterior_params(RT, X, samples_n, chains, tune, sampler="PYMC", acceptance_rate=0.90):
+def sample_posterior_params(RT, X, samples_n, chains, tune, sampler="PYMC", acceptance_rate=0.90, **kwargs):
 
     model = get_model(I = X.shape[0], obs_X = X, obs_RT=RT)
-    posterior_chain = ut.sample_posterior(model,samples_n, chains,tune, sampler=sampler, acceptance_rate= acceptance_rate)
+    posterior_chain = ut.sample_posterior(model,samples_n, chains,tune, sampler=sampler, acceptance_rate= acceptance_rate, **kwargs)
     return posterior_chain, model
 
 def sample_post_pred_data(posterior_chain, model, samples_n = 100):
