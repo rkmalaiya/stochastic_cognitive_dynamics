@@ -4,8 +4,8 @@ import numpy as np
 import pytensor as ae
 from pytensor import tensor as at
 import scipy as sp
-import diffusion_models.utils.common_logging as cl
-from diffusion_models.utils import common_utils as ut
+import cme.utils.common_logging as cl
+from cme.utils import common_utils as ut
 import pandas as pd
 import os
 import pymc.sampling.jax as jx

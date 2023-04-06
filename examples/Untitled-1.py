@@ -1,8 +1,8 @@
 # %%
-from diffusion_models.models import diffusion as dd
+from cme.models import diffusion as dd
 import pandas as pd
 import numpy as np
-from diffusion_models.utils import common_utils as ut
+from cme.utils import common_utils as ut
 import arviz as az
 import os
 

@@ -4,8 +4,8 @@ import numpy as np
 import aesara as ae
 from aesara import tensor as at
 import scipy as sp
-import diffusion_models.utils.common_logging as cl
-from diffusion_models.utils import common_utils as ut
+import cme.utils.common_logging as cl
+from cme.utils import common_utils as ut
 import arviz as az
 import xarray as xa
 

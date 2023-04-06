@@ -1,6 +1,6 @@
 #%%
-from diffusion_models.models import qdiffusion as qd
-import diffusion_models.utils.common_logging as cl
+from cme.models import qdiffusion as qd
+import cme.utils.common_logging as cl
 #import sys
 import numpy as np
 

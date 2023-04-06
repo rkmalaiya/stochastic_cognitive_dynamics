@@ -3,7 +3,7 @@ import arviz as az
 import pymc.sampling.jax as jx
 import numpy as np
 import pandas as pd
-import diffusion_models.utils.common_logging as cl
+import cme.utils.common_logging as cl
 import jax
 
 log = cl.get_logger("Common-Utils")

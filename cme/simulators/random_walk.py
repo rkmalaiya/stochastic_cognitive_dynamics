@@ -1,6 +1,8 @@
 from numpy import *
 from scipy.stats import *
-import diffusion_models.utils.common_logging as cl
+import cme.utils.common_logging as cl
+from joblib import Parallel, delayed
+
 log = cl.get_logger("random-walk")
 
 
@@ -130,22 +132,39 @@ def get_transition_matrix(alpha, tau, sigma, params, process, n_states):
     return Q
 
 
-def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Any"):
-    RT_arr = []
-    X_arr = []
-    steps_arr = []
-    max_iter = samples*50
-    for i in range(max_iter): 
-        steps, RT, X = _perform_walk(theta, alpha, tau, sigma, *params, process=process, initial=initial)
-        if RT > 0: 
-            RT_arr.append(RT) 
-            X_arr.append(X)
-            steps_arr.append(steps)
-        if size(RT_arr) >= samples:
-            break 
-    return RT_arr, X_arr, steps_arr
+def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Any",njobs=8):
+   RT_arr = []
+   X_arr = []
+   steps_arr = []
+   max_iter = samples*50
 
-def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU|DiffusionIRT", initial="EZ|Any"):
+   ret_ans = Parallel(n_jobs=njobs)(
+       
+     delayed(_perform_walk)(theta, alpha, tau, sigma, *params, process=process, initial=initial) for _ in range(max_iter)
+
+      
+         #if RT > 0: 
+         #   RT_arr.append(RT) 
+         #   X_arr.append(X)
+         #   steps_arr.append(steps)
+         #if size(RT_arr) >= samples:
+         #   break 
+   )
+
+   for ans in ret_ans:
+      steps, RT, X = ans
+      if RT > 0: 
+         RT_arr.append(RT) 
+         X_arr.append(X)
+         steps_arr.append(steps)
+      if size(RT_arr) >= samples:
+         break 
+
+
+   
+   return RT_arr, X_arr, steps_arr
+
+def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU|DiffusionIRT", initial="EZ|Any", njobs = 8):
    
    X = zeros((I,J))
    RT = zeros((I,J))
@@ -154,44 +173,50 @@ def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU|Diff
    print("Generating data for participant")
 
    for i in range(I):
-      print(f"{i}")
-      if (len(params) == 1):
-         v_s, = params   
-         v_s = v_s + random.default_rng().normal(0,0.1**2)
-         params = (v_s,)
-      else:
-         v_s, oths = params
-         v_s = v_s + random.default_rng().normal(0,0.1**2)
-         params = (v_s, oths)
+      par_gen_RT_X_mat(theta, alpha, tau, sigma, params, J, process, initial, X, RT, v_arr, i,njobs=njobs)
+
+   #Parallel(n_jobs=njobs, require='sharedmem')(
+   # delayed(par_gen_RT_X_mat)(theta, alpha, tau, sigma, params, J, process, initial, X, RT, v_arr, i) for i in range(I))
+     
+   return RT, X, v_arr
+
+def par_gen_RT_X_mat(theta, alpha, tau, sigma, params, J, process, initial, X, RT, v_arr, i,njobs):
+    print(f"{i}")
+    if (len(params) == 1):
+       v_s, = params   
+       v_s = v_s + random.default_rng().normal(0,0.1**2)
+       params = (v_s,)
+    else:
+       v_s, oths = params
+       v_s = v_s + random.default_rng().normal(0,0.1**2)
+       params = (v_s, oths)
 
       # To vary for each participant
       
       #params[0] = v_s, oths
       
-      if process == "DiffusionIRT":
-         v_p_s, v_i_s = params
-         v_l = len(v_i_s)
+    if process == "DiffusionIRT":
+       v_p_s, v_i_s = params
+       v_l = len(v_i_s)
 
-         if(J % v_l > 0):
-            raise Exception("Total number of items should be a multiple of the length of possible item drift rates")
+       if(J % v_l > 0):
+          raise Exception("Total number of items should be a multiple of the length of possible item drift rates")
          
-         batch = J//v_l
-         v_arr_ind = []
-         for v_i in v_i_s:
-            params_for_gen = [v_p_s / v_i]
-            v_arr_ind.append(params_for_gen)
-            for ind in range(0,J, batch):
-               rt, x, _ = gen_rt_x(theta, alpha, tau, sigma, *params_for_gen, samples=batch, process="Wiener", initial=initial)
-               X[i,ind:ind+batch] = x
-               RT[i,ind:ind+batch] = rt      
-         v_arr.append(v_arr_ind)      
-      else:
-         v_arr.append(params[0])
-         rt, x,_ = gen_rt_x(theta, alpha, tau, sigma, *params, samples=J, process=process, initial=initial)
-         X[i,:] = x
-         RT[i,:] = rt
-      
-   return RT, X, v_arr
+       batch = J//v_l
+       v_arr_ind = []
+       for v_i in v_i_s:
+          params_for_gen = [v_p_s / v_i]
+          v_arr_ind.append(params_for_gen)
+          for ind in range(0,J, batch):
+             rt, x, _ = gen_rt_x(theta, alpha, tau, sigma, *params_for_gen, samples=batch, process="Wiener", initial=initial,njobs=njobs)
+             X[i,ind:ind+batch] = x
+             RT[i,ind:ind+batch] = rt      
+       v_arr.append(v_arr_ind)      
+    else:
+       v_arr.append(params[0])
+       rt, x,_ = gen_rt_x(theta, alpha, tau, sigma, *params, samples=J, process=process, initial=initial)
+       X[i,:] = x
+       RT[i,:] = rt
 
 if __name__ == "__main__":
     theta, alpha, tau, sigma = 100, 1.5, 0.01, 1
@@ -231,9 +256,9 @@ if __name__ == "__main__":
     RT_mat, X_mat,v_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, v_i,I=10, J = 8, process="DiffusionIRT")
     log.debug(X_mat.shape)
     log.debug(RT_mat.shape)
-    assert RT_mat.shape == (10,6)
-    assert X_mat.shape == (10,6)
-    assert asarray(v_arr).squeeze().shape == (10,2)
+    assert RT_mat.shape == (10,8)
+    assert X_mat.shape == (10,8)
+    assert asarray(v_arr).squeeze().shape == (10,4)
     log.debug("test successful")
 
 
@@ -243,7 +268,7 @@ if __name__ == "__main__":
     RT_mat, X_mat,v_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, v_i,I=10, J = 8, process="DiffusionIRT")
     log.debug(X_mat.shape)
     log.debug(RT_mat.shape)
-    assert RT_mat.shape == (10,6)
-    assert X_mat.shape == (10,6)
-    assert asarray(v_arr).squeeze().shape == (10,2)
+    assert RT_mat.shape == (10,8)
+    assert X_mat.shape == (10,8)
+    assert asarray(v_arr).squeeze().shape == (10,4,100)
     log.debug("test successful")

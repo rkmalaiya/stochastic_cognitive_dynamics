@@ -1,8 +1,8 @@
 #%%
 import pymc as pm
 import numpy as np
-from diffusion_models.utils import common_utils as ut
-import diffusion_models.utils.common_logging as cl
+from cme.utils import common_utils as ut
+import cme.utils.common_logging as cl
 import pymc.sampling.jax as jx
 log = cl.get_logger("diffusion")
 

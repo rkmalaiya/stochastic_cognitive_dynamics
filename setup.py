@@ -9,5 +9,5 @@ setup(name='Computational_models_of_Reasoning',
       author='Ritesh K Malaiya',
       author_email='ritesh.malaiya@gmail.com',
       license='MIT',
-      packages=['diffusion_models'],
+      packages=['cme'],
       zip_safe=False)

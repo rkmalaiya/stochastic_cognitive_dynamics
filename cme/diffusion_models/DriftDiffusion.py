@@ -5,8 +5,8 @@ import pytensor as ae
 from pytensor import tensor as at
 import scipy as sp
 from scipy.stats.sampling import SimpleRatioUniforms
-import diffusion_models.utils.common_logging as cl
-from diffusion_models.utils import common_utils as ut
+import cme.utils.common_logging as cl
+from cme.utils import common_utils as ut
 import pandas as pd
 import os
 import pymc.sampling.jax as jx
@@ -273,3 +273,4 @@ if __name__ == "__main__":
     s = rv.rng_fn(np.random.default_rng(),0.1,0.2,1,0.01,[1],size=(1,1))
     print(s)
 # %%
+

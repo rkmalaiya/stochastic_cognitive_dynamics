@@ -1,8 +1,8 @@
 #%%
-from diffusion_models.models import diffusion as dd
-import diffusion_models.utils.common_logging as cl
+from cme.models import diffusion as dd
+import cme.utils.common_logging as cl
 import numpy as np
-from diffusion_models.utils import common_utils as ut
+from cme.utils import common_utils as ut
 import pandas as pd
 import os
 import pymc as pm
