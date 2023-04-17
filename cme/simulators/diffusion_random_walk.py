@@ -1,4 +1,5 @@
 from numpy import *
+from pandas import *
 from scipy.stats import *
 import cme.utils.common_logging as cl
 from joblib import Parallel, delayed
@@ -169,54 +170,68 @@ def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU|Diff
    X = zeros((I,J))
    RT = zeros((I,J))
    v_arr = []
+   tr_arr = []
 
    print("Generating data for participant")
 
    for i in range(I):
-      par_gen_RT_X_mat(theta, alpha, tau, sigma, params, J, process, initial, X, RT, v_arr, i,njobs=njobs)
-
-   #Parallel(n_jobs=njobs, require='sharedmem')(
-   # delayed(par_gen_RT_X_mat)(theta, alpha, tau, sigma, params, J, process, initial, X, RT, v_arr, i) for i in range(I))
-     
-   return RT, X, v_arr
-
-def par_gen_RT_X_mat(theta, alpha, tau, sigma, params, J, process, initial, X, RT, v_arr, i,njobs):
-    print(f"{i}")
-    if (len(params) == 1):
-       v_s, = params   
-       v_s = v_s + random.default_rng().normal(0,0.1**2)
-       params = (v_s,)
-    else:
-       v_s, oths = params
-       v_s = v_s + random.default_rng().normal(0,0.1**2)
-       params = (v_s, oths)
+      print(f"{i}")
+      if (len(params) == 1):
+         v_s, = params   
+         v_s = v_s + random.default_rng().normal(0,0.1**2)
+         params = (v_s,)
+      else:
+         v_s, oths = params
+         v_s = v_s + random.default_rng().normal(0,0.1**2)
+         params = (v_s, oths)
 
       # To vary for each participant
       
       #params[0] = v_s, oths
       
-    if process == "DiffusionIRT":
-       v_p_s, v_i_s = params
-       v_l = len(v_i_s)
+      if process == "DiffusionIRT":
+         v_p_s, v_i_s = params
+         v_l = len(v_i_s)
 
-       if(J % v_l > 0):
-          raise Exception("Total number of items should be a multiple of the length of possible item drift rates")
-         
-       batch = J//v_l
-       v_arr_ind = []
-       for v_i in v_i_s:
-          params_for_gen = [v_p_s / v_i]
-          v_arr_ind.append(params_for_gen)
-          for ind in range(0,J, batch):
-             rt, x, _ = gen_rt_x(theta, alpha, tau, sigma, *params_for_gen, samples=batch, process="Wiener", initial=initial,njobs=njobs)
-             X[i,ind:ind+batch] = x
-             RT[i,ind:ind+batch] = rt      
-       v_arr.append(v_arr_ind)      
-    else:
-       v_arr.append(params[0])
-       rt, x,_ = gen_rt_x(theta, alpha, tau, sigma, *params, samples=J, process=process, initial=initial)
-       X[i,:] = x
-       RT[i,:] = rt
+         if(J % v_l > 0):
+            raise Exception("Total number of items should be a multiple of the length of possible item drift rates")
+            
+         batch = J//v_l
+         v_arr_ind = []
+         for v_i in v_i_s:
+            params_for_gen = [v_p_s / v_i]
+            v_arr_ind.append(params_for_gen)
+            for ind in range(0,J, batch):
+               rt, x, _ = gen_rt_x(theta, alpha, tau, sigma, *params_for_gen, samples=batch, process="Wiener", initial=initial,njobs=njobs)
+               X[i,ind:ind+batch] = x
+               RT[i,ind:ind+batch] = rt      
+         v_arr.append(v_arr_ind)      
+      else:
+         v_arr.append(params[0])
+         rt, x, tr = gen_rt_x(theta, alpha, tau, sigma, *params, samples=J, process=process, initial=initial)
+         X[i,:] = x
+         RT[i,:] = rt
+         tr_arr.append(tr)
+
+   #Parallel(n_jobs=njobs, require='sharedmem')(
+   # delayed(par_gen_RT_X_mat)(theta, alpha, tau, sigma, params, J, process, initial, X, RT, v_arr, i) for i in range(I))
+     
+   return RT, X, v_arr, tr_arr
+    
+def store_randomwalk(RT, X, steps_arr,file_pre_name):
+   df = []
+   for i, steps in enumerate(steps_arr):
+      df.append(DataFrame({"rw_no":i,"steps":asarray(steps)}))
+
+   concat(df).to_csv(f"{file_pre_name}_steps.csv", index=False)
+   savetxt(f"{file_pre_name}_RT.csv", RT)
+   savetxt(f"{file_pre_name}_X.csv", X)
+
+def load_randomwalk(file_pre_name):
+   steps_arr = read_csv(f"{file_pre_name}_steps.csv")
+   RT = loadtxt(f"{file_pre_name}_RT.csv")
+   X = loadtxt(f"{file_pre_name}_X.csv")
+   return RT, X, steps_arr
 
 if __name__ == "__main__":
     theta, alpha, tau, sigma = 100, 1.5, 0.01, 1
