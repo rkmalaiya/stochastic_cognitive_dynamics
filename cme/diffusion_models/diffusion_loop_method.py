@@ -24,15 +24,66 @@ err2 = 10e-29
 
 def _diffusion_sum_inf(K, prob_rt_std, t, w, a):
     
-    #***** Start here, check why is until multi dimensional
-
-    a = a.squeeze()
+    #a = a.squeeze()
     prob_rt_std_new =  (K * at.exp( - ((K*np.pi)**2 * t/(2*a*a)) ) * at.sin( K * np.pi * w )) #exp becomes zero for large tt, hence adding eps
         
-    #print("a *******",a.shape)
-    #print("prob_rt_std *******", prob_rt_std.shape)
-    #print("prob_rt_std_new *******", prob_rt_std_new.shape)
     return [K+1, prob_rt_std + prob_rt_std_new], until(at.le(at.abs(prob_rt_std - prob_rt_std_new), err2)) #or t==0
+
+def _get_count_l(tt):
+
+    K = at.sqrt((-2) * at.log(np.pi * tt * err) / ((np.pi**2) * tt) )
+    K = at.switch(at.gt(K, 1/(np.pi * at.sqrt(tt)) ), K, (1 / (np.pi * at.sqrt(tt)) ) ) # based on RWiener package in rlang
+    return K
+
+def _get_count_s(tt):
+    K = at.sqrt( -2 * tt * at.log( 2 * err* at.sqrt( 2 * np.pi * tt ) ) )
+    K = at.switch(at.gt(K, at.sqrt(tt)+1), K, at.sqrt(tt) + 1)
+    return K
+
+def _get_lambda(tt):
+    
+    return 2 + _get_count_s(tt) - _get_count_l(tt)
+
+def _diffusion_01w_s(tt, w):
+
+    K_m = _get_count_s(tt)
+    K_n = at.max(at.floor(K_m))
+    K_n = at.switch(at.gt(K_n,max_k), max_k, K_n)
+
+    K=at.arange( -at.floor((K_n-1)/2), at.ceil((K_n-1)/2) + 1 )[:,np.newaxis, np.newaxis]
+
+    prob_rt_std = ((w + 2*K) * at.exp( ((w+2*K)*(w+2*K)) /(2*tt)) ).sum(axis=0)
+
+    prob_rt_std = prob_rt_std * 1/at.sqrt(2*np.pi*tt*tt*tt)
+
+    return prob_rt_std
+
+def _diffusion_01w_l(tt, w):
+
+    K_m = _get_count_l(tt)
+    K_n = at.max(at.floor(K_m))
+    K_n = at.switch(at.gt(K_n, max_k), max_k, K_n)
+
+    K=at.arange(1,K_n+1)[:,np.newaxis, np.newaxis]
+
+    prob_rt_std = np.pi * (K * at.exp( - ((K*np.pi)**2 * tt/2) ) * at.sin( K * np.pi * w )).sum(axis=0) #exp becomes zero for large tt, hence adding eps
+    return  prob_rt_std
+
+def _diffusion_01std(t,a,w):
+
+    tt = t/(a**2)
+    lmda = _get_lambda(tt)
+    st = _diffusion_01w_s(tt, w)
+    lt = _diffusion_01w_l(tt, w)
+    prob_rt_std = at.switch(at.lt(lmda, 0), st, lt)
+
+    # For Stability
+    prob_rt_final = at.switch(at.lt(prob_rt_std,0), 0, prob_rt_std) 
+    prob_rt_final = at.switch(at.isnan(prob_rt_final), 0, prob_rt_final)
+    prob_rt_final = at.switch(at.isinf(prob_rt_final), 0, prob_rt_final)
+
+    return prob_rt_final #should return a scaler
+
 
 
 def _calculate_parti_item_logp(dt, x, v, a, z):
@@ -47,14 +98,15 @@ def _calculate_parti_item_logp(dt, x, v, a, z):
     v_i = at.switch(at.eq(x,1),-v,v)
     z_i = at.switch(at.eq(x,1),1-z,z)
     
-    [_, prob_rt_std],_ = ae.scan(_diffusion_sum_inf,
-            outputs_info = [at.constant(1), at.constant( 0.0, dtype="float64")],
-            non_sequences=[dt, z_i, a],
-            n_steps=50
-            )
+    #[_, prob_rt_std],_ = ae.scan(_diffusion_sum_inf,
+    #       outputs_info = [at.constant(1), at.constant( 0.0, dtype="float64")],
+    #        non_sequences=[dt, z_i, a],
+    #        n_steps=50
+    #       )
     
-    prob_rt_std = prob_rt_std[-1,...]
+    #prob_rt_std = prob_rt_std[-1,...]
     
+    prob_rt_std = _diffusion_01std(dt, a, z_i)
     prob_rt = np.pi / a*a * at.exp( (-z_i*a*v_i) - (v_i*v_i * dt)/2 ) * prob_rt_std
 
     return prob_rt
@@ -140,34 +192,6 @@ def sample_posterior_params(RT, X, samples_n, chains, tune, sampler="PYMC", acce
 def sample_post_pred_data(posterior_chain, model, samples_n = 100):
     return ut.sample_post_pred(model, posterior_chain, samples_n)
 
-def _test_diffusion_01w():
-
-    log.debug(f"Starting Diffusion test")
-    t = at.as_tensor(2.01281869)
-    a = at.as_tensor(0.10357323)
-    z = at.as_tensor(0.01953739)
-    w = z/a
-
-    logp_per_trial = _diffusion_01std(t,a,w).eval()
-
-    log.debug(f"Log per Trial: {np.round(logp_per_trial, decimals=5)}")
-    assert np.round(logp_per_trial, decimals=5) == 0.00
-
-def _test_likelihood_using_error():
-    v = at.as_tensor([[-4.7455195,  3.5246989, -4.7455195,  3.5246989, -4.7455195]])
-    a = at.as_tensor([[0.10100832, 0.48082409, 0.10100832, 0.48082409, 0.10100832]])
-    z = at.as_tensor([[0.03027856, 0.33936817, 0.03027856, 0.33936817, 0.03027856]])
-    t_er = at.as_tensor([[2.17066536, 0.17037338, 0.17066536, 1.17037338, 2.17066536]])
-
-    RT = at.as_tensor([[0.36327581, 0.77126385, 1.02809235, 3.05141406, 0.37536871]])
-    X = at.as_tensor([[1, 0, 1, 0, 1]])
-
-    rt_logp = _diffusion_RT_logp(RT, X, v, a, z,t_er)
-    log.debug(f"rt_logp:{rt_logp}")
-
-    assert rt_logp >= 0
-    log.info("Test Successful!")
-
 def _test_likelihood_using_prior(I, J):
     """
     Testing likelihood function
@@ -177,7 +201,7 @@ def _test_likelihood_using_prior(I, J):
     #v_c,a_c,z_c, t_er_c, v_ic, a_ic, z_ic, t_er_ic = pm.draw([v_c,a_c,z_c, t_er_c, v_ic, a_ic, z_ic, t_er_ic])
 
     X = at.as_tensor(np.random.randint(0,2,(I, J)))
-    model, v, a, z, t_er = _diffusion_default_priors(X.shape[0])
+    _, v, a, z, t_er = _diffusion_default_priors(X.shape[0])
     RT = at.as_tensor(np.random.uniform(0,4,(I,J)))
 
     lp = _diffusion_RT_logp(RT, X, v, a, z,t_er)
