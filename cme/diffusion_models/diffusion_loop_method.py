@@ -49,6 +49,7 @@ def _diffusion_01w_s(tt, w):
     K_m = _get_count_s(tt)
     K_n = at.max(at.floor(K_m))
     K_n = at.switch(at.gt(K_n,max_k), max_k, K_n)
+    K_n = at.switch(at.isnan(K_n), 1, K_n)
 
     K=at.arange( -at.floor((K_n-1)/2), at.ceil((K_n-1)/2) + 1 )[:,np.newaxis, np.newaxis]
 
@@ -63,6 +64,7 @@ def _diffusion_01w_l(tt, w):
     K_m = _get_count_l(tt)
     K_n = at.max(at.floor(K_m))
     K_n = at.switch(at.gt(K_n, max_k), max_k, K_n)
+    K_n = at.switch(at.isnan(K_n), 1, K_n)
 
     K=at.arange(1,K_n+1)[:,np.newaxis, np.newaxis]
 
