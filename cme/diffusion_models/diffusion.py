@@ -73,7 +73,7 @@ def _calculate_RT_logp(DT, V, A, Z):
     
     DT = at.switch(at.le(DT,0), 0, DT) 
 
-    W = Z #/A 
+    W = Z#/A 
     
     prob_rt_std = _diffusion_01std(DT,A,W)
     
@@ -218,7 +218,8 @@ def _quick_test():
     log.debug(f"Starting Diffusion test")
     prior_chain = None #sample_prior_data(I=8,samples_n =5)
     model = get_model(I = X.shape[0], obs_X = X, obs_RT=RT)
-    posterior_chain = pm.sample(model=model, draws=1000, chains=4,tune=500)
+    with model:
+        posterior_chain = pm.sample(draws=1000, chains=4,tune=500, step=pm.NUTS(max_treedepth=20))
     post_pred_chain = None #pm.sample_posterior_predictive(posterior_chain,model)
     #with model:
     #    posterior_jax = jx.sample_numpyro_nuts(13, tune = 20, chains=2)

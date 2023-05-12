@@ -1,10 +1,8 @@
 import pymc as pm
 import arviz as az
-import pymc.sampling.jax as jx
 import numpy as np
 import pandas as pd
 import cme.utils.common_logging as cl
-import jax
 
 log = cl.get_logger("Common-Utils")
 
@@ -44,9 +42,9 @@ def _calculate_waic(posterior_chain, var_name):
 def _sample_posterior_PyMC(model, samples_n, chains, tune, acceptance_rate, likelihood):
     with model:
         log.debug(model.free_RVs)
-        posterior = pm.sample(samples_n, tune = tune, #step = pm.Metropolis(),
+        posterior = pm.sample(samples_n, tune = tune, step=pm.NUTS(target_accept=0.99,max_treedepth=15),
         return_inferencedata=True, chains=chains,
-        target_accept=acceptance_rate, 
+        nuts_sampler="pymc",
         cores=_cores, progressbar=True)
 
     if likelihood:
@@ -56,13 +54,20 @@ def _sample_posterior_PyMC(model, samples_n, chains, tune, acceptance_rate, like
     return posterior 
 
 def _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate,likelihood):
-    log.debug(f"Total number of devices detected: {jax.local_device_count()}")
+    #“pymc”, “nutpie”, “blackjax”, “numpyro”
+
     with model:
         log.debug(model.free_RVs)
-        posterior = jx.sample_numpyro_nuts(samples_n, tune = tune, chains=chains, target_accept=acceptance_rate, chain_method="parallel")
+        posterior = pm.sample(samples_n, tune = tune, step=pm.NUTS(target_accept=0.99,max_treedepth=20),
+        return_inferencedata=True, chains=chains,
+        nuts_sampler="numpyro",
+        cores=_cores, progressbar=True)
+
     if likelihood:
         posterior = _calculate_likelihood(posterior, model)
-    return posterior 
+        #posterior = pm.sample(10000, step = pm.Metropolis(), return_inferencedata=True, cores=4)
+
+    return posterior  
 
 def _sample_posterior_SMC(model, samples_n, chains):
     with model:
