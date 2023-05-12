@@ -23,7 +23,7 @@ rotation_X_n = rotation_X.loc[~rotation_RT.isna().any(axis=1),:].astype(int).to_
 rotation_RT_n[rotation_RT_n < 0.9]
 
 # %%
-samples_n, tune, chains, acceptance_rate = 100, 100, 4, 0.85
+samples_n, tune, chains, acceptance_rate = 1000, 700, 4, 0.85
 
 posterior_chain,_ = dd.sample_posterior_params(rotation_RT_n, rotation_X_n, 
 samples_n,chains=chains, sampler="PYMC", tune=tune, acceptance_rate = acceptance_rate)
@@ -34,11 +34,11 @@ posterior_chain
 
 # %%
 df_posterior_chain = ut.get_summary(posterior_chain)
-df_posterior_chain
+print(df_posterior_chain)
 
 # %%
 r_hat = ut.get_rhat(df_posterior_chain)
-r_hat
+print(r_hat)
 
 # %%
 az.plot_trace(posterior_chain)
