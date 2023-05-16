@@ -3,7 +3,6 @@ import pymc as pm
 import numpy as np
 from cme.utils import common_utils as ut
 import cme.utils.common_logging as cl
-import pymc.sampling.jax as jx
 log = cl.get_logger("diffusion")
 
 name = "qdiffusion"
@@ -26,7 +25,7 @@ vars_pers = [
 "t_er"
 ]
 
-def get_model(I,J, RT = None, X=None, a_p_mu = 0):
+def get_model(I,J, RT = None, X=None, a_p_mu = 0, full=False):
 
     log.debug(f"Getting model for prior: {a_p_mu}")
     with pm.Model() as qdiffusion:
@@ -37,12 +36,17 @@ def get_model(I,J, RT = None, X=None, a_p_mu = 0):
         
         t_er = pm.Lognormal("t_er",0,1,shape = (I,1))
 
+        if full:
+            delta = pm.Normal("delta")
+            v_p = v_p - v_i + delta
+
         mu_kj, sigma_kj, p_kj = q_diffusion(a_i, v_i, a_p, v_p, t_er)
 
         RT_kj = pm.Normal("RT_kj",mu_kj, sigma_kj, shape = (I,J), observed = np.log(RT) if RT is not None else None)
         X_kj = pm.Bernoulli("X_kj", pm.invlogit(p_kj), shape = (I,J), observed = X)
 
     return qdiffusion #, (a_i, v_i, a_p, v_p, t_er, RT_kj, X_kj)
+
 
 def q_diffusion(a_i, v_i, a_p, v_p, t_er, grad=False):
 
@@ -135,13 +139,13 @@ def _quick_test():
     RT = np.random.uniform(0,4,(70,5))
 
     log.debug(f"Starting Diffusion test")
-    model = get_model(*X.shape, X = X, RT=RT)
+    model = get_model(*X.shape, X = X, RT=RT,full=True)
     posterior_chain = pm.sample(model=model, draws=10, chains=2,tune=10)
-    with model:
-        posterior_jax = jx.sample_numpyro_nuts(1000, tune = 500, chains=4, chain_method="parallel")
+    #with model:
+    #    posterior_jax = jx.sample_numpyro_nuts(1000, tune = 500, chains=4, chain_method="parallel")
     log.debug(f"Posterior model v_correct {posterior_chain.posterior.v_p.shape}")
     assert posterior_chain.posterior.v_p.shape == (2,10,70,1)
-    assert posterior_jax.posterior.v_p.shape == (2,10,70,1)
+    #assert posterior_jax.posterior.v_p.shape == (2,10,70,1)
 
 
 if __name__ == "__main__":

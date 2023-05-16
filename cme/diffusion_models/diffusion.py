@@ -101,7 +101,7 @@ def _diffusion_RT_logp(RT, X, v, a, z, t_er):
     return total_logp 
 
 
-def _diffusion_default_priors(I, X):
+def _diffusion_default_priors_noncentral(I):
 
     with pm.Model() as model:
 
@@ -122,9 +122,60 @@ def _diffusion_default_priors(I, X):
 
     return model, v, a, z, t_er
 
+def _diffusion_default_priors_central(I):
+        
+    with pm.Model() as model:
+
+        v_m = pm.Normal("v_m", 2,3)
+        v_s = pm.HalfNormal("v_s", 2)
+        v = pm.Normal("v", v_m, v_s, shape=(I,1)) #v = ae.tensor.tile(v, (1,J))
+        #v = pm.Normal("v", 1,1, shape=(I,2)) #v = ae.tensor.tile(v, (1,J))
+
+        #a_m = pm.Gamma("a_m",1.5, 0.75, shape=(1,2))
+        a_m = pm.Gamma("a_m",0.1, 0.1)
+        a_s = pm.HalfNormal("a_s",0.1)
+        a = pm.Gamma("a",a_m,a_s,shape=(I,1))
+        #a = pm.Gamma("a",2,2,shape=(I,2))
+
+        z_m = pm.Normal("z_m",0.5,0.5)
+        z_s = pm.HalfNormal("z_s",0.05)
+        z = pm.LogitNormal("z",z_m,z_s,shape=(I,1)) # z ranges from 0 to a
+        #z = pm.Normal("z",1,1,shape=(I,2)) # z ranges from 0 to a
+
+        #z = pm.invlogit(z)
+
+        ter_m = pm.Gamma("ter_m",0.4, 0.2)
+        ter_s = pm.HalfNormal("ter_s",0.1)
+        t_er = pm.LogNormal("t_er",ter_m,ter_s,shape=(I,1))
+        #t_er = pm.Normal("t_er",1,1,shape=(I,2))
+        
+        #X = pm.Deterministic("X", X)
+
+        #v_ic = pm.LogNormal("v_ic",0,1,shape=(I,1)) #v = ae.tensor.tile(v, (1,J))
+        #a_ic = pm.Gamma("a_ic",2,2,shape=(I,1))
+        #z_ic = pm.Beta("z_ic", 1,1,shape=(I,1)) # z ranges from 0 to a
+        #t_er_ic = pm.HalfNormal("t_er_ic",2,shape=(I,1))
+
+        #V = at.switch(at.eq(X,1), -v[:,[0]], v[:,[1]])
+        #A = at.switch(at.eq(X,1), a[:,[0]], a[:,[1]])
+        #Z = at.switch(at.eq(X,1), 1-z[:,[0]], z[:,[1]])
+        #T_er = at.switch(at.eq(X,1), t_er[:,[0]], t_er[:,[1]])
+        
+        
+
+    return model, v, a, z, t_er
+
+def _diffusion_default_priors(I, type="Central|NonCentral"):
+    
+    if type == "NonCentral":
+        return _diffusion_default_priors_noncentral(I)
+    else:
+        return _diffusion_default_priors_central(I)
+
+
 def get_model(I, obs_X, obs_RT=None):
     
-    model, v, a, z, t_er = _diffusion_default_priors(I, obs_X)
+    model, v, a, z, t_er = _diffusion_default_priors(I)
        
     
     vars_RT = obs_X, v, a, z, t_er
@@ -193,7 +244,7 @@ def _test_likelihood_using_prior(I, J):
     #v_c,a_c,z_c, t_er_c, v_ic, a_ic, z_ic, t_er_ic = pm.draw([v_c,a_c,z_c, t_er_c, v_ic, a_ic, z_ic, t_er_ic])
 
     X = at.as_tensor(np.random.randint(0,2,(I, J)))
-    model, v, a, z, t_er = _diffusion_default_priors(X.shape[0], X)
+    model, v, a, z, t_er = _diffusion_default_priors(I)
     RT = at.as_tensor(np.random.uniform(0,4,(I,J)))
 
     lp = _calculate_RT_logp(RT - t_er, v, a, z)
