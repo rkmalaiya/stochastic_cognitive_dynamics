@@ -93,7 +93,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
    
    n_states = theta #_get_n_states(alpha, theta, tau, sigma)
 
-   Q = get_transition_matrix(alpha, tau, sigma, params, process, n_states)
+   Q = get_transition_matrix(alpha, tau, sigma, *params, process, n_states)
    
    if(initial == "EZ"):
       s_t = zeros(n_states)
@@ -119,7 +119,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
 def get_transition_matrix(alpha, tau, sigma, params, process, n_states):
     if (process=="Wiener"):
        mu, = params
-       if(len(mu) == 1):
+       if(not isinstance(mu, list)):
           Q = _create_Wiener_Q(n_states,alpha,tau,sigma,mu)
        elif(len(mu) > 1):
           Q = _create_pWiener_Q(n_states,alpha,tau,sigma,mu)
@@ -236,6 +236,9 @@ def load_randomwalk(file_pre_name):
 if __name__ == "__main__":
     theta, alpha, tau, sigma = 100, 1.5, 0.01, 1
 
+    mu = asarray([0.2])
+    get_transition_matrix(alpha, tau,sigma=sigma, params=mu, process="Wiener",n_states = theta)
+
 
     mu=asarray([0.2])
     RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener")
@@ -256,7 +259,7 @@ if __name__ == "__main__":
 
 
     v_p=asarray([0.2])
-    RT_mat, X_mat,v_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, I=10, J = 5, process="Wiener")
+    RT_mat, X_mat,v_arr,tr_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, I=10, J = 5, process="Wiener")
     log.debug(X_mat.shape)
     log.debug(RT_mat.shape)
     assert RT_mat.shape == (10,5)
@@ -268,7 +271,7 @@ if __name__ == "__main__":
     v_p=asarray([0.2])
     #v_i=asarray([2,0.5])
     v_i = asarray([0.5, 0.75, 1, 1.25])
-    RT_mat, X_mat,v_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, v_i,I=10, J = 8, process="DiffusionIRT")
+    RT_mat, X_mat,v_arr,tr_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, v_i,I=10, J = 8, process="DiffusionIRT")
     log.debug(X_mat.shape)
     log.debug(RT_mat.shape)
     assert RT_mat.shape == (10,8)
@@ -280,7 +283,7 @@ if __name__ == "__main__":
     v_p=repeat([0.01,0.02,0.05,0.08], (theta+2)/ 4)[0:theta+10]
     #v_i=asarray([2,0.5])
     v_i = asarray([0.5, 0.75, 1, 1.25])
-    RT_mat, X_mat,v_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, v_i,I=10, J = 8, process="DiffusionIRT")
+    RT_mat, X_mat,v_arr,tr_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, v_i,I=10, J = 8, process="DiffusionIRT")
     log.debug(X_mat.shape)
     log.debug(RT_mat.shape)
     assert RT_mat.shape == (10,8)

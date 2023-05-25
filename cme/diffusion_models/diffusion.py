@@ -36,10 +36,12 @@ def _diffusion_01w_s(tt, w):
     K_n = at.switch(at.gt(K_n,max_k), max_k, K_n)
 
     K=at.arange( -at.floor((K_n-1)/2), at.ceil((K_n-1)/2) + 1 )[:,np.newaxis, np.newaxis]
-
+    print("***********k",K.shape)
     prob_rt_std = ((w + 2*K) * at.exp( ((w+2*K)*(w+2*K)) /(2*tt)) ).sum(axis=0)
 
     prob_rt_std = prob_rt_std * 1/at.sqrt(2*np.pi*tt*tt*tt)
+
+    print("***********prob_rt_std",prob_rt_std.shape)
 
     return prob_rt_std
 
@@ -49,9 +51,17 @@ def _diffusion_01w_l(tt, w):
     K_n = at.max(at.floor(K_m))
     K_n = at.switch(at.gt(K_n, max_k), max_k, K_n)
 
-    K=at.arange(1,K_n+1)[:,np.newaxis, np.newaxis]
+    K=at.arange(1,K_n+1)#[:,np.newaxis, np.newaxis]
 
-    prob_rt_std = np.pi * (K * at.exp( - ((K*np.pi)**2 * tt/2) ) * at.sin( K * np.pi * w )).sum(axis=0) #exp becomes zero for large tt, hence adding eps
+    print("***********k",K.shape)
+
+    #prob_rt_std = np.pi * (K * at.exp( - ((K*np.pi)**2 * tt/2) ) * at.sin( K * np.pi * w )).sum(axis=0) #exp becomes zero for large tt, hence adding eps
+    
+    for k in K:
+        prob_rt_std += np.pi * (k * at.exp( - ((k*np.pi)**2 * tt/2) ) * at.sin(k * np.pi * w ))
+
+    print("***********prob_rt_std",prob_rt_std.shape)
+    
     return  prob_rt_std
 
 def _diffusion_01std(t,a,w):
@@ -63,9 +73,11 @@ def _diffusion_01std(t,a,w):
     prob_rt_std = at.switch(at.lt(lmda, 0), st, lt)
 
     # For Stability
-    prob_rt_final = at.switch(at.lt(prob_rt_std,0), 0, prob_rt_std) 
-    prob_rt_final = at.switch(at.isnan(prob_rt_final), 0, prob_rt_final)
-    prob_rt_final = at.switch(at.isinf(prob_rt_final), 0, prob_rt_final)
+    #prob_rt_final = at.switch(at.lt(prob_rt_std,0), 0, prob_rt_std) 
+    #prob_rt_final = at.switch(at.isnan(prob_rt_final), 0, prob_rt_final)
+    #prob_rt_final = at.switch(at.isinf(prob_rt_final), 0, prob_rt_final)
+
+    prob_rt_final = prob_rt_std
 
     return prob_rt_final #should return a scaler
 
@@ -77,8 +89,9 @@ def _calculate_RT_logp(DT, V, A, Z):
     
     prob_rt_std = _diffusion_01std(DT,A,W)
     
-    prob_rt = 1 / A*A * at.exp( (-W*A*V) - (V*V * DT)/2 ) * prob_rt_std
-    prob_rt = prob_rt.mean(axis=-1)
+    prob_rt = (1 / A*A) * (at.exp( (-W*A*V) - (V*V * DT)/2 )) * prob_rt_std
+    #prob_rt = (1 / A*A) * (at.exp( (-W*A*V) - (V*V * DT)/2 )) #* prob_rt_std
+    prob_rt = prob_rt #.mean(axis=-1)
 
     return prob_rt
     
@@ -91,14 +104,14 @@ def _diffusion_RT_logp(RT, X, v, a, z, t_er):
     T_er = at.switch(at.eq(X,1), t_er, t_er)
 
     prob_rt = _calculate_RT_logp(RT-T_er, V, A, Z)
-
     total_logp = prob_rt.sum()
 
-    # eps is used to stabilished log
-    total_logp = at.switch(at.eq(total_logp,0), 0, at.log(prob_rt)) 
-    total_logp = at.switch(at.isinf(total_logp), 0, at.log(prob_rt)) 
 
-    return total_logp 
+    # eps is used to stabilished log
+    #total_logp = at.switch(at.eq(total_logp,0), 0, at.log(prob_rt)) 
+    #total_logp = at.switch(at.isinf(total_logp), 0, at.log(prob_rt)) 
+
+    return at.log(total_logp) 
 
 
 def _diffusion_default_priors_noncentral(I):
@@ -167,15 +180,17 @@ def _diffusion_default_priors_central(I):
 
 def _diffusion_default_priors(I, type="Central|NonCentral"):
     
-    if type == "NonCentral":
-        return _diffusion_default_priors_noncentral(I)
-    else:
-        return _diffusion_default_priors_central(I)
+    return _diffusion_default_priors_noncentral(I)
+
+    #if type == "NonCentral":
+    #    return _diffusion_default_priors_noncentral(I)
+    #else:
+    #    return _diffusion_default_priors_central(I)
 
 
 def get_model(I, obs_X, obs_RT=None):
     
-    model, v, a, z, t_er = _diffusion_default_priors(I)
+    model, v, a, z, t_er = _diffusion_default_priors(I, type="NonCentral")
        
     
     vars_RT = obs_X, v, a, z, t_er
@@ -220,21 +235,6 @@ def _test_diffusion_01w():
     log.debug(f"Log per Trial: {np.round(logp_per_trial, decimals=5)}")
     assert np.round(logp_per_trial, decimals=5) == 0.00
 
-def _test_likelihood_using_error():
-    v = at.as_tensor([[-4.7455195,  3.5246989, -4.7455195,  3.5246989, -4.7455195]])
-    a = at.as_tensor([[0.10100832, 0.48082409, 0.10100832, 0.48082409, 0.10100832]])
-    z = at.as_tensor([[0.03027856, 0.33936817, 0.03027856, 0.33936817, 0.03027856]])
-    t_er = at.as_tensor([[2.17066536, 0.17037338, 0.17066536, 1.17037338, 2.17066536]])
-
-    RT = at.as_tensor([[0.36327581, 0.77126385, 1.02809235, 3.05141406, 0.37536871]])
-    X = at.as_tensor([[1, 0, 1, 0, 1]])
-
-    rt_logp = _calculate_RT_logp(RT - t_er, v, a, z)
-    log.debug(f"rt_logp:{rt_logp}")
-
-    assert rt_logp >= 0
-    log.info("Test Successful!")
-
 def _test_likelihood_using_prior(I, J):
     """
     Testing likelihood function
@@ -247,9 +247,10 @@ def _test_likelihood_using_prior(I, J):
     model, v, a, z, t_er = _diffusion_default_priors(I)
     RT = at.as_tensor(np.random.uniform(0,4,(I,J)))
 
-    lp = _calculate_RT_logp(RT - t_er, v, a, z)
+    #lp = _calculate_RT_logp(RT - t_er, v, a, z)
+    #lp_v = at.log(lp.sum()).eval()
 
-    lp_v = lp.eval()
+    lp_v = _diffusion_RT_logp(RT, X, v, a, z, t_er).eval()
 
     log.debug(f"lp: {lp_v}")
     #log.debug(f"priors:{prior_sample}")

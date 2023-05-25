@@ -106,11 +106,11 @@ def gen_sample_data(model):
     prior_data_ra = prior_data.prior["X_kj"].values.squeeze()[1,:,:]
     return(prior_data_rt, prior_data_ra)
 
-def sample_posterior_params(RT, X, samples_n, chains, tune, sampler="PYMC", acceptance_rate=0.90, likelihood=False, **kwargs):
+def sample_posterior_params(RT, X, samples_n, chains, tune, sampler="PYMC", acceptance_rate=0.90, likelihood=False, full=False, **kwargs):
     a_p_mu = 0
     if ("a_p_mu" in kwargs):
         a_p_mu = kwargs.get("a_p_mu")
-    model = get_model(*X.shape, X = X, RT=RT, a_p_mu = a_p_mu)
+    model = get_model(*X.shape, X = X, RT=RT, a_p_mu = a_p_mu,full=full)
     posterior_chain = ut.sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, likelihood=likelihood,**kwargs)
     return posterior_chain, model
 
