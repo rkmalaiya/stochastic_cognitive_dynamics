@@ -128,11 +128,13 @@ def _diffusion_default_priors_noncentral(I):
         t_er_pr = pm.Normal("t_er_pr",0,1,shape=(I,1)) # Non-Decision Time
 
 
-        v = m[0] + s[0] * v_pr
-        a = at.exp(m[1] + s[1] * a_pr)
-        z = pm.math.sigmoid(m[2] + s[2] * z_pr)
-        t_er = pm.math.sigmoid(m[3] + s[3] * t_er_pr)
+        v = pm.Deterministic("v", m[0] + s[0] * v_pr)
+        a = pm.Deterministic("a", at.exp(m[1] + s[1] * a_pr))
+        z = pm.Deterministic("z", pm.math.sigmoid(m[2] + s[2] * z_pr))
+        t_er = pm.Deterministic("t_er", pm.math.sigmoid(m[3] + s[3] * t_er_pr))
         
+
+
         #v = pm.Normal("v",0,1)
         #a = pm.Gamma("a",3,2)
         #z = pm.Beta("z", 1,1)
