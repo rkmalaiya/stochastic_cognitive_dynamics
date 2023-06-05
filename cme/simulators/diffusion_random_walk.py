@@ -89,7 +89,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
    steps = []
    RT = -1
    X = -1
-   max_steps = 40000
+   max_steps = 4000
    
    n_states = theta #_get_n_states(alpha, theta, tau, sigma)
 
@@ -172,10 +172,10 @@ def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU|Diff
    v_arr = []
    tr_arr = []
 
-   print("Generating data for participant")
+   #print("Generating data for participant", end=",")
 
    for i in range(I):
-      print(f"{i}")
+      #print(f"{i}", end=",")
       if (len(params) == 1):
          v_s, = params   
          v_s = v_s + random.default_rng().normal(0,0.1**2)
@@ -246,7 +246,7 @@ if __name__ == "__main__":
     assert len(X_arr) == 10
     log.debug(X_arr)
     log.debug(RT_arr)
-    log.debug("test successful")
+    log.debug("test successful1")
 
 
     mu=asarray([-0.2])
@@ -255,7 +255,7 @@ if __name__ == "__main__":
     assert len(X_arr) == 10
     log.debug(X_arr)
     log.debug(RT_arr)
-    log.debug("test successful")
+    log.debug("test successful2")
 
 
     v_p=asarray([0.2])
@@ -265,7 +265,7 @@ if __name__ == "__main__":
     assert RT_mat.shape == (10,5)
     assert X_mat.shape == (10,5)
     assert len(v_arr) == 10
-    log.debug("test successful")
+    log.debug("test successful3")
     
 
     v_p=asarray([0.2])
@@ -277,7 +277,7 @@ if __name__ == "__main__":
     assert RT_mat.shape == (10,8)
     assert X_mat.shape == (10,8)
     assert asarray(v_arr).squeeze().shape == (10,4)
-    log.debug("test successful")
+    log.debug("test successful4")
 
 
     v_p=repeat([0.01,0.02,0.05,0.08], (theta+2)/ 4)[0:theta+10]
@@ -289,4 +289,4 @@ if __name__ == "__main__":
     assert RT_mat.shape == (10,8)
     assert X_mat.shape == (10,8)
     assert asarray(v_arr).squeeze().shape == (10,4,100)
-    log.debug("test successful")
+    log.debug("test successful5")

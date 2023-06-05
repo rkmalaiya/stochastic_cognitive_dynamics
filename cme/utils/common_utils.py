@@ -11,6 +11,10 @@ _cores=4
 def sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, likelihood=True, **kwargs):
     if sampler == "PYMC":
         return _sample_posterior_PyMC(model, samples_n, chains, tune, acceptance_rate, likelihood)
+    elif sampler == "MH":
+        return _sample_posterior_MH(model, samples_n, chains, tune, acceptance_rate, likelihood)
+    elif sampler == "DE":
+        return _sample_posterior_DE(model, samples_n, chains, tune, acceptance_rate, likelihood)
     elif sampler == "JAX":
         return _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate, likelihood)
     elif sampler == "SMC":
@@ -38,11 +42,38 @@ def _calculate_waic(posterior_chain, var_name):
     w = az.waic(posterior_chain, var_name=var_name)#,scale='negative_log')
     return w
 
+def _sample_posterior_MH(model, samples_n, chains, tune, acceptance_rate, likelihood):
+    with model:
+        log.debug(model.free_RVs)
+        posterior = pm.sample(samples_n, tune = tune, step=pm.Metropolis(),
+        return_inferencedata=True, chains=chains,
+        nuts_sampler="pymc",
+        cores=_cores, progressbar=True)
+
+    if likelihood:
+        posterior = _calculate_likelihood(posterior, model)
+        #posterior = pm.sample(10000, step = pm.Metropolis(), return_inferencedata=True, cores=4)
+
+    return posterior 
+
+def _sample_posterior_DE(model, samples_n, chains, tune, acceptance_rate, likelihood):
+    with model:
+        log.debug(model.free_RVs)
+        posterior = pm.sample(samples_n, tune = tune, step=pm.DEMetropolis(),
+        return_inferencedata=True, chains=chains,
+        nuts_sampler="pymc",
+        cores=_cores, progressbar=True)
+
+    if likelihood:
+        posterior = _calculate_likelihood(posterior, model)
+        #posterior = pm.sample(10000, step = pm.Metropolis(), return_inferencedata=True, cores=4)
+
+    return posterior 
 
 def _sample_posterior_PyMC(model, samples_n, chains, tune, acceptance_rate, likelihood):
     with model:
         log.debug(model.free_RVs)
-        posterior = pm.sample(samples_n, tune = tune, step=pm.NUTS(target_accept=0.99,max_treedepth=15),
+        posterior = pm.sample(samples_n, tune = tune, step=pm.NUTS(target_accept=acceptance_rate,max_treedepth=25),
         return_inferencedata=True, chains=chains,
         nuts_sampler="pymc",
         cores=_cores, progressbar=True)
@@ -58,7 +89,7 @@ def _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate,likeli
 
     with model:
         log.debug(model.free_RVs)
-        posterior = pm.sample(samples_n, tune = tune, step=pm.NUTS(target_accept=0.99,max_treedepth=20),
+        posterior = pm.sample(samples_n, tune = tune, step=pm.NUTS(target_accept=acceptance_rate,max_treedepth=20),
         return_inferencedata=True, chains=chains,
         nuts_sampler="numpyro",
         cores=_cores, progressbar=True)
