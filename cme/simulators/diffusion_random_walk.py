@@ -93,7 +93,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
    
    n_states = theta #_get_n_states(alpha, theta, tau, sigma)
 
-   Q = get_transition_matrix(alpha, tau, sigma, *params, process, n_states)
+   Q = get_transition_matrix(alpha, tau, sigma, *params, process=process, n_states=n_states)
    
    if(initial == "EZ"):
       s_t = zeros(n_states)
@@ -116,15 +116,14 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
          break
    return(steps, RT, X)
 
-def get_transition_matrix(alpha, tau, sigma, params, process, n_states):
+def get_transition_matrix(alpha, tau, sigma, *params, process, n_states):
     if (process=="Wiener"):
        mu, = params
-       if(not isinstance(mu, list)):
+       if(len(mu) == 1):
           Q = _create_Wiener_Q(n_states,alpha,tau,sigma,mu)
-       elif(len(mu) > 1):
-          Q = _create_pWiener_Q(n_states,alpha,tau,sigma,mu)
        else:
-          raise Exception("Missing mu")
+          Q = _create_pWiener_Q(n_states,alpha,tau,sigma,mu)
+
     elif (process == "OU"):
        delta, gamma = params
        Q = _create_OU_Q(n_states,alpha,tau, sigma, delta, gamma)
@@ -199,7 +198,7 @@ def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU|Diff
          batch = J//v_l
          v_arr_ind = []
          for v_i in v_i_s:
-            params_for_gen = [v_p_s / v_i]
+            params_for_gen = [v_p_s / v_i,] #changed here
             v_arr_ind.append(params_for_gen)
             for ind in range(0,J, batch):
                rt, x, _ = gen_rt_x(theta, alpha, tau, sigma, *params_for_gen, samples=batch, process="Wiener", initial=initial,njobs=njobs)
@@ -237,7 +236,12 @@ if __name__ == "__main__":
     theta, alpha, tau, sigma = 100, 1.5, 0.01, 1
 
     mu = asarray([0.2])
-    get_transition_matrix(alpha, tau,sigma=sigma, params=mu, process="Wiener",n_states = theta)
+    get_transition_matrix(alpha, tau,sigma, mu, process="Wiener",n_states = theta)
+
+    mu = repeat([0.01,0.02,0.05,0.08], (theta+2)/ 4)[0:theta+10]
+    get_transition_matrix(alpha, tau,sigma, mu, process="Wiener",n_states = theta)
+    log.debug("test successful0")
+
 
 
     mu=asarray([0.2])
