@@ -37,7 +37,7 @@ def _diffusion_01w_s(tt, w):
 
     K=at.arange( -at.floor((K_n-1)/2), at.ceil((K_n-1)/2) + 1 )[:,np.newaxis, np.newaxis]
     #print("***********k",K.shape)
-    prob_rt_std = ((w + 2*K) * at.exp( ((w+2*K)*(w+2*K)) /(2*tt)) ).sum(axis=0)
+    prob_rt_std = ((w + 2*K) * at.exp(- ((w+2*K)*(w+2*K)) /(2*tt)) ).sum(axis=0)
 
     prob_rt_std = prob_rt_std * 1/at.sqrt(2*np.pi*tt*tt*tt)
 
