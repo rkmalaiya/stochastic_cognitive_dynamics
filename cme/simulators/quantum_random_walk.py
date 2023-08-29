@@ -88,8 +88,9 @@ if __name__ == "__main__":
     assert df_st.shape[0] == num_states * timesteps
     assert df_avg_conf.shape[0] == timesteps
     import matplotlib.pyplot as plt
-    a=df_avg_conf.iloc[:,1].plot()
-    
+
+
+    df_avg_conf.iloc[:,1].plot()
 
     import seaborn as sns
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
