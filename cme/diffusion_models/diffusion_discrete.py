@@ -97,9 +97,8 @@ def model(n_states, start_width, rt, s_0, Mr):
     
     npy.factor(f"likelihood", lkl)
 
-def sample_posterior_params(DT, X, num_warmup=100, samples_n=500):
+def sample_posterior_params(DT, X, num_warmup=100, samples_n=500, n_states=7, start_width=1):
 
-    n_states, start_width = 7, 1
     s_0, Mr = _get_initial_state(n_states, start_width)
 
     rng_key = random.PRNGKey(0)
@@ -152,14 +151,14 @@ if __name__ == "__main__":
     print("Mc", Mc.shape)
     print("Pt", Pt.shape)
 
-    s_0, Mr = _get_initial_state(7, 1)
-    Pt, Mc, Pcorrect = likelihood(7, 1, npx.linspace(0.1,1.5,rotation_RT_n.shape[0]), 1,rotation_RT_n, s_0, Mr)
+    s_0, Mr = _get_initial_state(53, 5)
+    Pt, Mc, Pcorrect = likelihood(53, 5, npx.linspace(0.1,2.5,rotation_RT_n.shape[0]), 1,rotation_RT_n, s_0, Mr)
     print("Pcorrect", Pcorrect)
     print("Mc", Mc.shape)
     print("Pt", Pt.shape)
     #plt.show()
 
-    mcmc_chain = sample_posterior_params(rotation_RT_n, None, num_warmup=10, samples_n=50)
+    mcmc_chain = sample_posterior_params(rotation_RT_n, None, num_warmup=10, samples_n=50, n_states=7, start_width=3)
     mcmc_chain.print_summary()
 
 
