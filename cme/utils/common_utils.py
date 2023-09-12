@@ -9,14 +9,15 @@ log = cl.get_logger("Common-Utils")
 _cores=4
 
 def sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, likelihood=True, **kwargs):
+    nuts_sampler = kwargs.get("nuts_sampler")
     if sampler == "PYMC":
         return _sample_posterior_PyMC(model, samples_n, chains, tune, acceptance_rate, likelihood)
     elif sampler == "MH":
         return _sample_posterior_MH(model, samples_n, chains, tune, acceptance_rate, likelihood)
     elif sampler == "DE":
         return _sample_posterior_DE(model, samples_n, chains, tune, acceptance_rate, likelihood)
-    elif sampler == "JAX":
-        return _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate, likelihood)
+    elif sampler == "EXT":
+        return _sample_posterior_EXT(model, samples_n, chains, tune, acceptance_rate, likelihood, "nutpie" if nuts_sampler is None else nuts_sampler)
     elif sampler == "SMC":
         return _sample_posterior_SMC(model, samples_n, chains)
     elif sampler == "VI":
@@ -84,14 +85,14 @@ def _sample_posterior_PyMC(model, samples_n, chains, tune, acceptance_rate, like
 
     return posterior 
 
-def _sample_posterior_JAX(model, samples_n, chains, tune, acceptance_rate,likelihood):
+def _sample_posterior_EXT(model, samples_n, chains, tune, acceptance_rate,likelihood, nuts_sampler="nutpie"):
     #“pymc”, “nutpie”, “blackjax”, “numpyro”
 
     with model:
         log.debug(model.free_RVs)
         posterior = pm.sample(samples_n, tune = tune, step=pm.NUTS(target_accept=acceptance_rate,max_treedepth=20),
         return_inferencedata=True, chains=chains,
-        nuts_sampler="numpyro",
+        nuts_sampler=nuts_sampler,
         cores=_cores, progressbar=True)
 
     if likelihood:
