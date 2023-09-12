@@ -48,8 +48,8 @@ def _diffusion_01w_s(tt, w):
 def _diffusion_01w_l(tt, w):
 
     K_m = _get_count_l(tt)
-    K_n = at.max(at.floor(K_m))
-    K_n = at.switch(at.gt(K_n, max_k), max_k, K_n)
+    K_n = 200 #at.max(at.floor(K_m))
+    #K_n = at.switch(at.gt(K_n, max_k), max_k, K_n)
 
     K=at.arange(1,K_n+1)[:,np.newaxis, np.newaxis]
 
@@ -67,10 +67,10 @@ def _diffusion_01w_l(tt, w):
 def _diffusion_01std(t,a,w):
 
     tt = t/(a**2)
-    lmda = _get_lambda(tt)
-    st = _diffusion_01w_s(tt, w)
+    #lmda = _get_lambda(tt)
+    #st = _diffusion_01w_s(tt, w)
     lt = _diffusion_01w_l(tt, w)
-    prob_rt_std = at.switch(at.lt(lmda, 0), st, lt)
+    prob_rt_std = lt #at.switch(at.lt(lmda, 0), st, lt)
 
     # For Stability
     #prob_rt_final = at.switch(at.lt(prob_rt_std,0), 0, prob_rt_std) 
@@ -103,7 +103,7 @@ def _diffusion_RT_logp(RT, X, v, a, z, t_er):
     prob_rt = _calculate_RT_logp(RT-T_er, V, A, Z)
     prob_rt = at.switch(at.isinf(prob_rt), 0, prob_rt) 
     prob_rt = at.switch(at.isnan(prob_rt), 0, prob_rt)
-    prob_rt = prob_rt.sum()
+    prob_rt = at.log(prob_rt.sum())
 
     # eps is used to stabilished log
     total_logp = at.switch(at.eq(prob_rt,0), 0, at.log(prob_rt)) 
