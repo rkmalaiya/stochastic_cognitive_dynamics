@@ -97,7 +97,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
    
    if(initial == "EZ"):
       s_t = zeros(n_states)
-      s_t[round(n_states/2)] = 1
+      s_t[int(round(n_states/2))] = 1
    else:
       s_t,_ = _get_initial_state(n_states)
    
