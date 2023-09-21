@@ -1,17 +1,11 @@
 #%%
-import jax.numpy as np
-import jax
+import torch as np
 import numpy as npy
-import jax.lax as lx
 import cme.utils.common_logging as cl
 from cme.utils import common_utils as ut
-import numpyro as pyro
-import numpyro.distributions as dist
-import jax.scipy as sy
-from jax import random
-from numpyro.infer import MCMC, NUTS, SA, BarkerMH
-import numpyro
-numpyro.set_host_device_count(8)
+import pyro
+import pyro.distributions as dist
+from pyro.infer import MCMC, NUTS, Predictive
 
 
 # enable on-the-fly graph computations
@@ -29,7 +23,7 @@ def _get_count_l(tt):
 
     K = np.sqrt((-2) * np.log(np.pi * tt * err) / ((np.pi**2) * tt) )
     #K = np.vectorize(lambda K, tt: K if K > 1/(np.pi * np.sqrt(tt)) else 1 / (np.pi * np.sqrt(tt)))(K, tt)
-    K = np.where(lx.lt(K, 1/(np.pi * np.sqrt(tt))), K, 1 / (np.pi * np.sqrt(tt)))
+    K = np.where(np.lt(K, 1/(np.pi * np.sqrt(tt))), K, 1 / (np.pi * np.sqrt(tt)))
     loop_big.append(K.max())
     #K = np.switch(np.gt(K, 1/(np.pi * np.sqrt(tt)) ), K, (1 / (np.pi * np.sqrt(tt)) ) ) # based on RWiener package in rlang
     return K
@@ -52,7 +46,7 @@ def _diffusion_01w_s(tt, w):
     K_n = 200 #np.nanmax(np.ceil(K_m))
     #K_n = np.switch(np.gt(K_n,max_k), max_k, K_n)
     #print("small size - loop count", K_n.max(), np.nanmax(K_m))
-    K=np.arange( -npy.floor((K_n-1)/2), npy.ceil((K_n-1)/2) + 1 )[:,np.newaxis, np.newaxis]
+    K=np.arange( -npy.floor((K_n-1)/2), npy.ceil((K_n-1)/2) + 1 )[:,npy.newaxis, npy.newaxis]
     #print("***********k",K.shape)
     prob_rt_std = 0
     #for K in K1:
@@ -70,7 +64,7 @@ def _diffusion_01w_l(tt, w):
     K_n = 200 #np.nanmax(np.ceil(K_m))
     #K_n = np.switch(np.gt(K_n, max_k), max_k, K_n)
     #print("large size - loop count", K_n, K_m.shape)
-    K=np.arange(1,K_n+1)[:,np.newaxis, np.newaxis]
+    K=np.arange(1,K_n+1)[:,npy.newaxis, npy.newaxis]
 
     #print("***********k_l",K.shape)
 
@@ -120,8 +114,8 @@ def model(I, J, DT, X):
 
     v = pyro.deterministic("v", m[0] + s[0] * v_pr)
     a = pyro.deterministic("a", np.exp(m[1] + s[1] * a_pr))
-    z = pyro.deterministic("z", sy.special.expit(m[2] + s[2] * z_pr))
-    t_er = pyro.deterministic("t_er", sy.special.expit(m[3] + s[3] * t_er_pr))
+    z = pyro.deterministic("z", np.special.expit(m[2] + s[2] * z_pr))
+    t_er = pyro.deterministic("t_er", np.special.expit(m[3] + s[3] * t_er_pr))
 
     
     V = np.where(X==1, -v, v)
@@ -135,11 +129,9 @@ def model(I, J, DT, X):
 
 def sample_posterior_params(DT, X, num_warmup=100,samples_n=500,target_accept_prob=0.80):
     I,J = DT.shape
-    rng_key = random.PRNGKey(0)
     kernel = NUTS(model, target_accept_prob=target_accept_prob)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=4)
-    mcmc_chain.run(
-        rng_key, I=I, J=J, DT=DT, X=X)
+    mcmc_chain.run(I=I, J=J, DT=DT, X=X)
     return mcmc_chain
 
 #%%
@@ -176,21 +168,21 @@ if __name__ == "__main__":
 
     DT_arr = []
     for i in range(0,50):
-        DT = np.linspace(i+1,0.1,100)
-        DT = jax.random.shuffle(jax.random.PRNGKey(0), DT)
+        DT = npy.linspace(i+1,0.1,100)
+        #DT = jax.random.shuffle(jax.random.PRNGKey(0), DT)
         DT_arr.append(DT)
 
-    DT = np.array(DT_arr)
+    DT = npy.array(DT_arr)
     X = npy.random.randint(0,2,(50,100))
 
-    V = np.linspace(np.asarray([1]),-1,50)
-    A = np.linspace(np.asarray([5]),0.1,50)
-    Z = np.linspace(np.asarray([1]),0,50)
+    V = npy.linspace(npy.asarray([1]),-1,50)
+    A = npy.linspace(npy.asarray([5]),0.1,50)
+    Z = npy.linspace(npy.asarray([1]),0,50)
 
 
-    V = jax.random.shuffle(jax.random.PRNGKey(0), V)
-    A = jax.random.shuffle(jax.random.PRNGKey(0), A)
-    Z = jax.random.shuffle(jax.random.PRNGKey(0), Z)
+    #V = jax.random.shuffle(jax.random.PRNGKey(0), V)
+    #A = jax.random.shuffle(jax.random.PRNGKey(0), A)
+    #Z = jax.random.shuffle(jax.random.PRNGKey(0), Z)
 
     prob_rt = _calculate_RT_logp(DT, V, A, Z)
     print("*****************", prob_rt)
