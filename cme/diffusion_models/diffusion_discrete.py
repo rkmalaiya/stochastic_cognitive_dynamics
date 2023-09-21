@@ -151,8 +151,8 @@ if __name__ == "__main__":
     print("Mc", Mc.shape)
     print("Pt", Pt.shape)
 
-    s_0, Mr = _get_initial_state(53, 5)
-    Pt, Mc, Pcorrect = likelihood(53, 5, npx.linspace(0.1,2.5,rotation_RT_n.shape[0]), 1,rotation_RT_n, s_0, Mr)
+    s_0, Mr = _get_initial_state(103, 11)
+    Pt, Mc, Pcorrect = likelihood(103, 11, npx.linspace(0.1,1.5,rotation_RT_n.shape[0]), 1,rotation_RT_n, s_0, Mr)
     print("Pcorrect", Pcorrect)
     print("Mc", Mc.shape)
     print("Pt", Pt.shape)
