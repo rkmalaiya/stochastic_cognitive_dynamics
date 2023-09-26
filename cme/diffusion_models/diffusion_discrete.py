@@ -93,7 +93,7 @@ def model(n_states, start_width, rt, s_0, Mr):
     #with npy.plate('I', I):
 
     mu =  npy.sample(f"mu", dist.Normal(0,5),sample_shape=(I,))
-    _,lkl ,_ = likelihood(n_states, start_width, mu, 1, rt, s_0, Mr)
+    _,lkl ,_ = likelihood(n_states, mu, 1, rt, s_0, Mr)
     npy.factor(f"likelihood", lkl)
 
 def sample_posterior_params(DT, X, num_warmup=100, samples_n=500, n_states=7, start_width=1):
@@ -148,7 +148,7 @@ if __name__ == "__main__":
     s_0, Mr = _get_initial_state(101, 11)
     Pcorrect_arr = []
     for mu in npx.linspace(0.1,1.5):
-        Pt, Mc, Pcorrect = likelihood(101, 11, [mu], 1,rotation_RT_n, s_0, Mr)
+        Pt, Mc, Pcorrect = likelihood(101, [mu], 1,rotation_RT_n, s_0, Mr)
         Pcorrect_arr.append(Pcorrect)
 
     print("Pcorrect", np.asarray(Pcorrect_arr))
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     print("Pt", Pt.shape)
 
     s_0, Mr = _get_initial_state(103, 11)
-    Pt, Mc, Pcorrect = likelihood(103, 11, npx.linspace(0.1,1.5,rotation_RT_n.shape[0]), 1,rotation_RT_n, s_0, Mr)
+    Pt, Mc, Pcorrect = likelihood(103, npx.linspace(0.1,1.5,rotation_RT_n.shape[0]), 1,rotation_RT_n, s_0, Mr)
     print("Pcorrect", Pcorrect)
     print("Mc", Mc.shape)
     print("Pt", Pt.shape)
