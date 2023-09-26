@@ -1,8 +1,5 @@
 #%%
-from pytensor import config
-config.floatX = "float32"
-config.openmp = True
-config.openmp_elemwise_minsize=0
+
 
 import pymc as pm
 import numpy as np
