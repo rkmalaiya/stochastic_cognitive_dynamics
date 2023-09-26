@@ -6,6 +6,7 @@ import pyro as npy
 import pyro.distributions as dist
 from pyro.infer import MCMC, NUTS
 import numpy as n
+import arviz as az
 #npy.set_host_device_count(4)
 
 def _buildK(n_states, mu, sigma, n_part): 
@@ -180,7 +181,7 @@ if __name__ == "__main__":
     print("test 6")
 
     mcmc_chain = sample_posterior_params(rotation_RT_n, None, rotation_RT_n.shape[0] ,num_warmup=10, samples_n=50, n_states=7, start_width=3)
-    mcmc_chain.print_summary()
+    az.summary(mcmc_chain)
     print("test 7")
 
 
