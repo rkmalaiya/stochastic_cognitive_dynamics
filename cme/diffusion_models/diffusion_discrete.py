@@ -5,8 +5,8 @@ import pandas as pd
 import numpyro as npy
 import numpyro.distributions as dist
 from jax import random
-from numpyro.infer import MCMC, NUTS, SA
-npy.set_host_device_count(4)
+from numpyro.infer import MCMC, NUTS, SA, HMCECS
+npy.set_host_device_count(16)
 
 def _buildK(n_states, mu, sigma): 
 # m = number of states  
@@ -41,7 +41,7 @@ def _get_initial_state(n_states, start_width):
             Mr = Mr.at[i,i].set(1)
     return s_0, Mr
 
-def likelihood(n_states, start_width, mu, sigma,rt,s_0, Mr):
+def likelihood(n_states, mu, sigma,rt,s_0, Mr):
     K= _buildK(n_states, mu=mu, sigma=sigma)
 
     Mid = int((n_states+1)/2)
@@ -64,7 +64,7 @@ def perform_walk(n_states, start_width, mu, sigma,timesteps=1.5, delta=0.01):
 
     for rt in list(np.arange(0,timesteps,step=delta)):
         
-        Pt, Mc, Pcorrect = likelihood(n_states, start_width, mu, sigma,npx.asarray([[rt]]),s_0, Mr)
+        Pt, Mc, Pcorrect = likelihood(n_states, mu, sigma,npx.asarray([[rt]]),s_0, Mr)
 
         state_prob.append(Pt)
         correct_prob.append(Pcorrect)
@@ -91,10 +91,9 @@ def perform_walk(n_states, start_width, mu, sigma,timesteps=1.5, delta=0.01):
 def model(n_states, start_width, rt, s_0, Mr):
     I,J = rt.shape
     #with npy.plate('I', I):
-        
+
     mu =  npy.sample(f"mu", dist.Normal(0,5),sample_shape=(I,))
     _,lkl ,_ = likelihood(n_states, start_width, mu, 1, rt, s_0, Mr)
-    
     npy.factor(f"likelihood", lkl)
 
 def sample_posterior_params(DT, X, num_warmup=100, samples_n=500, n_states=7, start_width=1):
@@ -102,10 +101,17 @@ def sample_posterior_params(DT, X, num_warmup=100, samples_n=500, n_states=7, st
     s_0, Mr = _get_initial_state(n_states, start_width)
 
     rng_key = random.PRNGKey(0)
+
+    #kernel = HMCECS(NUTS(model), num_blocks=10)
+    #mcmc_chain = MCMC(kernel, num_warmup=1000, num_samples=1000, num_chains=4)
+    #mcmc_chain.run(rng_key, n_states, start_width, DT, s_0, Mr)
+
+
+
     kernel = NUTS(model)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=4)
-    mcmc_chain.run(
-        rng_key, n_states, start_width, DT, s_0, Mr)
+    mcmc_chain.run(rng_key, n_states, start_width, DT, s_0, Mr)
+
     return mcmc_chain
 
 if __name__ == "__main__":

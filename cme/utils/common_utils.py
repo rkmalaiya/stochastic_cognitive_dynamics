@@ -1,3 +1,11 @@
+_cores=8
+
+from pytensor import config
+config.floatX = "float32"
+#config.openmp = True
+#config.openmp_elemwise_minsize=100
+
+
 import pymc as pm
 import arviz as az
 import numpy as np
@@ -5,8 +13,6 @@ import pandas as pd
 import cme.utils.common_logging as cl
 
 log = cl.get_logger("Common-Utils")
-
-_cores=4
 
 def sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, likelihood=True, **kwargs):
     nuts_sampler = kwargs.get("nuts_sampler")
@@ -116,9 +122,10 @@ def _calculate_likelihood(posterior,model):
     posterior_chain = pm.compute_log_likelihood(posterior, model=model)
     return posterior_chain
 
-def sample_post_pred(model, posterior, extend=True):
+def sample_post_pred(model, posterior_ch, extend=True):
     with model:
-        posterior_pred = pm.sample_posterior_predictive(posterior, extend_inferencedata=extend)
+        posterior_pred = pm.sample_posterior_predictive(posterior_ch.sel(draw=slice(None, None, 2)), extend_inferencedata=extend) #.sel(chain=[0])
+        #posterior_ch.extend(pm.sample_posterior_predictive(posterior_ch.sel(draw=slice(None, None, 5)).posterior.expand_dims(pred_id=5)))
     return posterior_pred
 
 def sample_prior_pred(model, samples_n=1000):

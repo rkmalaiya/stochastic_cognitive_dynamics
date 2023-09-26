@@ -207,7 +207,7 @@ def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU|Diff
          v_arr.append(v_arr_ind)      
       else:
          v_arr.append(params[0])
-         rt, x, tr = gen_rt_x(theta, alpha, tau, sigma, *params, samples=J, process=process, initial=initial)
+         rt, x, tr = gen_rt_x(theta, alpha, tau, sigma, *params, samples=J, process=process, initial=initial,njobs=njobs)
          X[i,:] = x
          RT[i,:] = rt
          tr_arr.append(tr)
@@ -245,7 +245,7 @@ if __name__ == "__main__":
 
 
     mu=asarray([0.2])
-    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener")
+    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener",njobs=8)
     assert len(RT_arr) == 10
     assert len(X_arr) == 10
     log.debug(X_arr)
@@ -254,7 +254,7 @@ if __name__ == "__main__":
 
 
     mu=asarray([-0.2])
-    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener")
+    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener",njobs=8)
     assert len(RT_arr) == 10
     assert len(X_arr) == 10
     log.debug(X_arr)
