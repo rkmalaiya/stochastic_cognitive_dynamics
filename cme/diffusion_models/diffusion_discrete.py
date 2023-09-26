@@ -106,8 +106,6 @@ def sample_posterior_params(DT, X, num_warmup=100, samples_n=500, n_states=7, st
     #mcmc_chain = MCMC(kernel, num_warmup=1000, num_samples=1000, num_chains=4)
     #mcmc_chain.run(rng_key, n_states, start_width, DT, s_0, Mr)
 
-
-
     kernel = NUTS(model)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=4)
     mcmc_chain.run(rng_key, n_states, start_width, DT, s_0, Mr)
