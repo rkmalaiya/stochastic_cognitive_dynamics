@@ -41,7 +41,7 @@ def _get_initial_state(n_states, start_width):
             Mr = Mr.at[i,i].set(1)
     return s_0, Mr
 
-def likelihood(n_states, mu, sigma,rt,s_0, Mr):
+def likelihood(n_states, mu, sigma,rt, ra, s_0, Mr):
     K= _buildK(n_states, mu=mu, sigma=sigma)
 
     Mid = int((n_states+1)/2)
@@ -51,8 +51,9 @@ def likelihood(n_states, mu, sigma,rt,s_0, Mr):
     phi=ln.expm(rt*K) # rt:I,J,1,1; K:I,J,m,m
     Pt = npx.dot(phi, s_0)
     Mc = npx.dot(mv,Pt)
-    Pcorrect = npx.dot(Mr,Pt).sum(axis=-2) # adding up the probabilities over states for a given response
-
+    Pcorrect = npx.dot(Mr,Pt)
+    Pcorrect = Pcorrect.sum(axis=0).squeeze() # adding up the probabilities over states for a given response
+    Pcorrect = npx.where(ra==0, 1-Pcorrect, Pcorrect)
     return Pt, Mc, Pcorrect.sum() #likelihood hence adding up over all responses.
 
 def perform_walk(n_states, start_width, mu, sigma,timesteps=1.5, delta=0.01):
@@ -64,7 +65,7 @@ def perform_walk(n_states, start_width, mu, sigma,timesteps=1.5, delta=0.01):
 
     for rt in list(np.arange(0,timesteps,step=delta)):
         
-        Pt, Mc, Pcorrect = likelihood(n_states, mu, sigma,npx.asarray([[rt]]),s_0, Mr)
+        Pt, Mc, Pcorrect = likelihood(n_states, mu, sigma,npx.asarray([[rt]]), npx.asarray([[1]]), s_0, Mr)
 
         state_prob.append(Pt)
         correct_prob.append(Pcorrect)
@@ -88,13 +89,16 @@ def perform_walk(n_states, start_width, mu, sigma,timesteps=1.5, delta=0.01):
 
     return df_st, df_avg_conf, df_avg_corr
 
-def model(n_states, start_width, rt, s_0, Mr):
+def model(n_states, start_width, rt, ra, s_0, Mr):
     I,J = rt.shape
-    #with npy.plate('I', I):
-
-    mu =  npy.sample(f"mu", dist.Normal(0,5),sample_shape=(I,))
-    _,lkl ,_ = likelihood(n_states, mu, 1, rt, s_0, Mr)
-    npy.factor(f"likelihood", lkl)
+    with npy.plate('I', I) as ind:
+        mu =  npy.sample(f"mu", dist.Normal(0,5)) #,sample_shape=(I,)
+    
+    with npy.plate('Obs', I,subsample_size=10) as ind:
+        #mu =  npy.sample(f"mu", dist.Normal(0,5)) #,sample_shape=(I,)
+    
+        _,lkl ,_ = likelihood(n_states, mu[ind], 1, npx.asarray(rt)[ind], npx.asarray(ra)[ind], s_0, Mr)
+        npy.factor(f"likelihood", lkl)
 
 def sample_posterior_params(DT, X, num_warmup=100, samples_n=500, n_states=7, start_width=1):
 
@@ -102,13 +106,13 @@ def sample_posterior_params(DT, X, num_warmup=100, samples_n=500, n_states=7, st
 
     rng_key = random.PRNGKey(0)
 
-    #kernel = HMCECS(NUTS(model), num_blocks=10)
-    #mcmc_chain = MCMC(kernel, num_warmup=1000, num_samples=1000, num_chains=4)
-    #mcmc_chain.run(rng_key, n_states, start_width, DT, s_0, Mr)
-
-    kernel = NUTS(model)
+    kernel = HMCECS(NUTS(model), num_blocks=10)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=4)
-    mcmc_chain.run(rng_key, n_states, start_width, DT, s_0, Mr)
+    mcmc_chain.run(rng_key, n_states, start_width, DT, X, s_0, Mr)
+
+    #kernel = NUTS(model)
+    #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=4)
+    #mcmc_chain.run(rng_key, n_states, start_width, DT, X, s_0, Mr)
 
     return mcmc_chain
 

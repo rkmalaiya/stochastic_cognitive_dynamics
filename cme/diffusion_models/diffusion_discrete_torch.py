@@ -143,11 +143,7 @@ if __name__ == "__main__":
     #mcmc_chain = sample_posterior_params(DT, None, samples_n=500)
     #mcmc_chain.print_summary()
 
-   
-#%%  
-import numpy as n
-if __name__ == "__main__":
-    rotation_RT = n.loadtxt("../../examples/data/final_project_rt.csv",delimiter=",", skiprows=1)
+    rotation_RT = n.loadtxt("examples/data/final_project_rt.csv",delimiter=",", skiprows=1)
     #rotation_RT_n = rotation_RT.loc[~rotation_RT.isna().any(axis=1),:].to_numpy()
     rotation_RT_n = np.from_numpy(rotation_RT)
     s_0, Mr = _get_initial_state(7, 1)
@@ -180,9 +176,9 @@ if __name__ == "__main__":
     print("Pt", Pt.shape)
     print("test 6")
 
-    mcmc_chain = sample_posterior_params(rotation_RT_n, None, rotation_RT_n.shape[0] ,num_warmup=10, samples_n=50, n_states=7, start_width=3)
-    az.summary(mcmc_chain)
-    print("test 7")
+    #mcmc_chain = sample_posterior_params(rotation_RT_n, None, rotation_RT_n.shape[0] ,num_warmup=10, samples_n=50, n_states=7, start_width=3)
+    #print(az.summary(mcmc_chain))
+    #print("test 7")
 
 
 
