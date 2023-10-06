@@ -5,8 +5,11 @@ import pandas as pd
 import numpyro as npy
 import numpyro.distributions as dist
 from jax import random
-from numpyro.infer import MCMC, NUTS, SA, HMCECS
-npy.set_host_device_count(16)
+from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive
+
+npy.set_host_device_count(64)
+_rng_key = random.PRNGKey(0)
+_rng_key, _rng_key_ = random.split(_rng_key)
 
 def _buildK(n_states, mu, sigma): 
 # m = number of states  
@@ -48,11 +51,11 @@ def likelihood(n_states, mu, sigma,rt, ra, s_0, Mr):
     mv = npx.arange(-(Mid-1),(Mid))
     rt = npx.expand_dims(rt, axis=2)
     rt = npx.expand_dims(rt, axis=2)
-    phi=ln.expm(rt*K) # rt:I,J,1,1; K:I,J,m,m
-    Pt = npx.dot(phi, s_0)
-    Mc = npx.dot(mv,Pt)
-    Pcorrect = npx.dot(Mr,Pt)
-    Pcorrect = Pcorrect.sum(axis=0).squeeze() # adding up the probabilities over states for a given response
+    phi=ln.expm(rt*K) # rt:I,J,1,1; K:I,J,m,m This is transaction matrix
+    Pt = npx.matmul(phi, s_0) # Probability of transition matrix at t time for each response time
+    Mc = npx.matmul(mv,Pt)
+    Pcorrect = npx.matmul(Mr,Pt)
+    Pcorrect = Pcorrect.sum(axis=(-2,-1)) #.squeeze() # adding up the probabilities over states for a given response
     Pcorrect = npx.where(ra==0, 1-Pcorrect, Pcorrect)
     return Pt, Mc, Pcorrect.sum() #likelihood hence adding up over all responses.
 
@@ -89,32 +92,42 @@ def perform_walk(n_states, start_width, mu, sigma,timesteps=1.5, delta=0.01):
 
     return df_st, df_avg_conf, df_avg_corr
 
-def model(n_states, start_width, rt, ra, s_0, Mr):
-    I,J = rt.shape
-    with npy.plate('I', I) as ind:
-        mu =  npy.sample(f"mu", dist.Normal(0,5)) #,sample_shape=(I,)
+def model(n_states, start_width, rt, ra,I,J, s_0, Mr):
     
-    with npy.plate('Obs', I,subsample_size=10) as ind:
+    mu_m =  npy.sample(f"mu_m", dist.Normal(2,3))
+    mu_s =  npy.sample(f"mu_s", dist.HalfNormal(2))
+    
+
+    with npy.plate('I', I) as ind:
+        mu =  npy.sample(f"mu", dist.Normal(mu_m,mu_s)) #,sample_shape=(I,)
+    
+    with npy.plate('Obs', I, subsample_size=10) as ind: #,
         #mu =  npy.sample(f"mu", dist.Normal(0,5)) #,sample_shape=(I,)
     
-        _,lkl ,_ = likelihood(n_states, mu[ind], 1, npx.asarray(rt)[ind], npx.asarray(ra)[ind], s_0, Mr)
+        rt1 = rt if rt is None else npx.asarray(rt)[ind]
+        ra1 = ra if ra is None else npx.asarray(ra)[ind]
+        _,lkl ,_ = likelihood(n_states, mu[ind], 1, rt1, ra1, s_0, Mr)
         npy.factor(f"likelihood", lkl)
 
-def sample_posterior_params(DT, X, num_warmup=100, samples_n=500, n_states=7, start_width=1):
+def sample_posterior_params(DT, X, I,J, num_warmup=100, samples_n=500, n_states=7, start_width=1, num_chains=4):
 
     s_0, Mr = _get_initial_state(n_states, start_width)
 
-    rng_key = random.PRNGKey(0)
-
     kernel = HMCECS(NUTS(model), num_blocks=10)
-    mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=4)
-    mcmc_chain.run(rng_key, n_states, start_width, DT, X, s_0, Mr)
+    mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
+    mcmc_chain.run(_rng_key, n_states, start_width, DT, X, I,J, s_0, Mr)
 
     #kernel = NUTS(model)
     #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=4)
-    #mcmc_chain.run(rng_key, n_states, start_width, DT, X, s_0, Mr)
+    #mcmc_chain.run(_rng_key, n_states, start_width, DT, X, I,J, s_0, Mr)
 
     return mcmc_chain
+
+def sample_post_pred_data(model, var_name, samples_n=100):
+    
+    prior_predictive = Predictive(model, num_samples=samples_n)
+    prior_predictions = prior_predictive(_rng_key, marriage=dset.MarriageScaled.values)[var_name]
+    return prior_predictions
 
 if __name__ == "__main__":
 
@@ -149,10 +162,13 @@ if __name__ == "__main__":
     rotation_RT = pd.read_csv("examples/data/final_project_rt.csv")
     rotation_RT_n = rotation_RT.loc[~rotation_RT.isna().any(axis=1),:].to_numpy()
 
+    rotation_X = pd.read_csv("examples/data/final_project_ra.csv")
+    rotation_X_n = rotation_X.loc[~rotation_RT.isna().any(axis=1),:].to_numpy()
+
     s_0, Mr = _get_initial_state(101, 11)
     Pcorrect_arr = []
     for mu in npx.linspace(0.1,1.5):
-        Pt, Mc, Pcorrect = likelihood(101, [mu], 1,rotation_RT_n, s_0, Mr)
+        Pt, Mc, Pcorrect = likelihood(101, [mu], 1,rotation_RT_n, rotation_X_n, s_0, Mr)
         Pcorrect_arr.append(Pcorrect)
 
     print("Pcorrect", np.asarray(Pcorrect_arr))
@@ -160,13 +176,13 @@ if __name__ == "__main__":
     print("Pt", Pt.shape)
 
     s_0, Mr = _get_initial_state(103, 11)
-    Pt, Mc, Pcorrect = likelihood(103, npx.linspace(0.1,1.5,rotation_RT_n.shape[0]), 1,rotation_RT_n, s_0, Mr)
+    Pt, Mc, Pcorrect = likelihood(103, npx.linspace(0.1,1.5,rotation_RT_n.shape[0]), 1,rotation_RT_n, rotation_X_n, s_0, Mr)
     print("Pcorrect", Pcorrect)
     print("Mc", Mc.shape)
     print("Pt", Pt.shape)
     #plt.show()
 
-    mcmc_chain = sample_posterior_params(rotation_RT_n, None, num_warmup=10, samples_n=50, n_states=7, start_width=3)
+    mcmc_chain = sample_posterior_params(rotation_RT_n, None, *rotation_RT_n.shape, num_warmup=10, samples_n=50, n_states=7, start_width=3)
     mcmc_chain.print_summary()
 
 

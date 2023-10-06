@@ -49,8 +49,8 @@ def _get_initial_state(n_states, start_width):
             Mr[i,i] = 1
     return s_0.double(), Mr.double()
 
-def likelihood(n_states, start_width, mu, sigma,rt,s_0, Mr, n_part):
-    K= _buildK(n_states, mu=mu, sigma=sigma, n_part=n_part)
+def likelihood(n_states, start_width, mu, sigma, rt, ra, s_0, Mr, I):
+    K= _buildK(n_states, mu=mu, sigma=sigma, n_part=I)
     Mid = int((n_states+1)/2)
     mv = np.arange(-(Mid-1),(Mid)).double()
     rt = rt.unsqueeze(2).unsqueeze(3)
@@ -59,8 +59,9 @@ def likelihood(n_states, start_width, mu, sigma,rt,s_0, Mr, n_part):
     phi=ln.matrix_exp(A) # rt:I,J,1,1; K:I,J,m,m
     Pt = np.matmul(phi, s_0)
     Mc = np.matmul(mv,Pt)
-    Pcorrect = np.matmul(Mr,Pt).sum(axis=-2) # adding up the probabilities over states for a given response
-
+    Pcorrect = np.matmul(Mr,Pt) # adding up the probabilities over states for a given response
+    Pcorrect = Pcorrect.sum(axis=(-2,-1))
+    Pcorrect = np.where(ra==0, 1-Pcorrect, Pcorrect)
     return Pt, Mc, Pcorrect.sum() #likelihood hence adding up over all responses.
 
 def perform_walk(n_states, start_width, mu, sigma, n_part, timesteps=1.5, delta=0.01):
@@ -72,7 +73,7 @@ def perform_walk(n_states, start_width, mu, sigma, n_part, timesteps=1.5, delta=
 
     for rt in list(np.arange(0.1,timesteps,step=delta)):
         
-        Pt, Mc, Pcorrect = likelihood(n_states, start_width, mu, sigma,np.as_tensor([[rt]]),s_0, Mr, n_part)
+        Pt, Mc, Pcorrect = likelihood(n_states, start_width, mu, sigma,np.as_tensor([[rt]]),np.asarray([[1]]),s_0, Mr, n_part)
 
         state_prob.append(Pt)
         correct_prob.append(Pcorrect)
@@ -96,21 +97,22 @@ def perform_walk(n_states, start_width, mu, sigma, n_part, timesteps=1.5, delta=
 
     return df_st, df_avg_conf, df_avg_corr
 
-def model(n_states, start_width, rt, s_0, Mr, n_part):
-    I,J = rt.shape
+def model(n_states, start_width, rt, ra, s_0, Mr, I, J):
+    #I,J = rt.shape if rt is not None else 10,5
     with npy.plate('I', I):
-        mu =  npy.sample(f"mu", dist.Normal(0,5))
-        _,lkl ,_ = likelihood(n_states, start_width, mu, 1, rt, s_0, Mr, n_part)
+        mu =  npy.sample(f"mu", dist.Normal(0,1))
+        _,lkl ,_ = likelihood(n_states, start_width, mu, 1, rt, ra, s_0, Mr, I)
     
         npy.factor(f"likelihood", lkl)
 
-def sample_posterior_params(DT, X, n_part, num_warmup=100, samples_n=500, n_states=7, start_width=1):
+def sample_posterior_params(DT, X, I, J, num_warmup=100, samples_n=500, n_states=7, start_width=1, num_chains=4):
 
     s_0, Mr = _get_initial_state(n_states, start_width)
-
+    DT = np.from_numpy(DT)
+    X = np.from_numpy(X)
     kernel = NUTS(model)
-    mcmc_chain = MCMC(kernel, warmup_steps =num_warmup, num_samples=samples_n, num_chains=4)
-    mcmc_chain.run(n_states, start_width, DT, s_0, Mr, n_part)
+    mcmc_chain = MCMC(kernel, warmup_steps =num_warmup, num_samples=samples_n, num_chains=num_chains)
+    mcmc_chain.run(n_states, start_width, DT, X, s_0, Mr, I, J)
     return mcmc_chain
 
 #%%
@@ -145,11 +147,20 @@ if __name__ == "__main__":
 
     rotation_RT = n.loadtxt("examples/data/final_project_rt.csv",delimiter=",", skiprows=1)
     #rotation_RT_n = rotation_RT.loc[~rotation_RT.isna().any(axis=1),:].to_numpy()
-    rotation_RT_n = np.from_numpy(rotation_RT)
+    #rotation_RT_n = np.from_numpy(rotation_RT)
+    rotation_RT_n = rotation_RT
+
+    rotation_X = n.loadtxt("examples/data/final_project_ra.csv",delimiter=",", skiprows=1)
+    #rotation_X_n = np.from_numpy(rotation_X)
+    rotation_X_n = rotation_X
+
+
     s_0, Mr = _get_initial_state(7, 1)
     Pcorrect_arr = []
+    
     for mu in np.linspace(0.1,1.5,50):
-        Pt, Mc, Pcorrect = likelihood(7, 1, [mu], 1 , np.ones((14,10)), s_0, Mr, 1)
+        Pt, Mc, Pcorrect = likelihood(7, 1, [mu], 1 , np.from_numpy(n.random.randn(14,10)), 
+                                      np.from_numpy(n.random.randint(2, size=(14,10))), s_0, Mr, 1)
         Pcorrect_arr.append(Pcorrect)
 
     print("Pcorrect", np.asarray(Pcorrect_arr))
@@ -160,7 +171,8 @@ if __name__ == "__main__":
     s_0, Mr = _get_initial_state(101, 11)
     Pcorrect_arr = []
     for mu in np.linspace(0.1,1.5,50):
-        Pt, Mc, Pcorrect = likelihood(101, 11, [mu], 1,rotation_RT_n, s_0, Mr, 1)
+        Pt, Mc, Pcorrect = likelihood(101, 11, [mu], 1,np.from_numpy(rotation_RT_n), 
+                                      np.from_numpy(rotation_X_n), s_0, Mr, 1)
         Pcorrect_arr.append(Pcorrect)
 
     print("Pcorrect", np.asarray(Pcorrect_arr))
@@ -170,17 +182,36 @@ if __name__ == "__main__":
 
 
     s_0, Mr = _get_initial_state(103, 11)
-    Pt, Mc, Pcorrect = likelihood(103, 11, np.linspace(0.1,1.5,rotation_RT_n.shape[0]), 1,rotation_RT_n, s_0, Mr, rotation_RT_n.shape[0])
+    Pt, Mc, Pcorrect = likelihood(103, 11, np.linspace(0.1,1.5,rotation_RT_n.shape[0]), 1,
+                                  np.from_numpy(rotation_RT_n), np.from_numpy(rotation_X_n), s_0, Mr, rotation_RT_n.shape[0])
     print("Pcorrect", Pcorrect)
     print("Mc", Mc.shape)
     print("Pt", Pt.shape)
     print("test 6")
 
-    #mcmc_chain = sample_posterior_params(rotation_RT_n, None, rotation_RT_n.shape[0] ,num_warmup=10, samples_n=50, n_states=7, start_width=3)
-    #print(az.summary(mcmc_chain))
-    #print("test 7")
+    model(103, 11, np.from_numpy(rotation_RT_n), 
+                        np.from_numpy(rotation_X_n), s_0, Mr, *rotation_RT_n.shape)
 
+    print("test 7")
 
+    s_0, Mr = _get_initial_state(103, 11)
+    auto_guide = npy.infer.autoguide.AutoNormal(model)
+    adam = npy.optim.Adam({"lr": 0.02})
+    elbo = npy.infer.Trace_ELBO()
+    svi = npy.infer.SVI(model, auto_guide, adam, elbo)
+    losses = []
+    for step in range(10):  # Consider running for more steps.
+        loss = svi.step(7, 3, np.from_numpy(rotation_RT_n), 
+                        np.from_numpy(rotation_X_n), s_0, Mr, *rotation_RT_n.shape)
+        losses.append(loss)
+        if step % 1 == 0:
+            print("Elbo loss: {}".format(loss))
+    print("test 8")
+
+    mcmc_chain = sample_posterior_params(rotation_RT_n, rotation_X_n, *rotation_RT_n.shape ,
+                                                num_warmup=10, samples_n=10, n_states=7, start_width=3)
+    print(az.summary(mcmc_chain))
+    print("test 9")
 
 
 # %%
