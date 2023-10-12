@@ -1,9 +1,12 @@
 #%%
+import matplotlib.pyplot as plt
+
 import pytensor.tensor as jnp
 import pymc as pm
 import pandas as pd
 import numpy as np
 import arviz as az
+from pymc.variational.callbacks import CheckParametersConvergence
 
 def _liklihood(r, a, v, t):
   
@@ -25,23 +28,23 @@ def _liklihood(r, a, v, t):
 
 def _priors(I,J):
   with pm.Model() as model_mc:
-    a_m = pm.Uniform("a_m", 0.67,2.35)
-    a_s = pm.Uniform("a_s", 0,0.485)
+    a_m = pm.Uniform("a_m", 0.5, 2)
+    a_s = pm.Uniform("a_s", 0, 2)
     
-    t_m = pm.Uniform("t_m", 0, 0.82)
-    t_s = pm.Uniform("t_s", 0, 0.237)
+    #t_m = pm.Uniform("t_m", 0, 0.82)
+    t_s = pm.Uniform("t_s", 0, 0.05)
     
-    v_m = pm.Uniform("v_m", 0.85,7.43)
-    v_s = pm.Uniform("v_s", 0,1.899)
+    v_m = pm.Uniform("v_m", 1, 5)
+    v_s = pm.Uniform("v_s", 0, 2)
     
     
-    a = pm.Normal("a", a_m, a_s**2,shape=(I,J))
-    v = pm.Lognormal("v", v_m, v_s**2,shape=(I,J))
-    t = pm.Lognormal("t", t_m, t_s**2,shape=(I,J))
+    #a = pm.Normal("a", a_m, a_s**2,shape=(I,J))
+    #v = pm.Lognormal("v", v_m, v_s**2,shape=(I,J))
+    #t = pm.Lognormal("t", t_m, t_s**2,shape=(I,J))
 
-    #a = pm.Normal("a", 0, 1)
-    #v = pm.Lognormal("v", 0, 1)
-    #t = pm.HalfNormal("t", 1)
+    a = pm.Normal("a", a_m, a_s**2,shape=(I,J))
+    v = pm.Normal("v", v_m, v_s**2,shape=(I,J))
+    t = pm.HalfNormal("t", t_s**2,shape=(I,J))
     
   return a, v, t, model_mc
   
@@ -61,9 +64,19 @@ def model(r,I,J):
   
 def sample_posterior_distribution(r):
   with model(r, *r.shape):
-    mcmc = pm.sample() #step=[pm.Metropolis]
+    mcmc = pm.sample(tune=3500, draws= 2500, 
+                     nuts_sampler="pymc",
+                     nuts_sampler_kwargs={"target_accept":95}
+                     ) #step=[pm.Metropolis]
     
   return mcmc
+
+def fit_posterior_distribution(r):
+  with model(r, *r.shape):
+    mean_field = pm.fit(n=100000,
+                        method="advi", 
+                        callbacks=[pm.callbacks.CheckParametersConvergence(diff="absolute")])
+  return mean_field
 
 def sample_prior_distribution(r):
   with model(r, 100,10):
@@ -86,13 +99,23 @@ r = (df.drop("choice", axis=1)
 _liklihood(1,0,1,1).eval()
 
 #%%
+mean_field = fit_posterior_distribution(r)
+approx_sample = mean_field.sample(1000)
+
+#%%
+plt.plot(mean_field.hist);
+
+#%%
 mcmc = sample_posterior_distribution(r)
-az.summary(mcmc)
-  
+summ = az.summary(mcmc)
+summ.to_csv("neu_summ.csv")
+print(summ)
+mcmc.to_netcdf("neu_posterior.cdf")
+#mcmc.to_dataframe().to_csv("neu_posterior.csv")
 
 #%%
   
-mcmc_prior = sample_prior_distribution(r)
+#mcmc_prior = sample_prior_distribution(r)
 
 
 
