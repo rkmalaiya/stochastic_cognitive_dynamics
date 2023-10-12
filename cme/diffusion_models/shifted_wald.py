@@ -28,23 +28,23 @@ def _liklihood(r, a, v, t):
 
 def _priors(I,J):
   with pm.Model() as model_mc:
-    a_m = pm.Uniform("a_m", 0.5, 2)
-    a_s = pm.Uniform("a_s", 0, 2)
+    #a_m = pm.Uniform("a_m", 0, 2)
+    #a_s = pm.Uniform("a_s", 0, 1)
     
     #t_m = pm.Uniform("t_m", 0, 0.82)
-    t_s = pm.Uniform("t_s", 0, 0.05)
+    #t_s = pm.Uniform("t_s", 0, 0.5)
     
-    v_m = pm.Uniform("v_m", 1, 5)
-    v_s = pm.Uniform("v_s", 0, 2)
+    #v_m = pm.Uniform("v_m", 1, 5)
+    #v_s = pm.Uniform("v_s", 0, 1)
     
     
-    #a = pm.Normal("a", a_m, a_s**2,shape=(I,J))
-    #v = pm.Lognormal("v", v_m, v_s**2,shape=(I,J))
-    #t = pm.Lognormal("t", t_m, t_s**2,shape=(I,J))
+    a = pm.Normal("a", 0.5,2,shape=(I,1))
+    v = pm.Lognormal("v", 1,1, shape=(I,1))
+    t = pm.HalfNormal("t", 0.1, shape=(I,1))
 
-    a = pm.Normal("a", a_m, a_s**2,shape=(I,J))
-    v = pm.Normal("v", v_m, v_s**2,shape=(I,J))
-    t = pm.HalfNormal("t", t_s**2,shape=(I,J))
+    #a = pm.Normal("a", a_m, a_s**2,shape=(I,1))
+    #v = pm.Normal("v", v_m, v_s**2,shape=(I,1))
+    #t = pm.HalfNormal("t", t_s**2,shape=(I,1))
     
   return a, v, t, model_mc
   
@@ -62,15 +62,6 @@ def model(r,I,J):
   return model_mc
   
   
-def sample_posterior_distribution(r):
-  with model(r, *r.shape):
-    mcmc = pm.sample(tune=3500, draws= 2500, 
-                     nuts_sampler="pymc",
-                     nuts_sampler_kwargs={"target_accept":95}
-                     ) #step=[pm.Metropolis]
-    
-  return mcmc
-
 def fit_posterior_distribution(r):
   with model(r, *r.shape):
     mean_field = pm.fit(n=100000,
@@ -99,19 +90,31 @@ r = (df.drop("choice", axis=1)
 _liklihood(1,0,1,1).eval()
 
 #%%
-mean_field = fit_posterior_distribution(r)
+mean_field = fit_posterior_distribution(r[0:100,:])
 approx_sample = mean_field.sample(1000)
 
 #%%
 plt.plot(mean_field.hist);
 
 #%%
+
+def sample_posterior_distribution(r):
+  with model(r, *r.shape):
+    mcmc = pm.sample(tune=1000, draws= 1500, 
+                     nuts_sampler="pymc",
+                     nuts_sampler_kwargs={"target_accept":85}
+                     ) #step=[pm.Metropolis]
+    
+  return mcmc
+
 mcmc = sample_posterior_distribution(r)
 summ = az.summary(mcmc)
 summ.to_csv("neu_summ.csv")
 print(summ)
 mcmc.to_netcdf("neu_posterior.cdf")
-#mcmc.to_dataframe().to_csv("neu_posterior.csv")
+mcmc.to_dataframe().to_csv("neu_posterior.csv")
+
+az.plot_trace(mcmc)
 
 #%%
   
