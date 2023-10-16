@@ -25,8 +25,8 @@ def _liklihood(r, a, v, t):
 
   return likl
 
-def _priors(I,J):
-  with pm.Model() as model_mc:
+def _priors(I, model_mc):
+  with model_mc:
     #a = pm.Normal("a", 0.5,2,shape=(I,1))
     #v = pm.LogNormal("v", 0,1, shape=(I,1))
     #t = pm.HalfNormal("t", 0.1, shape=(I,1))
@@ -35,10 +35,10 @@ def _priors(I,J):
     v = pm.LogNormal("v", 0, 2, shape=(I,1)) #0,1
     t = pm.HalfNormal("t", 0.1, shape=(I,1))
 
-  return a, v, t, model_mc
+  return a, v, t
 
-def _priors_multi(I,J):
-  with pm.Model() as model_mc:
+def _priors_multi(I,model_mc):
+  with model_mc:
     a_m = pm.Uniform("a_m", 0.1, 3)
     a_s = pm.Uniform("a_s", 1, 3)
     
@@ -48,16 +48,22 @@ def _priors_multi(I,J):
     v_m = pm.Uniform("v_m", 0, 1)
     v_s = pm.Uniform("v_s", 0.1, 1)
 
-    a = pm.Normal("a", a_m, a_s,shape=(I,1))
-    v = pm.LogNormal("v", v_m, v_s,shape=(I,1))
-    t = pm.HalfNormal("t", t_s,shape=(I,1))
+    a = pm.Normal("a", a_m, a_s,shape=(I,1), dims="partID")
+    v = pm.LogNormal("v", v_m, v_s,shape=(I,1), dims="partID")
+    t = pm.HalfNormal("t", t_s,shape=(I,1), dims="partID")
     
-  return a, v, t, model_mc
+  return a, v, t
   
   
-def model(r,I,J):
+def model(r, I, coords=None):
   
-  a, v, t, model_mc = _priors_multi(I,J)
+  if coords is None:
+    model_mc = pm.Model()
+  else:
+    model_mc = pm.Model(coords={"partID": coords})
+
+  a, v, t = _priors_multi(I, model_mc)
+
   with model_mc:
     pm.CustomDist(
         'likl',
@@ -69,7 +75,7 @@ def model(r,I,J):
   
   
 def fit_posterior_distribution(r):
-  with model(r, *r.shape):
+  with model(r, r.shape[0]):
     mean_field = pm.fit(n=100000,
                         method="advi", 
                         callbacks=[pm.callbacks.CheckParametersConvergence(diff="absolute")])
@@ -80,64 +86,21 @@ def sample_prior_distribution(r):
     mcmc_prior = pm.sample_prior_predictive()
   return mcmc_prior
 
-def sample_posterior_distribution(r):
-  with model(r, *r.shape):
-    mcmc = pm.sample(tune=1500, draws= 2500, 
+def sample_posterior_distribution(r, coords=None, tune=1500, samples = 2500):
+  with model(r, r.shape[0], coords):
+    mcmc = pm.sample(tune=tune, draws= samples, 
                      nuts_sampler="pymc",
                      nuts_sampler_kwargs={"target_accept":0.9}
                      ) #step=[pm.Metropolis]
     
   return mcmc
 
+#%%
 if __name__ == "__main__":
 
-  # read the data
-
-  df = pd.read_csv("ES_Neu_Trials.csv").drop("Unnamed: 0", axis=1)
-  item_count = df.groupby("subjID").count().iloc[0,1]
-  df = df.assign(item_id = np.tile(np.arange(0,item_count), 258)) 
-
-  r = (df.drop("choice", axis=1)
-      .pivot(columns="item_id",index="subjID", values="RT")
-      .reset_index().drop(columns="subjID").to_numpy())
-  #r.shape
-
-  #%%
-  #_liklihood(1,1,1,1).eval()
-  _liklihood(1,0,1,1).eval()
-
-  #%%
-  mean_field = fit_posterior_distribution(r)
-  approx_sample = mean_field.sample(1000)
-
-  #%%
-  plt.plot(mean_field.hist);
-
-  #%%
-
-
-
-  mcmc = sample_posterior_distribution(r)
-  summ = az.summary(mcmc)
-  summ.to_csv("neu_summ.csv")
-  print(summ)
-  mcmc.to_netcdf("neu_posterior.cdf")
-  mcmc.to_dataframe().to_csv("neu_posterior.csv")
-
-  az.plot_trace(mcmc)
-
-  #%%
-    
-  #mcmc_prior = sample_prior_distribution(r)
-
-
-
-  # %%
-
   likl_arr = []
-  for r, a, v, t in zip(r, np.ones((258,128)), np.ones((258,128)), np.zeros((258,128))):
+  for r, a, v, t in zip(np.ones((258,128)), np.ones((258,128)), np.ones((258,128)), np.zeros((258,128))):
     likl_t = _liklihood(r, a, v, t)
     likl_arr.append(likl_t.eval())
-  print(likl_arr)
   pd.Series(np.asarray(likl_arr)).plot.kde()
   # %%
