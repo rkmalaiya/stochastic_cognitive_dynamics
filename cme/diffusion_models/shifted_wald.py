@@ -25,33 +25,39 @@ def _liklihood(r, a, v, t):
 
   return likl
 
-
 def _priors(I,J):
   with pm.Model() as model_mc:
-    #a_m = pm.Uniform("a_m", 0, 2)
-    #a_s = pm.Uniform("a_s", 0, 1)
-    
-    #t_m = pm.Uniform("t_m", 0, 0.82)
-    #t_s = pm.Uniform("t_s", 0, 0.5)
-    
-    #v_m = pm.Uniform("v_m", 1, 5)
-    #v_s = pm.Uniform("v_s", 0, 1)
-    
-    
-    a = pm.Normal("a", 0.5,2,shape=(I,1))
-    v = pm.Lognormal("v", 1,1, shape=(I,1))
+    #a = pm.Normal("a", 0.5,2,shape=(I,1))
+    #v = pm.LogNormal("v", 0,1, shape=(I,1))
+    #t = pm.HalfNormal("t", 0.1, shape=(I,1))
+
+    a = pm.Normal("a", 0.5, 2,shape=(I,1))
+    v = pm.LogNormal("v", 0, 2, shape=(I,1)) #0,1
     t = pm.HalfNormal("t", 0.1, shape=(I,1))
 
-    #a = pm.Normal("a", a_m, a_s**2,shape=(I,1))
-    #v = pm.Normal("v", v_m, v_s**2,shape=(I,1))
-    #t = pm.HalfNormal("t", t_s**2,shape=(I,1))
+  return a, v, t, model_mc
+
+def _priors_multi(I,J):
+  with pm.Model() as model_mc:
+    a_m = pm.Uniform("a_m", 0.1, 3)
+    a_s = pm.Uniform("a_s", 1, 3)
+    
+    #t_m = pm.Uniform("t_m", 0, 0.82)
+    t_s = pm.Uniform("t_s", 0.1, 0.5)
+    
+    v_m = pm.Uniform("v_m", 0, 1)
+    v_s = pm.Uniform("v_s", 0.1, 1)
+
+    a = pm.Normal("a", a_m, a_s,shape=(I,1))
+    v = pm.LogNormal("v", v_m, v_s,shape=(I,1))
+    t = pm.HalfNormal("t", t_s,shape=(I,1))
     
   return a, v, t, model_mc
   
   
 def model(r,I,J):
   
-  a, v, t, model_mc = _priors(I,J)
+  a, v, t, model_mc = _priors_multi(I,J)
   with model_mc:
     pm.CustomDist(
         'likl',
@@ -90,7 +96,7 @@ r = (df.drop("choice", axis=1)
 _liklihood(1,0,1,1).eval()
 
 #%%
-mean_field = fit_posterior_distribution(r[0:100,:])
+mean_field = fit_posterior_distribution(r)
 approx_sample = mean_field.sample(1000)
 
 #%%
@@ -100,9 +106,9 @@ plt.plot(mean_field.hist);
 
 def sample_posterior_distribution(r):
   with model(r, *r.shape):
-    mcmc = pm.sample(tune=1000, draws= 1500, 
+    mcmc = pm.sample(tune=1500, draws= 2500, 
                      nuts_sampler="pymc",
-                     nuts_sampler_kwargs={"target_accept":85}
+                     nuts_sampler_kwargs={"target_accept":0.9}
                      ) #step=[pm.Metropolis]
     
   return mcmc
