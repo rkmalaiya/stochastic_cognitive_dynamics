@@ -80,30 +80,6 @@ def sample_prior_distribution(r):
     mcmc_prior = pm.sample_prior_predictive()
   return mcmc_prior
 
-# read the data
-
-df = pd.read_csv("ES_Neu_Trials.csv").drop("Unnamed: 0", axis=1)
-item_count = df.groupby("subjID").count().iloc[0,1]
-df = df.assign(item_id = np.tile(np.arange(0,item_count), 258)) 
-
-r = (df.drop("choice", axis=1)
-    .pivot(columns="item_id",index="subjID", values="RT")
-    .reset_index().drop(columns="subjID").to_numpy())
-#r.shape
-
-#%%
-#_liklihood(1,1,1,1).eval()
-_liklihood(1,0,1,1).eval()
-
-#%%
-mean_field = fit_posterior_distribution(r)
-approx_sample = mean_field.sample(1000)
-
-#%%
-plt.plot(mean_field.hist);
-
-#%%
-
 def sample_posterior_distribution(r):
   with model(r, *r.shape):
     mcmc = pm.sample(tune=1500, draws= 2500, 
@@ -113,27 +89,55 @@ def sample_posterior_distribution(r):
     
   return mcmc
 
-mcmc = sample_posterior_distribution(r)
-summ = az.summary(mcmc)
-summ.to_csv("neu_summ.csv")
-print(summ)
-mcmc.to_netcdf("neu_posterior.cdf")
-mcmc.to_dataframe().to_csv("neu_posterior.csv")
+if __name__ == "__main__":
 
-az.plot_trace(mcmc)
+  # read the data
 
-#%%
-  
-#mcmc_prior = sample_prior_distribution(r)
+  df = pd.read_csv("ES_Neu_Trials.csv").drop("Unnamed: 0", axis=1)
+  item_count = df.groupby("subjID").count().iloc[0,1]
+  df = df.assign(item_id = np.tile(np.arange(0,item_count), 258)) 
+
+  r = (df.drop("choice", axis=1)
+      .pivot(columns="item_id",index="subjID", values="RT")
+      .reset_index().drop(columns="subjID").to_numpy())
+  #r.shape
+
+  #%%
+  #_liklihood(1,1,1,1).eval()
+  _liklihood(1,0,1,1).eval()
+
+  #%%
+  mean_field = fit_posterior_distribution(r)
+  approx_sample = mean_field.sample(1000)
+
+  #%%
+  plt.plot(mean_field.hist);
+
+  #%%
 
 
 
-# %%
+  mcmc = sample_posterior_distribution(r)
+  summ = az.summary(mcmc)
+  summ.to_csv("neu_summ.csv")
+  print(summ)
+  mcmc.to_netcdf("neu_posterior.cdf")
+  mcmc.to_dataframe().to_csv("neu_posterior.csv")
 
-likl_arr = []
-for r, a, v, t in zip(r, np.ones((258,128)), np.ones((258,128)), np.zeros((258,128))):
-  likl_t = _liklihood(r, a, v, t)
-  likl_arr.append(likl_t.eval())
-print(likl_arr)
-pd.Series(np.asarray(likl_arr)).plot.kde()
-# %%
+  az.plot_trace(mcmc)
+
+  #%%
+    
+  #mcmc_prior = sample_prior_distribution(r)
+
+
+
+  # %%
+
+  likl_arr = []
+  for r, a, v, t in zip(r, np.ones((258,128)), np.ones((258,128)), np.zeros((258,128))):
+    likl_t = _liklihood(r, a, v, t)
+    likl_arr.append(likl_t.eval())
+  print(likl_arr)
+  pd.Series(np.asarray(likl_arr)).plot.kde()
+  # %%
