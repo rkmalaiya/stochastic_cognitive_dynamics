@@ -48,14 +48,14 @@ def _priors(I, model_mc):
 
 def _priors_multi(I,model_mc):
   with model_mc:
-    a_m = pm.Uniform("a_m", 0.1, 2)
-    a_s = pm.Uniform("a_s", 0.1, 1)
+    a_m = pm.Uniform("a_m", 0.1, 1)
+    a_s = pm.Uniform("a_s", 0.05, 0.5)
     
     #t_m = pm.Uniform("t_m", 0, 0.5)
-    t_s = pm.Uniform("t_s", 0.05, 0.1)
+    t_s = pm.Uniform("t_s", 0.09, 0.2)
     
-    v_m = pm.Uniform("v_m", 0, 2)
-    v_s = pm.Uniform("v_s", 0.1, 1)
+    v_m = pm.Uniform("v_m", 0.1, 1.5)
+    v_s = pm.Uniform("v_s", 0.05, 0.1)
 
     a = pm.LogNormal("a", a_m, a_s, shape=(I,1), dims="partID")
     v = pm.LogNormal("v", v_m, v_s, shape=(I,1), dims="partID")
@@ -71,7 +71,7 @@ def model(r=None, I=None, coords=None):
   else:
     model_mc = pm.Model(coords={"partID": coords})
 
-  a, v, t = _priors(I, model_mc)
+  a, v, t = _priors_multi(I, model_mc)
 
   with model_mc:
     pm.CustomDist(
