@@ -40,7 +40,7 @@ def _priors(I, model_mc):
     #v = pm.LogNormal("v", 0,1, shape=(I,1))
     #t = pm.HalfNormal("t", 0.1, shape=(I,1))
 
-    a = pm.Normal("a", 0.5, 2, shape=(I,1), dims="partID")
+    a = pm.LogNormal("a", 0.5, 2, shape=(I,1), dims="partID")
     v = pm.LogNormal("v", 0, 2, shape=(I,1), dims="partID") #0,1
     t = pm.HalfNormal("t", 0.1, shape=(I,1), dims="partID")
 
@@ -51,15 +51,15 @@ def _priors_multi(I,model_mc):
     a_m = pm.Uniform("a_m", 0.1, 2)
     a_s = pm.Uniform("a_s", 0.1, 1)
     
-    t_m = pm.Uniform("t_m", 0, 0.5)
-    t_s = pm.Uniform("t_s", 0.01, 0.1)
+    #t_m = pm.Uniform("t_m", 0, 0.5)
+    t_s = pm.Uniform("t_s", 0.05, 0.1)
     
     v_m = pm.Uniform("v_m", 0, 2)
     v_s = pm.Uniform("v_s", 0.1, 1)
 
-    a = pm.LogNormal("a", a_m, a_s,shape=(I,1), dims="partID")
-    v = pm.LogNormal("v", v_m, v_s,shape=(I,1), dims="partID")
-    t = pm.LogNormal("t", t_m, t_s,shape=(I,1), dims="partID")
+    a = pm.LogNormal("a", a_m, a_s, shape=(I,1), dims="partID")
+    v = pm.LogNormal("v", v_m, v_s, shape=(I,1), dims="partID")
+    t = pm.HalfNormal("t", t_s, shape=(I,1), dims="partID")
     
   return a, v, t
   
