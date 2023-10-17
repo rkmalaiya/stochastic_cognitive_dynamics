@@ -25,22 +25,34 @@ def _liklihood(r, a, v, t):
 
   return likl
 
+def _random(*dist_params, rng=None, size=(100,50)):
+  a, v, t = dist_params
+  
+  E_x = t+(a/v)
+  V_x = a/(v**3)
+  
+  mu = np.log(E_x / np.sqrt( (V_x / E_x**2) + 1  ))
+  sig_sqr = np.log( (V_x / E_x**2) + 1 )  
+
+  return rng.lognormal(mu, sig_sqr, size=size)
+
+
 def _priors(I, model_mc):
   with model_mc:
     #a = pm.Normal("a", 0.5,2,shape=(I,1))
     #v = pm.LogNormal("v", 0,1, shape=(I,1))
     #t = pm.HalfNormal("t", 0.1, shape=(I,1))
 
-    a = pm.Normal("a", 0.5, 2,shape=(I,1))
-    v = pm.LogNormal("v", 0, 2, shape=(I,1)) #0,1
-    t = pm.HalfNormal("t", 0.1, shape=(I,1))
+    a = pm.Normal("a", 0.5, 2, shape=(I,1), dims="partID")
+    v = pm.LogNormal("v", 0, 2, shape=(I,1), dims="partID") #0,1
+    t = pm.HalfNormal("t", 0.1, shape=(I,1), dims="partID")
 
   return a, v, t
 
 def _priors_multi(I,model_mc):
   with model_mc:
-    a_m = pm.Uniform("a_m", 0.1, 3)
-    a_s = pm.Uniform("a_s", 1, 3)
+    a_m = pm.Uniform("a_m", 0.5, 2)
+    a_s = pm.Uniform("a_s", 0.1, 1)
     
     #t_m = pm.Uniform("t_m", 0, 0.82)
     t_s = pm.Uniform("t_s", 0.1, 0.5)
@@ -55,20 +67,21 @@ def _priors_multi(I,model_mc):
   return a, v, t
   
   
-def model(r, I, coords=None):
+def model(r=None, I=None, coords=None):
   
   if coords is None:
     model_mc = pm.Model()
   else:
     model_mc = pm.Model(coords={"partID": coords})
 
-  a, v, t = _priors_multi(I, model_mc)
+  a, v, t = _priors(I, model_mc)
 
   with model_mc:
     pm.CustomDist(
-        'likl',
+        'RT',
         a, v, t,
         logp=_liklihood,
+        random=_random,
         observed=r,
     )
   return model_mc
@@ -81,26 +94,35 @@ def fit_posterior_distribution(r):
                         callbacks=[pm.callbacks.CheckParametersConvergence(diff="absolute")])
   return mean_field
 
-def sample_prior_distribution(r):
-  with model(r, 100,10):
-    mcmc_prior = pm.sample_prior_predictive()
+def sample_prior_distribution(r = None, samples=None):
+  with model(r, I = 1 if r is None else r.shape[0]):
+    mcmc_prior = pm.sample_prior_predictive(samples=samples)
   return mcmc_prior
 
 def sample_posterior_distribution(r, coords=None, tune=1500, samples = 2500):
-  with model(r, r.shape[0], coords):
+  model_mc = model(r, r.shape[0], coords)
+  with model_mc:
     mcmc = pm.sample(tune=tune, draws= samples, 
                      nuts_sampler="pymc",
                      nuts_sampler_kwargs={"target_accept":0.9}
                      ) #step=[pm.Metropolis]
     
+  return mcmc, model_mc
+
+def sample_posterior_predictive(model_mc, mcmc):
+  with model_mc:
+    mcmc = pm.sample_posterior_predictive(mcmc, extend_inferencedata=True)
   return mcmc
 
 #%%
 if __name__ == "__main__":
 
-  likl_arr = []
-  for r, a, v, t in zip(np.ones((258,128)), np.ones((258,128)), np.ones((258,128)), np.zeros((258,128))):
-    likl_t = _liklihood(r, a, v, t)
-    likl_arr.append(likl_t.eval())
-  pd.Series(np.asarray(likl_arr)).plot.kde()
+  mcmc_prior = sample_prior_distribution(samples=200)
+  mcmc_prior = sample_prior_distribution(np.ones((258,128)), samples=200)
+  
+
+  #likl_arr = []
+  #r, a, v, t = np.ones((258,128)), np.ones((258,128)), np.ones((258,128)), np.zeros((258,128))
+  #likl_arr = _liklihood(r, a, v, t).eval()
+  #pd.Series(np.asarray(likl_arr)).plot.kde()
   # %%
