@@ -28,13 +28,10 @@ def _liklihood(r, a, v, t):
 def _random(*dist_params, rng=None, size=(100,50)):
   a, v, t = dist_params
   
-  E_x = t+(a/v)
-  V_x = a/(v**3)
-  
-  mu = np.log(E_x / np.sqrt( (V_x / E_x**2) + 1  ))
-  sig_sqr = np.log( (V_x / E_x**2) + 1 )  
+  mu = a/v
+  lam = a**2 
 
-  return rng.lognormal(mu, sig_sqr, size=size)
+  return rng.wald(mu, lam, size=size) + t
 
 
 def _priors(I, model_mc):
@@ -51,18 +48,18 @@ def _priors(I, model_mc):
 
 def _priors_multi(I,model_mc):
   with model_mc:
-    a_m = pm.Uniform("a_m", 0.5, 2)
+    a_m = pm.Uniform("a_m", 0.1, 2)
     a_s = pm.Uniform("a_s", 0.1, 1)
     
-    #t_m = pm.Uniform("t_m", 0, 0.82)
-    t_s = pm.Uniform("t_s", 0.1, 0.5)
+    t_m = pm.Uniform("t_m", 0, 0.5)
+    t_s = pm.Uniform("t_s", 0.01, 0.1)
     
-    v_m = pm.Uniform("v_m", 0, 1)
+    v_m = pm.Uniform("v_m", 0, 2)
     v_s = pm.Uniform("v_s", 0.1, 1)
 
-    a = pm.Normal("a", a_m, a_s,shape=(I,1), dims="partID")
+    a = pm.LogNormal("a", a_m, a_s,shape=(I,1), dims="partID")
     v = pm.LogNormal("v", v_m, v_s,shape=(I,1), dims="partID")
-    t = pm.HalfNormal("t", t_s,shape=(I,1), dims="partID")
+    t = pm.LogNormal("t", t_m, t_s,shape=(I,1), dims="partID")
     
   return a, v, t
   
