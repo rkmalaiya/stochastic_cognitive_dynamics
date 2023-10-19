@@ -95,8 +95,8 @@ def _priors_noncentral(I,model_mc):
     a_n = pm.Gamma("a_n",2,2, shape=(I,1), dims="partID")
     v_n = pm.Gamma("v_n",2,2, shape=(I,1), dims="partID")
 
-    a = pm.Deterministic("a", a_m + a_s*a_n)
-    v = pm.Deterministic("v", v_m + v_s*v_n)
+    a = pm.Deterministic("a", a_m + a_s*a_n, dims="partID")
+    v = pm.Deterministic("v", v_m + v_s*v_n, dims="partID")
 
     #a = pm.Gamma("a", mu=a_m, sigma=a_s, shape=(I,1), dims="partID")
     #v = pm.Gamma("v", mu=v_m, sigma=v_s, shape=(I,1), dims="partID")
