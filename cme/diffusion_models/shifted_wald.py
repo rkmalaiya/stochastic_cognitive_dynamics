@@ -156,10 +156,15 @@ def sample_posterior_predictive(model_mc, mcmc):
   return mcmc
 
 #%%
+
 if __name__ == "__main__":
 
-  mcmc_prior = sample_prior_distribution(samples=200)
-  mcmc_prior = sample_prior_distribution(np.ones((258,128)), samples=200)
+  mcmc_prior = sample_prior_distribution(np.random.uniform(0.1,2,size=(258,128)), np.ones((258,128)), samples=20)
+  print("test 1 ")
+  mcmc, model_mc = sample_posterior_distribution(np.random.uniform(0.1,2,size=(258,128)), np.ones((258,128)), tune=10, samples=20)
+  print("test 2")
+  mcmc = sample_posterior_predictive(model_mc, mcmc)
+  print("test 3")
   
 
   #likl_arr = []
