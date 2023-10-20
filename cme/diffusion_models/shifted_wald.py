@@ -39,10 +39,10 @@ def _random(*dist_params, rng=None, size=None):
   
   a, v, t, _ = dist_params
 
-  mu = a/v
+  mu = a/v + t*delta_t
   lam = a**2 
 
-  return pm.Wald.dist(mu=mu, lam=lam,shape=size).eval() + t*delta_t
+  return pm.Wald.dist(mu=mu, lam=lam,shape=size).eval()
 
 
 def _priors(I, model_mc):
@@ -86,24 +86,26 @@ def _priors_noncentral(I,model_mc):
     a_m = pm.Uniform("a_m", 0.5, 1.5)
     a_s = pm.Uniform("a_s", 0.1, 0.5)
     
-    #t_m = pm.Uniform("t_m", 0, 0.5)
-    #t_s = pm.Uniform("t_s", 0.1, 0.9)
+    t_m = pm.Uniform("t_m", 0.05, 0.2)
+    t_s = pm.Uniform("t_s", 0.5, 1)
     
     v_m = pm.Uniform("v_m", 0.5, 1.5)
     v_s = pm.Uniform("v_s", 0.1, 0.5)
 
     a_n = pm.Gamma("a_n",2,2, shape=(I,1), dims="partID")
     v_n = pm.Gamma("v_n",2,2, shape=(I,1), dims="partID")
+    t_n = pm.Beta("t_n",2,5, shape=(I,1), dims="partID")
 
     a = pm.Deterministic("a", a_m + a_s*a_n, dims="partID")
     v = pm.Deterministic("v", v_m + v_s*v_n, dims="partID")
+    t = pm.Deterministic("t", t_m + t_s*t_n, dims="partID")
 
     #a = pm.Gamma("a", mu=a_m, sigma=a_s, shape=(I,1), dims="partID")
     #v = pm.Gamma("v", mu=v_m, sigma=v_s, shape=(I,1), dims="partID")
     
     #a = pm.HalfNormal("a", a_s, shape=(I,1), dims="partID")
     #v = pm.HalfNormal("v", v_s, shape=(I,1), dims="partID")
-    t = pm.HalfNormal("t", 0.5, shape=(I,1), dims="partID")
+    #t = pm.HalfNormal("t", 0.5, shape=(I,1), dims="partID")
     
   return a, v, t
   
