@@ -5,6 +5,7 @@ import cme.utils.common_logging as cl
 from joblib import Parallel, delayed
 import numpy as np
 import pytensor.tensor.subtensor as st
+import arviz as az
 
 log = cl.get_logger("random-walk")
 
@@ -38,7 +39,8 @@ def _get_initial_state(n_states):
    #s_0 = pm.draw(pm.Multinomial.dist(n=1,p=p_0))
    return p_0
 
-def _liklihood(t, v):
+def _liklihood(t, x, v):
+   
    alpha=1.5
    tau = 0.01
    theta=5
@@ -53,34 +55,36 @@ def _liklihood(t, v):
    
    Z_m = m-2
    Z = _get_initial_state(Z_m)
-   n = (t / tau) - 1
+   n = (t.eval() / tau) - 1
 
    #num1 = at.matmul(Z, at.nlinalg.matrix_power(Q, n-1))
    #num = at.matmul(num1, R)
    #den = at.matmul(at.matmul(Z, at.nlinalg.matrix_power((at.eye(m)-Q,-1))), R)
 
-   t1 = at.nlinalg.matrix_power(Q, 10.0)
+   t1 = at.nlinalg.matrix_power(Q, n)
    t2 = at.nlinalg.matrix_power(at.eye(Z_m) - Q,-1)
    
    num = (Z @ t1) @ R
    den = (Z @ t2) @ R
 
    Pr = num/den
-
-   return Pr
+   #print(Pr.eval().shape)
+   likl = at.where(at.eq(x,0),Pr[0], Pr[1])
+   #likl = likl.sum()
+   return likl
 
 #%%
 if __name__ == "__main__":
-   Pr = _liklihood(at.as_tensor(1.5), at.as_tensor(0.5))
-   print(Pr.eval())
+   Pr = _liklihood(at.as_tensor([[1.5]]), at.as_tensor([[1]]), at.as_tensor([0.5]))
+   print(Pr.eval().shape)
    
    with pm.Model() as model:
-      v = pm.Normal("drift", 0,1)
+      v = pm.Normal("drift", 0,1,shape=(1,))
       likl = pm.CustomDist("rt",
-      v,
+      at.as_tensor([[1]]), v,
       logp = _liklihood,
-      observed = at.as_tensor(1.5)
+      observed = at.as_tensor([[1.5]])
       )
-      pm.sample(draws=100, tune=50)
+      az.summary(pm.sample(draws=10, tune=5))
    
 # %%
