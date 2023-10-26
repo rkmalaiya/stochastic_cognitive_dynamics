@@ -87,8 +87,8 @@ def _priors_noncentral(I,model_mc):
     a_m = pm.Uniform("a_m", 0.5, 1.5)
     a_s = 0.2**2 #pm.Uniform("a_s", 0.1, 0.5)
     
-    #t_m = pm.Uniform("t_m", 0.05, 0.2)
-    #t_s = pm.Uniform("t_s", 0.5, 1)
+    t_m = pm.Uniform("t_m", 0.05, 0.1)
+    t_s = 0.2**2 #pm.Uniform("t_s", 0.5, 1)
     
     v_m = pm.Uniform("v_m", 1.5, 2.5)
     v_s = 0.2**2 #pm.Uniform("v_s", 0.1, 0.5)
@@ -99,17 +99,18 @@ def _priors_noncentral(I,model_mc):
 
     a_n = pm.Normal("a_n", shape=(I,1), dims="partID")
     v_n = pm.Normal("v_n", shape=(I,1), dims="partID")
+    t_n = pm.Normal("t_n", shape=(I,1), dims="partID")
 
     a = pm.Deterministic("a", a_m + a_s*(a_n**2), dims="partID")
     v = pm.Deterministic("v", v_m + v_s*(v_n**2), dims="partID")
-    #t = pm.Deterministic("t", t_m + t_s*t_n, dims="partID")
+    t = pm.Deterministic("t", t_m + t_s*t_n, dims="partID")
 
     #a = pm.Gamma("a", mu=a_m, sigma=a_s, shape=(I,1), dims="partID")
     #v = pm.Gamma("v", mu=v_m, sigma=v_s, shape=(I,1), dims="partID")
     
     #a = pm.HalfNormal("a", a_s, shape=(I,1), dims="partID")
     #v = pm.HalfNormal("v", v_s, shape=(I,1), dims="partID")
-    t = pm.HalfNormal("t", 0.1, shape=(I,1), dims="partID")
+    #t = pm.HalfNormal("t", 0.1, shape=(I,1), dims="partID")
     
   return a, v, t
   
