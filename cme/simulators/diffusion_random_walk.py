@@ -20,6 +20,8 @@ def _create_Wiener_Q(n_states, alpha, tau, sigma, mu):
     Q[rows_,cols_] = 1/(2*alpha)*(1-mu*sqrt(tau)/sigma**2)
     Q[cols_, rows_] =  1/(2*alpha)*(1+mu*sqrt(tau)/sigma**2)
     Q[arange(n_states), arange(n_states)] = 1-(1/alpha)
+    Q[0,1] = 0
+    Q[-1,-2] = 0
     return Q
 
 def _create_pWiener_Q(n_states, alpha, tau, sigma, mu):
@@ -32,7 +34,8 @@ def _create_pWiener_Q(n_states, alpha, tau, sigma, mu):
     Q[rows_,cols_] = 1/(2*alpha)*(1-mu_t)[rows_]
     Q[cols_, rows_] =  1/(2*alpha)*(1+mu_t)[cols_]
     Q[arange(n_states), arange(n_states)] = 1-(1/alpha)
-    
+    Q[0,1] = 0
+    Q[-1,-2] = 0
     return Q
 
 def _create_OU_Q(n_states, alpha, tau, sigma, delta, gamma):
@@ -42,15 +45,17 @@ def _create_OU_Q(n_states, alpha, tau, sigma, delta, gamma):
     cols_ = arange(0,n_states-1)
     x = arange(n_states)
 
-    p1 = 1/(2*alpha) * ( 1 - (( delta-gamma * x ) * sqrt(tau)/sigma**2 ))
-    p2 = 1/(2*alpha) * ( 1 + (( delta-gamma * x ) * sqrt(tau)/sigma**2 ))
+    p1 = 1/(2*alpha) * ( 1 - ( (delta - (gamma * x))  * sqrt(tau)/sigma**2 ))
+    p2 = 1/(2*alpha) * ( 1 + ( (delta - (gamma * x))  * sqrt(tau)/sigma**2 ))
     p3 = 1 - (1/alpha)
     
 
     Q[rows_,cols_] = p1[rows_]
     Q[cols_, rows_] = p2[cols_]
     Q[arange(n_states), arange(n_states)] = p3
-    
+    Q[0,1] = 0
+    Q[-1,-2] = 0
+
     return Q
 
 def _get_initial_state(n_states):
@@ -71,12 +76,14 @@ def _random_walk_next_step(s_t, Q):
    p_t = around(p_t.squeeze(),decimals=2)
    z=sum(p_t)
    while(z>1):
-      p_t = p_t/z
-      z=sum(p_t+0.01)
       print(f"$$$$$$$$$$$ Floating point error $$$$$$$$$$$$$$$$$$$ {z}")
-   
-   s_t_1 = multinomial.rvs(n=1, p=p_t) 
-   
+
+   try:
+      s_t_1 = multinomial.rvs(n=1, p=p_t) 
+   except Exception as e:
+      print("*************")
+      print(Q)
+      print(p_t)
 
       
    ind_t_1 = where(s_t_1)[0][0]
@@ -251,6 +258,14 @@ if __name__ == "__main__":
     log.debug(X_arr)
     log.debug(RT_arr)
     log.debug("test successful1")
+
+    delta, gamma = asarray([3]), asarray([0.01])
+    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, delta, gamma,samples = 10, process="OU",njobs=8)
+    assert len(RT_arr) == 10
+    assert len(X_arr) == 10
+    log.debug(X_arr)
+    log.debug(RT_arr)
+    log.debug("test successful1-OU")
 
 
     mu=asarray([-0.2])
