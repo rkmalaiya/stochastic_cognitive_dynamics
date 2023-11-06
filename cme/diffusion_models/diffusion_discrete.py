@@ -185,7 +185,7 @@ def sample_post_pred_data(model, var_name, samples_n=100):
 
 if __name__ == "__main__":
     
-    mu_arr,sigma = npx.asarray([[0.01,0.01,0.01,0.01,0.01,0.01,0.01]]), npx.asarray([1])
+    mu_arr,sigma = npx.asarray([[0.01,0.01,0.01,0.01,0.01,0.01,5]]), npx.asarray([1])
     
 
     ic(_buildK(7, mu=mu_arr, sigma=sigma))
@@ -228,40 +228,42 @@ if __name__ == "__main__":
     phi_0 = _get_initial_state(n_states, start_width)
     K = _buildK(7, mu=mu_arr, sigma=sigma)
 
-    conf_arr = []
-    for r in np.arange(0,20,0.1):
-        P_t, Mconf = sample_states_and_confidence(r, phi_0, K)
-        conf_arr.append(Mconf.squeeze())
+    #conf_arr = []
+    #for r in np.arange(0,20,0.1):
+    #    P_t, Mconf = sample_states_and_confidence(r, phi_0, K)
+    #    conf_arr.append(Mconf.squeeze())
 
-    conf = np.asarray(conf_arr)
-    pd.Series(conf).plot.line()
-    plt.show()
+    #conf = np.asarray(conf_arr)
+    #pd.Series(conf).plot.line()
+    #plt.show()
 
 
-    df_st, df_avg_conf, df_avg_corr = perform_walk(n_states=7, start_width=3, mu=mu_arr, sigma=2,max_timesteps=20, delta=0.1)
+    df_st, df_avg_conf, df_likl = perform_walk(n_states=7, start_width=3, mu=mu_arr, sigma=2,max_timesteps=20, delta=0.1)
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
+    sns.relplot(df_avg_conf, x="time",y="avg_conf")
     plt.show()
 
     ic("Variable Drift Rate - 2")
-    mu_arr = npx.asarray([np.repeat([0.5,0.5,0.5,5],26)[0:101]])
+    mu_arr = npx.asarray([np.repeat([0.01,0.01,0.01,5],26)[0:101]])
 
     phi_0 = _get_initial_state(n_states, start_width)
     K = _buildK(7, mu=mu_arr, sigma=sigma)
-    conf_arr = []
+    #conf_arr = []
     
-    for r in np.arange(0,20,0.1):
-        P_t, Mconf = sample_states_and_confidence(r, phi_0, K)
-        conf_arr.append(Mconf.squeeze())
+    #for r in np.arange(0,20,0.1):
+    #    P_t, Mconf = sample_states_and_confidence(r, phi_0, K)
+    #    conf_arr.append(Mconf.squeeze())
 
-    conf = np.asarray(conf_arr)
-    pd.Series(conf).plot.line()
-    plt.show()
+    #conf = np.asarray(conf_arr)
+    #pd.Series(conf).plot.line()
+    #plt.show()
 
 
-    df_st, df_avg_conf, df_avg_corr = perform_walk(n_states=101, start_width=11, mu=mu_arr, sigma=2,max_timesteps=20, delta=0.1)
+    df_st, df_avg_conf, df_likl = perform_walk(n_states=101, start_width=11, mu=mu_arr, sigma=2,max_timesteps=800, delta=80)
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
+    sns.relplot(df_avg_conf, x="time",y="avg_conf")
     plt.show()
    
 
