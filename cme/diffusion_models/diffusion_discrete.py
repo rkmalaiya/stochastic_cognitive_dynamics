@@ -93,7 +93,7 @@ def likelihood(K,rt, ra, phi_0, delta, Mc, Mw, Mn):
         #ic(T_t_i.shape, n_i.shape)
         for T_t_i_j, n_i_j in zip(T_t_i, n_i):
             #ic(T_t_i_j.shape, n_i_j.shape)
-            phi_noresp_arr.append(num_ln.matrix_power(Mn @ T_t_i_j, n_i_j.astype(int).item()) @ phi_0)
+            phi_noresp_arr.append(num_ln.matrix_power(Mn @ T_t_i_j, n_i_j.astype(int).item()-1) @ phi_0)
 
     phi_noresp = npx.asarray(phi_noresp_arr)
 
@@ -219,9 +219,11 @@ if __name__ == "__main__":
     pd.Series(conf).plot.line()
     plt.show()
 
-    df_st, df_avg_conf, df_avg_corr = perform_walk(n_states=7, start_width=3, mu=[[0.5]], sigma=2,max_timesteps=20, delta=0.1)
+    df_st, df_avg_conf, df_likl = perform_walk(n_states=7, start_width=3, mu=[[0.5]], sigma=2,max_timesteps=20, delta=0.1)
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
+    sns.relplot(df_avg_conf, x="time",y="avg_conf")
+    sns.relplot(df_likl, x="time",y="liklihood")
     plt.show()
     
     ic("Variable Drift Rate - 1")
@@ -242,6 +244,7 @@ if __name__ == "__main__":
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
     sns.relplot(df_avg_conf, x="time",y="avg_conf")
+    sns.relplot(df_likl, x="time",y="liklihood")
     plt.show()
 
     ic("Variable Drift Rate - 2")
@@ -264,6 +267,7 @@ if __name__ == "__main__":
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
     sns.relplot(df_avg_conf, x="time",y="avg_conf")
+    sns.relplot(df_likl, x="time",y="liklihood")
     plt.show()
    
 
