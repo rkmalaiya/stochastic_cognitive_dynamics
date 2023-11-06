@@ -4,5 +4,7 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+	"settings": {
+		"python.defaultInterpreterPath": "/home/rkmalaiya/miniconda3/envs/ds1/bin/python"
+	}
 }
