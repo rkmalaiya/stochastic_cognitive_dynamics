@@ -44,25 +44,34 @@ def _buildK(n_states, mu, sigma=1, delta=1):
         
     return K
 
-def _get_measurement_matrix(n_states, start_width):
-    Mc = npx.zeros((n_states, n_states)) # correct response
-    for i in range(n_states):
-        if i > int(n_states/2) + start_width:
-            Mc = Mc.at[i,i].set(0.5)
+def _get_measurement_matrix(n_states, start_width, prob = 0.5):
+    
+    Mcorr = npx.zeros(n_states)
+    Mcorr = Mcorr.at[-start_width:].set(prob)
+    Mcorr = npx.diag(Mcorr)
 
-    Mw = npx.zeros((n_states, n_states)) # incorrect response
-    for i in range(n_states):
-        if i < int(n_states/2) - start_width:
-            Mw = Mw.at[i,i].set(0.5)
+    Mincorr = npx.zeros(n_states)
+    Mincorr = Mincorr.at[:start_width].set(prob)
+    Mincorr = npx.diag(Mincorr)
+    
+    #Mc = npx.zeros((n_states, n_states)) # correct response
+    #for i in range(n_states):
+    #    if i > int(n_states/2) + start_width:
+    #        Mc = Mc.at[i,i].set(prob)
 
-    Mn = npx.eye(n_states) - Mc - Mw
+    #Mw = npx.zeros((n_states, n_states)) # incorrect response
+    #for i in range(n_states):
+    #    if i < int(n_states/2) - start_width:
+    #        Mw = Mw.at[i,i].set(prob)
 
-    return Mc, Mw, Mn
+    Mnoresp = npx.eye(n_states) - Mcorr - Mincorr
+
+    return Mcorr, Mincorr, Mnoresp
 
 def _get_initial_state(n_states, start_width):
 
     Mid = int((n_states+1)/2)
-    p_0 = npx.ones((n_states,1)) 
+    p_0 = npx.zeros((n_states,1)) 
     p_0 = p_0.at[(Mid-start_width-1):(Mid+start_width)].set(1) # additional -1 because indexing starts from 0
     p_0 = p_0.reshape(-1,1) # to get column vector
     p_0 = p_0 / npx.sum(p_0)
@@ -87,15 +96,14 @@ def likelihood(K,rt, ra, phi_0, delta, Mc, Mw, Mn):
     rt = npx.expand_dims(rt, axis=2)
 
     T_t=ln.expm(delta*K) # rt:I,J,1,1; K:I,J,m,m This is transaction matrix
-    phi_noresp_arr = []
-
+    
+    phi_noresp_arr_i = []
     for T_t_i, n_i in zip(T_t, n_noresp):
-        #ic(T_t_i.shape, n_i.shape)
+        phi_noresp_arr_i_j = []
         for T_t_i_j, n_i_j in zip(T_t_i, n_i):
-            #ic(T_t_i_j.shape, n_i_j.shape)
-            phi_noresp_arr.append(num_ln.matrix_power(Mn @ T_t_i_j, n_i_j.astype(int).item()-1) @ phi_0)
-
-    phi_noresp = npx.asarray(phi_noresp_arr)
+            phi_noresp_arr_i_j.append(num_ln.matrix_power(Mn @ T_t_i_j, n_i_j.astype(int).item()-1) @ phi_0) #n_state x 1
+        phi_noresp_arr_i.append(npx.asarray(phi_noresp_arr_i_j))    
+    phi_noresp = npx.asarray(phi_noresp_arr_i) # n_part x n_trials x n_state x 1
 
     Pcorrect = (Mc @ phi_noresp).sum(axis=(-2,-1))
     Pincorrect = (Mw @ phi_noresp).sum(axis=(-2,-1))
@@ -105,20 +113,20 @@ def likelihood(K,rt, ra, phi_0, delta, Mc, Mw, Mn):
     #Pcorrect = Pcorrect.sum(axis=(-2,-1)) #.squeeze() # adding up the probabilities over states for a given response
     
     P_total = npx.where(ra==0, Pincorrect, Pcorrect)
-    likl = P_total.sum(axis=-1)
+    likl = P_total.sum()
 
     return likl #likelihood hence adding up over all responses.
 
-def perform_walk(n_states, start_width, mu, sigma,max_timesteps=10, delta=0.1):
+def perform_walk(n_states, start_width, mu, sigma,max_timesteps=10, delta=1, prob=0.25):
 
     avg_conf = [];  
     state_prob = []
     likl_prob = []
     p_0 = _get_initial_state(n_states, start_width)
-    Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width)
+    Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, prob)
     ra = 1
 
-    for rt in list(npx.arange(0,max_timesteps,step=delta)):
+    for rt in list(npx.arange(1,max_timesteps,step=delta)):
         
         #print(p_0, "**********")
         K= _buildK(n_states, mu=mu, sigma=sigma)
@@ -199,10 +207,10 @@ if __name__ == "__main__":
     ic(_buildK(7, mu=npx.asarray([[1,2,0.5]]), sigma=1).shape)
 
 
-    ic("Constant Drift Rate")
+    ic("Constant Drift Rate - 1")
     # Replicating the plots in Busemeyer 2010
     n_states=7
-    start_width=0
+    start_width=3
     mu=[[0.5]] #drift rate
     sigma=2 #diffusion
 
@@ -219,7 +227,17 @@ if __name__ == "__main__":
     pd.Series(conf).plot.line()
     plt.show()
 
-    df_st, df_avg_conf, df_likl = perform_walk(n_states=7, start_width=3, mu=[[0.5]], sigma=2,max_timesteps=20, delta=0.1)
+    ic("Constant Drift Rate - 2")
+    # Replicating the plots in Busemeyer 2010
+    n_states=101
+    start_width=4
+    mu=[[0.56]] #drift rate
+    sigma=20.09 #diffusion
+
+    phi_0 = _get_initial_state(n_states, start_width)
+    K = _buildK(n_states,mu,sigma)
+
+    df_st, df_avg_conf, df_likl = perform_walk(n_states=n_states, start_width=start_width, mu=mu, sigma=sigma,max_timesteps=200, delta=1, prob=0.25)
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
     sns.relplot(df_avg_conf, x="time",y="avg_conf")
@@ -230,17 +248,7 @@ if __name__ == "__main__":
     phi_0 = _get_initial_state(n_states, start_width)
     K = _buildK(7, mu=mu_arr, sigma=sigma)
 
-    #conf_arr = []
-    #for r in np.arange(0,20,0.1):
-    #    P_t, Mconf = sample_states_and_confidence(r, phi_0, K)
-    #    conf_arr.append(Mconf.squeeze())
-
-    #conf = np.asarray(conf_arr)
-    #pd.Series(conf).plot.line()
-    #plt.show()
-
-
-    df_st, df_avg_conf, df_likl = perform_walk(n_states=7, start_width=3, mu=mu_arr, sigma=2,max_timesteps=20, delta=0.1)
+    df_st, df_avg_conf, df_likl = perform_walk(n_states=7, start_width=3, mu=mu_arr, sigma=2,max_timesteps=100, delta=1)
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
     sns.relplot(df_avg_conf, x="time",y="avg_conf")
@@ -248,22 +256,12 @@ if __name__ == "__main__":
     plt.show()
 
     ic("Variable Drift Rate - 2")
-    mu_arr = npx.asarray([np.repeat([0.01,0.01,0.01,5],26)[0:101]])
+    mu_arr = npx.asarray([np.repeat([0.01,0.01,0.01,2],26)[0:101]])
 
     phi_0 = _get_initial_state(n_states, start_width)
     K = _buildK(7, mu=mu_arr, sigma=sigma)
-    #conf_arr = []
-    
-    #for r in np.arange(0,20,0.1):
-    #    P_t, Mconf = sample_states_and_confidence(r, phi_0, K)
-    #    conf_arr.append(Mconf.squeeze())
 
-    #conf = np.asarray(conf_arr)
-    #pd.Series(conf).plot.line()
-    #plt.show()
-
-
-    df_st, df_avg_conf, df_likl = perform_walk(n_states=101, start_width=11, mu=mu_arr, sigma=2,max_timesteps=800, delta=80)
+    df_st, df_avg_conf, df_likl = perform_walk(n_states=101, start_width=11, mu=mu_arr, sigma=2,max_timesteps=500, delta=10)
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
     sns.relplot(df_avg_conf, x="time",y="avg_conf")
