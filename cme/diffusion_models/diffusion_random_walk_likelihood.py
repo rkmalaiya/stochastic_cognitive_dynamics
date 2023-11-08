@@ -93,7 +93,7 @@ def sample_posterior(t, x, num_samples=200, num_warmup=100):
 
    # Run NUTS.
    kernel = NUTS(_model)
-   mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples)
+   mcmc = MCMC(kernel, num_warmup=num_warmup, num_samples=num_samples, num_chains=4)
    mcmc.run(
       rng_key_, n_states = get_n_states(), t=t, x=x
    )
@@ -177,5 +177,6 @@ if __name__ == "__main__":
    print(Pr)
    print("sampling******")
 
-   sample_posterior(t,x,50,10)
+   mcmc_chain = sample_posterior(t,x,50,10)
+   print(az.summary(mcmc_chain))
 
