@@ -95,15 +95,20 @@ def _calculate_RT_logp(DT, V, A, Z):
 
 def _diffusion_RT_logp(RT, X, v, a, z, t_er):    
 
-    V = at.switch(at.eq(X,1), -v, v) # -v,v
-    A = at.switch(at.eq(X,1), a, a)
-    Z = at.switch(at.eq(X,1), 1-z, z) # 1-z, z
-    T_er = at.switch(at.eq(X,1), t_er, t_er)
+    #V = at.switch(at.eq(X,1), -v, v) # -v,v
+    #A = at.switch(at.eq(X,1), a, a)
+    #Z = at.switch(at.eq(X,1), 1-z, z) # 1-z, z
+    #T_er = at.switch(at.eq(X,1), t_er, t_er)
 
-    prob_rt = _calculate_RT_logp(RT-T_er, V, A, Z)
+    prob_rt_correct = _calculate_RT_logp(RT-t_er, -v, a, 1-z)
+    prob_rt_incorrect = _calculate_RT_logp(RT-t_er, v, a, z)
+
+    prob_rt = at.switch(at.eq(X,0), prob_rt_incorrect, prob_rt_correct)
+
     prob_rt = at.switch(at.isinf(prob_rt), 0, prob_rt) 
     prob_rt = at.switch(at.isnan(prob_rt), 0, prob_rt)
     prob_rt = at.log(prob_rt.sum())
+
 
     # eps is used to stabilished log
     total_logp = at.switch(at.eq(prob_rt,0), 0, at.log(prob_rt)) 

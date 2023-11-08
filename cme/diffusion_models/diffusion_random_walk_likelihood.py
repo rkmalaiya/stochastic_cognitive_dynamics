@@ -9,6 +9,7 @@ from numpyro.infer import Predictive
 from jax import random
 from numpyro.infer import MCMC, NUTS
 import arviz as az
+ro.set_host_device_count(4)
 
 
 log = cl.get_logger("random-walk")
@@ -33,7 +34,7 @@ def _create_Wiener_Q(n_part, n_states, alpha, tau, sigma, v):
       Q = Q.at[i,:, -1,-2].set(0)
     return Q
 
-def init_model(n_part, v, n_states):
+def init_model(n_part, v, n_states, alpha, tau, sigma):
 
    #x = np.arange(-(n_states-1)/2, (n_states-1)/2)
    
@@ -73,21 +74,21 @@ def _liklihood(t, x, T_m, Z, I, N):
    likl = likl.sum()
    return likl
 
-def _model(n_states, n_within_trials=1, tau=0.01, t= None, x=None):
+def _model(n_states, n_within_trials=1, alpha=1.5, tau=0.01, sigma=1, t= None, x=None):
 
    n_part = t.shape[0] if t is not None else 1
    Z = ro.sample("start_state", dist.Dirichlet(np.repeat(0.5,n_states-2)), sample_shape=(n_part,)) # To match the Q matrix (see Diederich 2003)
    v = ro.sample("drift", dist.Normal(0,1),sample_shape=(n_part,n_within_trials))
 
-   T_m, I = init_model(n_part, v, n_states)
+   T_m, I = init_model(n_part, v, n_states, alpha, tau, sigma)
 
-   N = np.asarray((t / tau) - 1).astype(int)
+   N = np.asarray((t / tau) - 1).astype(int) if t is not None else np.asarray([[1]])
 
    ro.factor("likl", _liklihood(t,x,T_m, Z, I, N))
 
    return Z, v
 
-def sample_posterior(t, x, num_samples=200, num_warmup=100):
+def sample_posterior_params(t, x, num_samples=200, num_warmup=100):
    rng_key = random.PRNGKey(0)
    rng_key, rng_key_ = random.split(rng_key)
 
@@ -99,7 +100,7 @@ def sample_posterior(t, x, num_samples=200, num_warmup=100):
    )
 
    mcmc_chain = az.from_numpyro(mcmc)
-   return mcmc_chain
+   return mcmc#_chain
 
 if __name__ == "__main__":
    alpha=1.5
@@ -127,7 +128,7 @@ if __name__ == "__main__":
    v = dist.Normal(0,1).sample(rng, sample_shape=(n_part,1))
 
 
-   T_m, I = init_model(n_part, v, n_states)
+   T_m, I = init_model(n_part, v, n_states, alpha=1.5, tau=0.01, sigma=1)
 
    t, x = at.asarray([[1.5]]), at.asarray([[1]]) 
 
@@ -146,7 +147,7 @@ if __name__ == "__main__":
    Z = dist.Dirichlet(np.repeat(0.5,n_states-2)).sample(rng, sample_shape=(n_part,))
    v = dist.Normal(0,1).sample(rng, sample_shape=(n_part,1))
 
-   T_m, I = init_model(n_part, v, n_states)
+   T_m, I = init_model(n_part, v, n_states, alpha=1.5, tau=0.01, sigma=1)
    n_within_trial = T_m.shape[0]
 
    t, x = np.random.random((n_part,4)) + np.random.random((n_part,4)), np.random.randint(0,2, size = (n_part,4))
@@ -166,7 +167,7 @@ if __name__ == "__main__":
    Z = dist.Dirichlet(np.repeat(0.5,n_states-2)).sample(rng, sample_shape=(n_part,))
    v = dist.Normal(0,1).sample(rng, sample_shape=(n_part,n_states-1))
 
-   T_m, I = init_model(n_part, v, n_states)
+   T_m, I = init_model(n_part, v, n_states, alpha=1.5, tau=0.01, sigma=1)
    n_within_trial = T_m.shape[0]
 
    t, x = np.random.random((n_part,4)) + np.random.random((n_part,4)), np.random.randint(0,2, size = (n_part,4))
@@ -177,6 +178,15 @@ if __name__ == "__main__":
    print(Pr)
    print("sampling******")
 
-   mcmc_chain = sample_posterior(t,x,50,10)
+   mcmc_chain = sample_posterior_params(t,x,50,10)
    print(az.summary(mcmc_chain))
+
+   pred_prior = Predictive(_model, num_samples=10)
+   samples_predictive = pred_prior(random.PRNGKey(1),7)
+   print(samples_predictive.keys())
+
+   pred_post = Predictive(_model, mcmc_chain.get_samples())
+   samples_predictive = pred_post(random.PRNGKey(1),get_n_states())
+   print(samples_predictive.keys())
+
 
