@@ -243,7 +243,7 @@ def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, 
 
     return mcmc_chain
 
-def sample_prior_pred_data(n_states, start_width, tau, sigma, I, J, samples_n=100):
+def sample_prior_pred_data(n_states, start_width, tau, sigma, I, J, samples_n=100, njobs=8):
     s_0 = _get_initial_state(n_states, start_width)
     prior_predictive = Predictive(model, num_samples=samples_n)
     prior_predictions = prior_predictive(_rng_key, n_states, start_width, None, None, I, J, s_0)
@@ -251,7 +251,7 @@ def sample_prior_pred_data(n_states, start_width, tau, sigma, I, J, samples_n=10
     theta = int((n_states+1)/2)
     mu_s = prior_predictions["mu"]
     
-    RT, X, Steps = get_rt_sample(theta, 1.5, tau, sigma[0], mu_s, n_trials = J)
+    RT, X, Steps = get_rt_sample(theta, 1.5, tau, sigma[0], mu_s, n_trials = J, njobs=njobs)
 
     prior_predictions["RT"] = RT
     prior_predictions["X"] = X
@@ -267,7 +267,7 @@ def sample_prior_pred_data(n_states, start_width, tau, sigma, I, J, samples_n=10
 
     return prior_predictions
 
-def get_rt_sample(theta, alpha, tau, sigma, mu_s, n_trials):
+def get_rt_sample(theta, alpha, tau, sigma, mu_s, n_trials, njobs=8):
 
     C, I, _ = mu_s.shape
 
@@ -279,7 +279,7 @@ def get_rt_sample(theta, alpha, tau, sigma, mu_s, n_trials):
         steps_arr_i = []
         for i in npx.arange(I):
 
-            RT_arr, X_arr, steps = drw.gen_rt_x(theta, alpha, tau, sigma, mu_s[c,i,...], samples=n_trials, process="Wiener", initial="Any")
+            RT_arr, X_arr, steps = drw.gen_rt_x(theta, alpha, tau, sigma, mu_s[c,i,...], samples=n_trials, process="Wiener", initial="Any", njobs=njobs)
             RT[c, i,:] = RT_arr
             X[c, i,:] = X_arr
             steps_arr_i.append(steps)
