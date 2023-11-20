@@ -199,14 +199,20 @@ def model(n_states, start_width, rt, ra,I,J, s_0):
     
     Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, 0.25)
 
-    mu_m =  npy.sample(f"mu_m", dist.Normal(2,3))
-    mu_s =  npy.sample(f"mu_s", dist.HalfNormal(2))
+    #mu_m =  npy.sample(f"mu_m", dist.Normal(2,3))
+    #mu_s =  npy.sample(f"mu_s", dist.HalfNormal(2))
     delta = np.asarray([[0.001]])
     sigma=1
     n_noresp = rt/delta if rt is not None else 10
     
+    m = npy.sample("mu_m", dist.Normal("m",0,1))
+    s = npy.sample("mu_s", dist.HalfNormal("m",1)) #s = pm.Normal("s",0,0.2,shape=4)
+
+
     with npy.plate('I', I, dim=-2) as ind:
-        mu =  npy.sample(f"mu", dist.Normal(mu_m,mu_s),sample_shape=(I,1))
+        #mu =  npy.sample(f"mu", dist.Normal(mu_m,mu_s),sample_shape=(I,1))
+        mu_r = npy.sample("mu_r", dist.Normal(0,1,shape=(I,1))) # Drift Rate
+        mu = npy.Deterministic("mu", m + s * mu_r)
 
         K = _buildK(n_states,mu,sigma,delta=delta)
     
