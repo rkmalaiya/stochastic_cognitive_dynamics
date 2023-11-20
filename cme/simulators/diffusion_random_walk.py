@@ -98,7 +98,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
    X = -1
    max_steps = 4000
    
-   n_states = theta #_get_n_states(alpha, theta, tau, sigma)
+   n_states = _get_n_states(alpha, theta, tau, sigma)
 
    Q = get_transition_matrix(alpha, tau, sigma, *params, process=process, n_states=n_states)
    
@@ -139,11 +139,11 @@ def get_transition_matrix(alpha, tau, sigma, *params, process, n_states):
     return Q
 
 
-def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Any",njobs=8):
+def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Any", njobs=8):
    RT_arr = []
    X_arr = []
    steps_arr = []
-   max_iter = samples*50
+   max_iter = samples*500
 
    ret_ans = Parallel(n_jobs=njobs)(
        

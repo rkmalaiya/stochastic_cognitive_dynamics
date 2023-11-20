@@ -16,8 +16,9 @@ log = cl.get_logger("random-walk")
 
 
 def get_n_states(alpha=1.5, theta=5, tau=0.01, sigma=1):
+    #theta represents the decision bounds
     delta_state = alpha * sigma * at.sqrt(tau)
-    n_states = at.round(theta/delta_state) #2 * round(theta/delta_state) + 1
+    n_states = 2 * round(theta/delta_state) + 1 #at.round(theta/delta_state) #2 * round(theta/delta_state) + 1
     return n_states.astype(int).item()
 
 def _create_Wiener_Q(n_part, n_states, alpha, tau, sigma, v):
@@ -62,7 +63,7 @@ def _liklihood(t, x, T_m, Z, I, N):
          a1 = Q[i,j]
          a2 = N[i,j]
          #a2 = a2.astype(int).item()
-         t1 = t1.at[i,j,...].set(at.linalg.matrix_power(a1, a2.item()))
+         t1 = t1.at[i,j,...].set(at.linalg.matrix_power(a1, a2.item()-1))
 
    t2 = at.linalg.matrix_power(I - Q, -1)
    
@@ -78,7 +79,7 @@ def _model(n_states, n_within_trials=1, alpha=1.5, tau=0.01, sigma=1, t= None, x
 
    n_part = t.shape[0] if t is not None else 1
    Z = ro.sample("start_state", dist.Dirichlet(np.repeat(0.5,n_states-2)), sample_shape=(n_part,)) # To match the Q matrix (see Diederich 2003)
-   v = ro.sample("drift", dist.Normal(0,1),sample_shape=(n_part,n_within_trials))
+   v = ro.sample("drift", dist.Normal(0,1),sample_shape=(n_part,n_states-1))
 
    T_m, I = init_model(n_part, v, n_states, alpha, tau, sigma)
 
@@ -124,15 +125,22 @@ if __name__ == "__main__":
    n_states = get_n_states(alpha, theta, tau, sigma)
 
    #res = Predictive(get_prior(n_part, n_states, n_within_trial))(rng)
-   Z = dist.Dirichlet(np.repeat(0.5,n_states-2)).sample(rng, sample_shape=(1,))
+   Z = np.ones((1, n_states-2)); Z = Z/Z.sum() # dist.Dirichlet(np.repeat(0.5,n_states-2)).sample(rng, sample_shape=(1,))
    v = dist.Normal(0,1).sample(rng, sample_shape=(n_part,1))
 
+   #N = 20
 
-   T_m, I = init_model(n_part, v, n_states, alpha=1.5, tau=0.01, sigma=1)
+   t = at.asarray([[tau]])
 
-   t, x = at.asarray([[1.5]]), at.asarray([[1]]) 
+   #tau = t / N
 
-   N = at.asarray((t / tau) - 1).astype(int)
+
+   T_m, I = init_model(n_part, v, n_states, alpha=1.5, tau=tau, sigma=1)
+
+   #t, x = at.asarray([[tau]]), at.asarray([[1]]) 
+   x = at.asarray([[1]]) 
+
+   N = at.asarray((t / tau)).astype(int)
 
    Pr = _liklihood(t, x, T_m, Z, I, N)
    print(Pr)
@@ -147,12 +155,12 @@ if __name__ == "__main__":
    Z = dist.Dirichlet(np.repeat(0.5,n_states-2)).sample(rng, sample_shape=(n_part,))
    v = dist.Normal(0,1).sample(rng, sample_shape=(n_part,1))
 
-   T_m, I = init_model(n_part, v, n_states, alpha=1.5, tau=0.01, sigma=1)
+   T_m, I = init_model(n_part, v, n_states, alpha=1.5, tau=tau, sigma=1)
    n_within_trial = T_m.shape[0]
 
    t, x = np.random.random((n_part,4)) + np.random.random((n_part,4)), np.random.randint(0,2, size = (n_part,4))
 
-   N = at.asarray((t / tau) - 1).astype(int)
+   N = at.asarray((t / tau)).astype(int)
 
    Pr = _liklihood(t, x, T_m, Z, I, N)
    print(Pr)
@@ -172,7 +180,7 @@ if __name__ == "__main__":
 
    t, x = np.random.random((n_part,4)) + np.random.random((n_part,4)), np.random.randint(0,2, size = (n_part,4))
 
-   N = at.asarray((t / tau) - 1).astype(int)
+   N = at.asarray((t / tau)).astype(int)
 
    Pr = _liklihood(t, x, T_m, Z, I, N)
    print(Pr)
