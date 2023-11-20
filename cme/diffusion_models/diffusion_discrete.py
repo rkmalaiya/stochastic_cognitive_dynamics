@@ -195,14 +195,14 @@ def perform_walk(n_states, start_width, mu, sigma, max_timesteps=10, delta=1, pr
 
     return df_st, df_avg_conf, df_likl
 
-def model(n_states, start_width, rt, ra,I,J, s_0):
+def model(n_states, start_width, sigma, tau, rt, ra,I,J, s_0):
     
     Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, 0.25)
 
     #mu_m =  npy.sample(f"mu_m", dist.Normal(2,3))
     #mu_s =  npy.sample(f"mu_s", dist.HalfNormal(2))
-    delta = np.asarray([[0.001]])
-    sigma=1
+    delta = np.asarray([[tau]])
+    
     n_noresp = rt/delta if rt is not None else 10
     
     m = npy.sample("mu_m", dist.Normal("m",0,1))
@@ -226,7 +226,7 @@ def model(n_states, start_width, rt, ra,I,J, s_0):
             lkl = likelihood(K, rt, ra, s_0, n_noresp, delta, Mc, Mw, Mn)
             npy.factor(f"likelihood", lkl)
 
-def sample_posterior_params(DT, X, n_states, start_width, I = None, num_warmup=100, samples_n=500, num_chains=4):
+def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, num_warmup=100, samples_n=500, num_chains=4):
 
     s_0 = _get_initial_state(n_states, start_width)
     I,J = DT.shape if I is None else I,DT.shape[1]
@@ -239,7 +239,7 @@ def sample_posterior_params(DT, X, n_states, start_width, I = None, num_warmup=1
 
     kernel = NUTS(model)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
-    mcmc_chain.run(_rng_key, n_states, start_width, DT, X, I, J, s_0)
+    mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0)
 
     return mcmc_chain
 
