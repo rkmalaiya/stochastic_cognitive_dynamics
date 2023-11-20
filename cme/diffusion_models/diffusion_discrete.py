@@ -226,15 +226,16 @@ def model(n_states, start_width, rt, ra,I,J, s_0):
             lkl = likelihood(K, rt, ra, s_0, n_noresp, delta, Mc, Mw, Mn)
             npy.factor(f"likelihood", lkl)
 
-def sample_posterior_params(DT, X, n_states, start_width, num_warmup=100, samples_n=500, num_chains=4):
+def sample_posterior_params(DT, X, n_states, start_width, I = None, num_warmup=100, samples_n=500, num_chains=4):
 
     s_0 = _get_initial_state(n_states, start_width)
-    
+    I,J = DT.shape if I is None else I,DT.shape[1]
+
     #kernel = HMCECS(NUTS(model), num_blocks=10)
     #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
     #mcmc_chain.run(_rng_key, n_states, start_width, DT, X, I,J, s_0, Mr)
 
-    I,J = DT.shape
+    
 
     kernel = NUTS(model)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
