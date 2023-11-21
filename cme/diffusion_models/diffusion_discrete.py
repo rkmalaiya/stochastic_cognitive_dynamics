@@ -141,13 +141,14 @@ def likelihood(K,rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn):
 
     return likl #likelihood hence adding up over all responses.
 
-def perform_walk(n_states, start_width, mu, sigma, max_timesteps=10, delta=1, prob=0.25, n_noresp = None):
+def perform_walk(n_states, start_width, mu, sigma, max_timesteps=10, delta=None, prob=0.25, n_noresp = None):
 
     avg_conf = [];  
     state_prob = []
     likl_prob = []
     n_noresp_arr = []
     noresp_traj_arr = []
+    rt_arr = []
     p_0 = _get_initial_state(n_states, start_width)
     Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, prob)
     ra = npx.asarray([[1]])
@@ -176,22 +177,27 @@ def perform_walk(n_states, start_width, mu, sigma, max_timesteps=10, delta=1, pr
         avg_conf.append(Mconf)
         noresp_traj_arr.append(noresp_traj)
         n_noresp_arr.append(n_noresp_1)
+        rt_arr.append((np.asarray(rt)*delta)[0,0])
 
     df_avg_conf = pd.DataFrame(np.asarray(avg_conf).squeeze()).rename({0:"avg_conf"}, axis=1)
-    df_avg_conf = df_avg_conf.reset_index().rename({"index":"time"}, axis=1)
+    #df_avg_conf = df_avg_conf.reset_index().rename({"index":"time"}, axis=1)
+    df_avg_conf.loc[:,"time"] = pd.Series(rt_arr) #df_avg_conf["time"] * delta
 
     df_likl = pd.DataFrame(np.asarray(likl_prob)).rename({0:"liklihood"}, axis=1)
-    df_likl = df_likl.reset_index().rename({"index":"time"}, axis=1)
+    #df_likl = df_likl.reset_index().rename({"index":"time"}, axis=1)
+    df_likl.loc[:,"time"] = pd.Series(rt_arr) 
+    
 
     df_st = pd.DataFrame(np.asarray(state_prob).squeeze())
     Mid = int((n_states+1)/2)
     mv = np.arange(-(Mid-1),(Mid))
     df_st.columns = mv
     df_st = df_st.reset_index() \
-                .melt(id_vars = "index",var_name="state", value_name="probability") \
-                .rename({"index":"time"}, axis=1)
+                .melt(id_vars = "index",var_name="state", value_name="probability") #\
+                #.rename({"index":"time"}, axis=1)
     #df_st.loc[:,"state"] = df_st.state.astype("category")
-    df_st.loc[:,"time"] = df_st.time.astype("category")
+    df_st.loc[:,"time"] = pd.Series(rt_arr) 
+    #df_st.loc[:,"time"] = df_st.time.astype("category")
 
     return df_st, df_avg_conf, df_likl
 
@@ -235,27 +241,44 @@ def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, 
     #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
     #mcmc_chain.run(_rng_key, n_states, start_width, DT, X, I,J, s_0, Mr)
 
-    
-
     kernel = NUTS(model)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
     mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0)
 
     return mcmc_chain
 
-def sample_prior_pred_data(n_states, start_width, tau, sigma, I, J, samples_n=100, njobs=8):
+def sample_prior_pred_data(n_states, start_width, tau, sigma, I, J, samples_n=100, njobs=8, get_response=False, obs_response_range=None):
     s_0 = _get_initial_state(n_states, start_width)
     prior_predictive = Predictive(model, num_samples=samples_n)
     prior_predictions = prior_predictive(_rng_key, n_states, start_width, sigma, tau, None, None, I, J, s_0)
 
     theta = int((n_states+1)/2)
     mu_s = prior_predictions["mu"]
+    #print(npx.asarray(mu_s).shape)
     
-    RT, X, Steps = get_rt_sample(theta, 1.5, tau, sigma, mu_s, n_trials = J, njobs=njobs)
+    if get_response:
+        RT, X, Steps = get_rt_sample(theta, 1.5, tau, sigma, mu_s, n_trials = J, njobs=njobs)
 
-    prior_predictions["RT"] = RT
-    prior_predictions["X"] = X
-    prior_predictions["Steps"] = Steps
+        prior_predictions["RT"] = RT
+        prior_predictions["X"] = X
+        prior_predictions["Steps"] = Steps
+
+    if ~get_response and obs_response_range is not None:
+        df_st, df_avg_conf, df_likl = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        _, max_obs_resp = obs_response_range
+
+        for mu in npx.asarray(mu_s):
+            #print(mu.shape)
+            df_st_t, df_avg_conf_t, df_likl_t = perform_walk(n_states,start_width,mu,sigma,max_timesteps=max_obs_resp,delta=tau)
+
+            df_st = pd.concat([df_st, df_st_t.assign(drift_rate=np.array2string(mu, separator=","))])
+            df_avg_conf = pd.concat([df_avg_conf, df_avg_conf_t.assign(drift_rate=np.array2string(mu, separator=","))])
+            df_likl_t = pd.concat([df_likl, df_likl_t.assign(drift_rate=np.array2string(mu, separator=","))])
+        
+        prior_predictions["States"] = df_st
+        prior_predictions["Confidence"] = df_avg_conf
+        prior_predictions["Likelihood"] = df_likl
+
 
     #C = mu_s.shape[0]
     #Mid = int((n_states+1)/2)
@@ -322,18 +345,18 @@ if __name__ == "__main__":
     n_states=7
     start_width=1
     tau = 0.001
-    mcmc_chain = sample_posterior_params(DT=rt, X=x,I=I,J=J, n_states=n_states, start_width=start_width, num_warmup=10, samples_n=4 )
-    mcmc_chain.print_summary()
-    mcmc_samples = mcmc_chain.get_samples()
+    #mcmc_chain = sample_posterior_params(DT=rt, X=x, sigma=sigma, tau=tau, I=I, n_states=n_states, start_width=start_width, num_warmup=10, samples_n=4 )
+    #mcmc_chain.print_summary()
+    #mcmc_samples = mcmc_chain.get_samples()
 
     ic("Prior Prediction - 1")
-    prior_predictions = sample_prior_pred_data(n_states, start_width, tau, sigma[0],  I, J, samples_n=4)
-    RT = prior_predictions["RT"]
-    ic(RT.min(), RT.mean(), RT.max())
+    #prior_predictions = sample_prior_pred_data(n_states, start_width, tau, sigma,  I, J, samples_n=4, get_response=True)
+    #RT = prior_predictions["RT"]
+    #ic(RT.min(), RT.mean(), RT.max())
 
     ic("Posterior Prediction - 1") # Test here
-    RT, X, steps_arr = sample_post_pred_data(n_states, start_width, tau, sigma[0], mcmc_samples, n_trials=J)
-    ic(RT.min(), RT.mean(), RT.max())
+    #RT, X, steps_arr = sample_post_pred_data(n_states, start_width, tau, sigma, mcmc_samples, n_trials=J)
+    #ic(RT.min(), RT.mean(), RT.max())
 
     ic("Constant Drift Rate - 1")
     # Replicating the plots in Busemeyer 2010
