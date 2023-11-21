@@ -205,14 +205,14 @@ def model(n_states, start_width, sigma, tau, rt, ra,I,J, s_0):
     
     n_noresp = rt/delta if rt is not None else 10
     
-    m = npy.sample("mu_m", dist.Normal("m",0,1))
-    s = npy.sample("mu_s", dist.HalfNormal("m",1)) #s = pm.Normal("s",0,0.2,shape=4)
+    m = npy.sample("mu_m", dist.Normal(0,1))
+    s = npy.sample("mu_s", dist.HalfNormal(1)) #s = pm.Normal("s",0,0.2,shape=4)
 
 
     with npy.plate('I', I, dim=-2) as ind:
         #mu =  npy.sample(f"mu", dist.Normal(mu_m,mu_s),sample_shape=(I,1))
-        mu_r = npy.sample("mu_r", dist.Normal(0,1,shape=(I,1))) # Drift Rate
-        mu = npy.Deterministic("mu", m + s * mu_r)
+        mu_r = npy.sample("mu_r", dist.Normal(0,1), sample_shape=(I,1)) # Drift Rate
+        mu = npy.deterministic("mu", m + s * mu_r)
 
         K = _buildK(n_states,mu,sigma,delta=delta)
     
@@ -246,12 +246,12 @@ def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, 
 def sample_prior_pred_data(n_states, start_width, tau, sigma, I, J, samples_n=100, njobs=8):
     s_0 = _get_initial_state(n_states, start_width)
     prior_predictive = Predictive(model, num_samples=samples_n)
-    prior_predictions = prior_predictive(_rng_key, n_states, start_width, None, None, I, J, s_0)
+    prior_predictions = prior_predictive(_rng_key, n_states, start_width, sigma, tau, None, None, I, J, s_0)
 
     theta = int((n_states+1)/2)
     mu_s = prior_predictions["mu"]
     
-    RT, X, Steps = get_rt_sample(theta, 1.5, tau, sigma[0], mu_s, n_trials = J, njobs=njobs)
+    RT, X, Steps = get_rt_sample(theta, 1.5, tau, sigma, mu_s, n_trials = J, njobs=njobs)
 
     prior_predictions["RT"] = RT
     prior_predictions["X"] = X
@@ -327,12 +327,12 @@ if __name__ == "__main__":
     mcmc_samples = mcmc_chain.get_samples()
 
     ic("Prior Prediction - 1")
-    prior_predictions = sample_prior_pred_data(n_states, start_width, tau, sigma,  I, J, samples_n=4)
+    prior_predictions = sample_prior_pred_data(n_states, start_width, tau, sigma[0],  I, J, samples_n=4)
     RT = prior_predictions["RT"]
     ic(RT.min(), RT.mean(), RT.max())
 
     ic("Posterior Prediction - 1") # Test here
-    RT, X, steps_arr = sample_post_pred_data(n_states, start_width, tau, sigma, mcmc_samples, n_trials=J)
+    RT, X, steps_arr = sample_post_pred_data(n_states, start_width, tau, sigma[0], mcmc_samples, n_trials=J)
     ic(RT.min(), RT.mean(), RT.max())
 
     ic("Constant Drift Rate - 1")
