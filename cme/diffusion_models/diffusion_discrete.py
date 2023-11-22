@@ -107,7 +107,7 @@ def sample_states_and_confidence(rt_delta, phi_0, K, Mn, N):
     return phi_t, Mconf, npx.asarray(noresp_traj_arr) if False else None
 
 
-def likelihood(K,rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn):
+def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn):
     #ic(rt.shape)
     #K= _buildK(n_states, mu=mu, sigma=sigma)
     
@@ -158,7 +158,7 @@ def perform_walk(n_states, start_width, mu, sigma, max_timesteps=10, delta=None,
     if n_noresp is not None:
         n_noresp = npx.asarray(n_noresp)
 
-    for rt in list(npx.arange(1,max_timesteps,step=delta[0,0])):
+    for rt in list(npx.arange(delta[0,0],max_timesteps,step=delta[0,0])):
     #for rt in np.linspace(1,max_timesteps, 50):
         rt_arr.append(rt)
         rt = npx.asarray([[rt]])
@@ -253,16 +253,25 @@ def sample_prior_pred_data(n_states, start_width, tau, sigma, I, J, samples_n=10
     prior_predictive = Predictive(model, num_samples=samples_n)
     prior_predictions = prior_predictive(_rng_key, n_states, start_width, sigma, tau, None, None, I, J, s_0)
 
-    theta = int((n_states+1)/2)
+    
     mu_s = prior_predictions["mu"]
     #print(npx.asarray(mu_s).shape)
     
+    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma, J, samples_n, njobs, get_response=get_response, obs_response_range=obs_response_range)
+    predictions.update(prior_predictions)
+
+    return predictions
+
+def get_predictive_samples(n_states,start_width, mu_s, tau, sigma, J, samples_n=100, njobs=8, get_response=False, obs_response_range=None):
+    predictions = {}
+    theta = int((n_states+1)/2)
+
     if get_response:
         RT, X, Steps = get_rt_sample(theta, 1.5, tau, sigma, mu_s, n_trials = J, njobs=njobs)
 
-        prior_predictions["RT"] = RT
-        prior_predictions["X"] = X
-        prior_predictions["Steps"] = Steps
+        predictions["RT"] = RT
+        predictions["X"] = X
+        predictions["Steps"] = Steps
 
     if ~get_response and obs_response_range is not None:
         df_st, df_avg_conf, df_likl = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -274,11 +283,11 @@ def sample_prior_pred_data(n_states, start_width, tau, sigma, I, J, samples_n=10
 
             df_st = pd.concat([df_st, df_st_t.assign(drift_rate=np.array2string(mu, separator=","))])
             df_avg_conf = pd.concat([df_avg_conf, df_avg_conf_t.assign(drift_rate=np.array2string(mu, separator=","))])
-            df_likl_t = pd.concat([df_likl, df_likl_t.assign(drift_rate=np.array2string(mu, separator=","))])
+            df_likl = pd.concat([df_likl, df_likl_t.assign(drift_rate=np.array2string(mu, separator=","))])
         
-        prior_predictions["States"] = df_st
-        prior_predictions["Confidence"] = df_avg_conf
-        prior_predictions["Likelihood"] = df_likl
+        predictions["States"] = df_st
+        predictions["Confidence"] = df_avg_conf
+        predictions["Likelihood"] = df_likl
 
 
     #C = mu_s.shape[0]
@@ -288,8 +297,8 @@ def sample_prior_pred_data(n_states, start_width, tau, sigma, I, J, samples_n=10
     #    RT[c,...] = RT_t
     #    X[c,...] = X_t
     #    Steps[c,...] = steps_arr_t
+    return predictions
 
-    return prior_predictions
 
 def get_rt_sample(theta, alpha, tau, sigma, mu_s, n_trials, njobs=8):
 
@@ -313,17 +322,15 @@ def get_rt_sample(theta, alpha, tau, sigma, mu_s, n_trials, njobs=8):
     return RT, X, Steps
 
 
-def sample_post_pred_data(n_states, start_width, tau, sigma, mcmc_samples, n_trials):
-    mu_s = mcmc_samples["mu"]
+def sample_post_pred_data(n_states, start_width, tau, sigma, I, J, mcmc_samples, njobs=8, get_response=False, obs_response_range=None):
+    mu_s = mcmc_samples["mu"][0:100,...]
 
-    theta = int((n_states+1)/2)
+    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma, J, samples_n, njobs, get_response=get_response, obs_response_range=obs_response_range)
+    predictions.update("mu", mu_s)
 
-    RT, X, Steps = get_rt_sample(theta, 1.5, tau, sigma[0], mu_s, n_trials = n_trials)
-
-    return RT, X, Steps
+    return predictions
 
     
-
 if __name__ == "__main__":
     
     mu_arr,sigma = npx.asarray([[0.01,0.01,0.01,0.01,0.01,1,1]]), npx.asarray([10])
@@ -346,18 +353,18 @@ if __name__ == "__main__":
     n_states=7
     start_width=1
     tau = 0.001
-    #mcmc_chain = sample_posterior_params(DT=rt, X=x, sigma=sigma, tau=tau, I=I, n_states=n_states, start_width=start_width, num_warmup=10, samples_n=4 )
-    #mcmc_chain.print_summary()
-    #mcmc_samples = mcmc_chain.get_samples()
+    mcmc_chain = sample_posterior_params(DT=rt, X=x, sigma=sigma, tau=tau, I=I, n_states=n_states, start_width=start_width, num_warmup=10, samples_n=4 )
+    mcmc_chain.print_summary()
+    mcmc_samples = mcmc_chain.get_samples()
 
     ic("Prior Prediction - 1")
-    #prior_predictions = sample_prior_pred_data(n_states, start_width, tau, sigma,  I, J, samples_n=4, get_response=True)
-    #RT = prior_predictions["RT"]
-    #ic(RT.min(), RT.mean(), RT.max())
+    prior_predictions = sample_prior_pred_data(n_states, start_width, tau, sigma,  I, J, samples_n=4, get_response=True)
+    RT = prior_predictions["RT"]
+    ic(RT.min(), RT.mean(), RT.max())
 
     ic("Posterior Prediction - 1") # Test here
-    #RT, X, steps_arr = sample_post_pred_data(n_states, start_width, tau, sigma, mcmc_samples, n_trials=J)
-    #ic(RT.min(), RT.mean(), RT.max())
+    RT, X, steps_arr = sample_post_pred_data(n_states, start_width, tau, sigma, mcmc_samples, n_trials=J)
+    ic(RT.min(), RT.mean(), RT.max())
 
     ic("Constant Drift Rate - 1")
     # Replicating the plots in Busemeyer 2010
