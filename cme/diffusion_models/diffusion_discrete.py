@@ -158,8 +158,9 @@ def perform_walk(n_states, start_width, mu, sigma, max_timesteps=10, delta=None,
     if n_noresp is not None:
         n_noresp = npx.asarray(n_noresp)
 
-    for rt in list(npx.arange(0.1,max_timesteps,step=0.1)):
+    for rt in list(npx.arange(1,max_timesteps,step=delta[0,0])):
     #for rt in np.linspace(1,max_timesteps, 50):
+        rt_arr.append(rt)
         rt = npx.asarray([[rt]])
         if n_noresp is None:
             n_noresp_1 = rt/delta
@@ -177,27 +178,27 @@ def perform_walk(n_states, start_width, mu, sigma, max_timesteps=10, delta=None,
         avg_conf.append(Mconf)
         noresp_traj_arr.append(noresp_traj)
         n_noresp_arr.append(n_noresp_1)
-        rt_arr.append((np.asarray(rt)*delta)[0,0])
+        
 
     df_avg_conf = pd.DataFrame(np.asarray(avg_conf).squeeze()).rename({0:"avg_conf"}, axis=1)
-    #df_avg_conf = df_avg_conf.reset_index().rename({"index":"time"}, axis=1)
-    df_avg_conf.loc[:,"time"] = pd.Series(rt_arr) #df_avg_conf["time"] * delta
+    df_avg_conf = df_avg_conf.reset_index().rename({"index":"time"}, axis=1)
+    df_avg_conf.loc[:,"rt"] = pd.Series(rt_arr) #df_avg_conf["time"] * delta
 
     df_likl = pd.DataFrame(np.asarray(likl_prob)).rename({0:"liklihood"}, axis=1)
-    #df_likl = df_likl.reset_index().rename({"index":"time"}, axis=1)
-    df_likl.loc[:,"time"] = pd.Series(rt_arr) 
+    df_likl = df_likl.reset_index().rename({"index":"time"}, axis=1)
+    df_likl.loc[:,"rt"] = pd.Series(rt_arr) 
     
 
     df_st = pd.DataFrame(np.asarray(state_prob).squeeze())
     Mid = int((n_states+1)/2)
     mv = np.arange(-(Mid-1),(Mid))
     df_st.columns = mv
+    #df_st.loc[:,"rt"] = pd.Series(rt_arr)
     df_st = df_st.reset_index() \
-                .melt(id_vars = "index",var_name="state", value_name="probability") #\
-                #.rename({"index":"time"}, axis=1)
+                .melt(id_vars = "index",var_name="state", value_name="probability") \
+                .rename({"index":"time"}, axis=1)
     #df_st.loc[:,"state"] = df_st.state.astype("category")
-    df_st.loc[:,"time"] = pd.Series(rt_arr) 
-    #df_st.loc[:,"time"] = df_st.time.astype("category")
+    df_st.loc[:,"time"] = df_st.time.astype("category")
 
     return df_st, df_avg_conf, df_likl
 
@@ -392,7 +393,7 @@ if __name__ == "__main__":
     phi_0 = _get_initial_state(n_states, start_width)
     K = _buildK(n_states,mu,sigma,delta=delta)
 
-    df_st, df_avg_conf, df_likl = perform_walk(n_states=n_states, start_width=start_width, mu=mu, sigma=sigma,max_timesteps=30, delta=delta, prob=0.25)#, n_noresp=npx.asarray([[1]]))
+    df_st, df_avg_conf, df_likl = perform_walk(n_states=n_states, start_width=start_width, mu=mu, sigma=sigma,max_timesteps=300, delta=[[1]], prob=0.25)#, n_noresp=npx.asarray([[1]]))
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
     sns.relplot(df_avg_conf, x="time",y="avg_conf")
@@ -409,7 +410,7 @@ if __name__ == "__main__":
 
     Pt, Mconf, noresp_traj = sample_states_and_confidence(90, phi_0, K.squeeze(), Mn, npx.asarray([[2]]))
 
-    df_st, df_avg_conf, df_likl = perform_walk(n_states=7, start_width=3, mu=mu_arr, sigma=10, max_timesteps=100, delta=delta)#, n_noresp=npx.asarray([[2]]))
+    df_st, df_avg_conf, df_likl = perform_walk(n_states=7, start_width=3, mu=mu_arr, sigma=10, max_timesteps=1, delta=delta)#, n_noresp=npx.asarray([[2]]))
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
     sns.relplot(df_avg_conf, x="time",y="avg_conf")
@@ -422,7 +423,7 @@ if __name__ == "__main__":
     phi_0 = _get_initial_state(n_states, start_width)
     K = _buildK(7, mu=mu_arr, sigma=sigma, delta=delta)
 
-    df_st, df_avg_conf, df_likl = perform_walk(n_states=101, start_width=11, mu=mu_arr, sigma=10,max_timesteps=50, delta=delta)#, n_noresp=npx.asarray([[5]]))
+    df_st, df_avg_conf, df_likl = perform_walk(n_states=101, start_width=11, mu=mu_arr, sigma=10,max_timesteps=1, delta=delta)#, n_noresp=npx.asarray([[5]]))
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
     sns.relplot(df_avg_conf, x="time",y="avg_conf")
