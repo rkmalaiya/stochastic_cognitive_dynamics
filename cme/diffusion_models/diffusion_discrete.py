@@ -6,18 +6,24 @@ import pandas as pd
 import numpyro as npy
 import numpyro.distributions as dist
 from jax import random
-from icecream import ic
 import seaborn as sns
 import matplotlib.pyplot as plt
 import cme.simulators.diffusion_random_walk as drw
 from joblib import Parallel, delayed
 from numpyro.infer.util import log_density
+from cme.utils import common_logging as cl
+from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive
+import scipy.stats as stats
+
+#from numpyro.contrib.tfp.mcmc import TFPKernel
+#import tensorflow_probability as tfp
+
+log = cl.get_logger("diffusion_discrete")
 
 import jax
 jax.config.update('jax_platforms', 'cpu')
 
-ic.enable()
-from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive
+
 
 npy.set_host_device_count(64)
 _rng_key = random.PRNGKey(0)
@@ -35,6 +41,7 @@ def _buildK(n_states, mu, sigma=1, delta=0.001):
     if n_mu == 1:
         mu=npx.repeat(mu,n_states,axis=1) # keeping mu constant over states
 
+    
     for i in range(n_part):
         #b1 = 0.5 * (((sigma**2)/delta**2) - mu[i,:]/delta) # 9.765
         #b2 = 0.5 * (((sigma**2)/delta**2) + mu[i,:]/delta) # 10.325 
@@ -42,7 +49,7 @@ def _buildK(n_states, mu, sigma=1, delta=0.001):
         b2 = 0.5 * (sigma[i,:] + mu[i,:])
                 
         a = -(b1+b2)
-       
+    
         for j in range(1,n_states-1):
             #try:
             K = K.at[i,0,[j-1,j,j+1],j].set([b1[j], a[j], b2[j]])
@@ -88,14 +95,22 @@ def _get_measurement_matrix(n_states, start_width, prob = 0.5):
 
     return Mcorr, Mincorr, Mnoresp
 
+
 def _get_initial_state(n_states, start_width):
 
+    st = stats.dirichlet(npx.ones((start_width))+4).rvs().squeeze()
+    
+    Mid_w = int((start_width+1)/2)
     Mid = int((n_states+1)/2)
-    p_0 = npx.zeros((n_states,1)) 
-    p_0 = p_0.at[(Mid-start_width-1):(Mid+start_width)].set(1) # additional -1 because indexing starts from 0
-    p_0 = p_0.reshape(-1,1) # to get column vector
-    p_0 = p_0 / npx.sum(p_0)
-    return p_0
+    s_0 = npx.zeros((n_states,1)) 
+    s_0 = s_0.at[(Mid-Mid_w):(Mid+Mid_w),0].set(st)
+
+    #Mid = int((n_states+1)/2)
+    #p_0 = npx.zeros((n_states,1)) 
+    #p_0 = p_0.at[(Mid-start_width-1):(Mid+start_width)].set(1) # additional -1 because indexing starts from 0
+    #p_0 = p_0.reshape(-1,1) # to get column vector
+    #p_0 = p_0 / npx.sum(p_0)
+    return s_0
     
 def sample_states_and_confidence(rt_delta, phi_0, K, Mn, N):
     n_states = K.shape[-1] # picking the last dimension because the dimensions are I,J,K,K
@@ -173,7 +188,7 @@ def get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw
     Pt, Mconf, noresp_traj = sample_states_and_confidence(rt, p_0, K, Mn, n_noresp_1.squeeze())
     return delta, n_noresp_1, likl, Pt, Mconf, noresp_traj, rt
 
-def perform_walk(n_states, start_width, mu, sigma, max_timesteps=10, delta=None, prob=0.5, n_noresp = None, njobs=2):
+def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10, delta=None, prob=0.5, n_noresp = None, njobs=2):
 
     avg_conf = [];  
     state_prob = []
@@ -181,7 +196,9 @@ def perform_walk(n_states, start_width, mu, sigma, max_timesteps=10, delta=None,
     n_noresp_arr = []
     noresp_traj_arr = []
     rt_arr = []
-    p_0 = _get_initial_state(n_states, start_width)
+    if p_0 is None:
+        p_0 = _get_initial_state(n_states, start_width)
+
     Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, prob)
     ra = npx.asarray([[1]])
     if delta is not None:
@@ -190,6 +207,8 @@ def perform_walk(n_states, start_width, mu, sigma, max_timesteps=10, delta=None,
     if n_noresp is not None:
         n_noresp = npx.asarray(n_noresp)
     
+    get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, 0.2)
+
     dely_get_likl_states_confidence = delayed(get_likl_states_confidence)
     # parallelized over timesteps
     res = Parallel(n_jobs=njobs)(dely_get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, rt) 
@@ -244,8 +263,47 @@ def perform_walk(n_states, start_width, mu, sigma, max_timesteps=10, delta=None,
 
     return df_st, df_avg_conf, df_likl
 
+def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size=2):
+    
+    #st = npy.sample("s_0", dist.Dirichlet(npx.ones((start_width))+4))
+    
+    #Mid_w = int((start_width+1)/2)
+    #Mid = int((n_states+1)/2)
+    #s_0 = npx.zeros((n_states,1)) 
+    #s_0 = s_0.at[(Mid-Mid_w):(Mid+Mid_w),0].set(st)
+    s_0 = _get_initial_state(n_states, start_width)
+    s_0 = npy.deterministic("s_0", s_0)
 
-def model(n_states, start_width, sigma, tau, rt, ra,I,J, s_0):
+    Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, 0.5)
+
+    #mu_m =  npy.sample(f"mu_m", dist.Normal(2,3))
+    #mu_s =  npy.sample(f"mu_s", dist.HalfNormal(2))
+    delta = np.asarray([[tau]])
+    
+    n_noresp = rt/delta if rt is not None else 10
+        
+    with npy.plate('I', I, dim=-2) as ind: #, subsample_size=batch_size
+        #mu =  npy.sample(f"mu", dist.Normal(mu_m,mu_s),sample_shape=(I,1))
+        mu = npy.sample("mu", dist.Normal(0,2)) # Drift Rate
+        sigma = npy.sample("sigma", dist.Normal(5,2)) # Diffusion Rate
+        sigma = (mu + sigma)**2 #Sigma cannot be negative and should be larger than mu
+        #if(npx.count_nonzero(npx.array(npx.less_equal(sigma , 0))) > 0):
+        #    log.debug(sigma)
+        K = _buildK(n_states, mu, sigma, delta=delta)
+    
+    #with npy.plate('Obs', I, subsample_size=10) as ind: #,
+        #mu =  npy.sample(f"mu", dist.Normal(0,5)) #,sample_shape=(I,)
+    
+        rt1 = rt if rt is None else npx.asarray(rt)#[ind]
+        ra1 = ra if ra is None else npx.asarray(ra)#[ind]
+        #_,lkl ,_ = likelihood(n_states, mu[ind], 1, rt1, ra1, s_0, Mr)
+        if rt is not None:
+            lkl = likelihood(K, rt1, ra1, s_0, n_noresp, delta, Mc, Mw, Mn)
+            #lkl = npx.where(npx.less_equal(K.at[1,1], npx.asarray(0)), npx.asarray(0), lkl)
+            
+            npy.factor(f"likelihood", lkl)
+
+def model(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size=2):
     
     Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, 0.5)
 
@@ -259,10 +317,10 @@ def model(n_states, start_width, sigma, tau, rt, ra,I,J, s_0):
     s = npy.sample("s", dist.HalfNormal(1)) #s = pm.Normal("s",0,0.2,shape=4)
 
 
-    with npy.plate('I', I, dim=-2) as ind:
+    with npy.plate('I', I, dim=-2) as ind: #, subsample_size=batch_size
         #mu =  npy.sample(f"mu", dist.Normal(mu_m,mu_s),sample_shape=(I,1))
-        mu_r = npy.sample("mu_r", dist.Normal(2,1), sample_shape=(I,1)) # Drift Rate
-        sigma_r = npy.sample("sigma_r", dist.Normal(1,1), sample_shape=(I,1)) # Diffusion Rate
+        mu_r = npy.sample("mu_r", dist.Normal(2,1)) # Drift Rate
+        sigma_r = npy.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
 
         mu = npy.deterministic("mu", m + s * mu_r)
         sigma = npy.deterministic("sigma", (mu + s * sigma_r)**2) #Sigma cannot be negative and should be larger than mu
@@ -272,50 +330,63 @@ def model(n_states, start_width, sigma, tau, rt, ra,I,J, s_0):
     #with npy.plate('Obs', I, subsample_size=10) as ind: #,
         #mu =  npy.sample(f"mu", dist.Normal(0,5)) #,sample_shape=(I,)
     
-        #rt1 = rt if rt is None else npx.asarray(rt)[ind]
-        #ra1 = ra if ra is None else npx.asarray(ra)[ind]
+        rt1 = rt if rt is None else npx.asarray(rt)#[ind]
+        ra1 = ra if ra is None else npx.asarray(ra)#[ind]
         #_,lkl ,_ = likelihood(n_states, mu[ind], 1, rt1, ra1, s_0, Mr)
         if rt is not None:
-            lkl = likelihood(K, rt, ra, s_0, n_noresp, delta, Mc, Mw, Mn)
+            lkl = likelihood(K, rt1, ra1, s_0, n_noresp, delta, Mc, Mw, Mn)
             npy.factor(f"likelihood", lkl)
 
-def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, num_warmup=100, samples_n=500, num_chains=4):
+def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, num_warmup=100, samples_n=500, num_chains=4, batch_size=2):
 
     s_0 = _get_initial_state(n_states, start_width)
     I,J = DT.shape if I is None else I,DT.shape[1]
 
     #kernel = HMCECS(NUTS(model), num_blocks=10)
     #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
-    #mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, extra_fields=('potential_energy',))
+    #mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
 
-    kernel = NUTS(model)
+    #kernel = NUTS(model)
+    kernel = NUTS(model_central)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
-    mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, extra_fields=('potential_energy',))
+    mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('potential_energy',))
+
+    #kernel = TFPKernel[tfp.mcmc.NoUTurnSampler](model, step_size=1.)
+    #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
+    #mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
 
     #post_likl = log_density(model, model_args=(n_states, start_width,  sigma, tau, DT, X, I, J, s_0), model_kwargs = None, params=mcmc_chain.get_samples())
+    #post_likl = mcmc_chain.get_extra_fields()['hmc_state'].potential_energy
     post_likl = mcmc_chain.get_extra_fields()['potential_energy']
     return mcmc_chain, post_likl
 
-def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=100, njobs=8, get_response=False, obs_response_range=None):
+def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=100, njobs=8, get_response=False, obs_response_range=None, batch_size=2):
     s_0 = _get_initial_state(n_states, start_width)
-    prior_predictive = Predictive(model, num_samples=samples_n)
-    prior_predictions = prior_predictive(_rng_key, n_states, start_width, sigma_s[...,0] if sigma_s is not None else None, tau, None, None, I, J, s_0)
+
+    #prior_predictive = Predictive(model, num_samples=samples_n)
+    prior_predictive = Predictive(model_central, num_samples=samples_n)
+    prior_predictions = prior_predictive(_rng_key, n_states, start_width, sigma_s[...,0] if sigma_s is not None else None, 
+                                         tau, None, None, I, J, s_0, batch_size=batch_size)
 
     
     mu_s = prior_predictions["mu"]
     sigma_s = prior_predictions["sigma"]
-    #print(npx.asarray(mu_s).shape)
+    s_0 = prior_predictions["s_0"][0]
+    log.debug(npx.asarray(mu_s.shape))
+    log.debug(npx.asarray(sigma_s.shape))
+    log.debug(npx.asarray(s_0.shape))
     
-    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, samples_n, njobs, get_response=get_response, obs_response_range=obs_response_range)
+    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0 = s_0, samples_n=samples_n, njobs=njobs, get_response=get_response, obs_response_range=obs_response_range)
     predictions.update(prior_predictions)
 
     return predictions
 
-def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, samples_n=100, njobs=8, get_response=False, obs_response_range=None):
+def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=None, samples_n=100, njobs=8, get_response=False, obs_response_range=None):
     predictions = {}
     theta = int((n_states+1)/2)
 
     if get_response:
+        log.debug("Getting Response Times")
         RT, X, Steps = get_rt_sample(theta, 1.5, tau, sigma_s, mu_s, n_trials = J, njobs=njobs)
 
         predictions["RT"] = RT
@@ -323,6 +394,7 @@ def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, samples
         predictions["Steps"] = Steps
 
     if ~get_response and obs_response_range is not None:
+        log.debug("Confidence and Likelihood")
         df_st, df_avg_conf, df_likl = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         _, max_obs_resp = obs_response_range
 
@@ -331,7 +403,7 @@ def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, samples
             #print(mu.shape)
             #print("in loop muu", mu.shape)
             #print("sgimau", sigma.shape)
-            df_st_t, df_avg_conf_t, df_likl_t = perform_walk(n_states, start_width, mu_p, sigma_p, 
+            df_st_t, df_avg_conf_t, df_likl_t = perform_walk(n_states, start_width, mu_p, sigma_p, p_0=p_0,
                                                              max_timesteps=max_obs_resp, delta=tau, njobs=njobs)
 
             #for (_,df_st_t), (_,df_avg_conf_t), mu, sigma in zip(df_st_m.iteritems(), df_avg_conf_m.iteritems(), mu_p, sigma_p):
@@ -380,8 +452,9 @@ def get_rt_sample(theta, alpha, tau, sigma, mu_s, n_trials, njobs=8):
 def sample_post_pred_data(n_states, start_width, tau, sigma_s, I, J, mcmc_samples, njobs=8, get_response=False, obs_response_range=None):
     mu_s = mcmc_samples["mu"][0:100,...]
     sigma_s = mcmc_samples["sigma"][0:100,...]
+    s_0 = mcmc_samples["s_0"][0:100,...]
 
-    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, samples_n, njobs, get_response=get_response, obs_response_range=obs_response_range)
+    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0 = s_0, samples_n= 100, njobs= njobs, get_response=get_response, obs_response_range=obs_response_range)
     predictions.update("mu", mu_s)
 
     return predictions
@@ -389,19 +462,19 @@ def sample_post_pred_data(n_states, start_width, tau, sigma_s, I, J, mcmc_sample
     
 if __name__ == "__main__":
     
-    mu_arr, sigma = npx.asarray([[0.01,0.01,0.01,0.01,0.01,1,1]]), npx.asarray([[10]])
+    mu_arr, sigma = npx.asarray([[0.01,0.01,0.01,0.01, 1,1,1]]), npx.asarray([[10]])
 
-    ic(_buildK(7, mu=mu_arr, sigma=sigma))
+    log.debug(_buildK(7, mu=mu_arr, sigma=sigma))
     
-    ic(_buildK(7, mu=[[1.5]], sigma=sigma))
+    log.debug(_buildK(7, mu=[[1.5]], sigma=sigma))
     
-    ic(_buildK(7, mu=[[0.5,1.5]], sigma=sigma)) # this didn't throw out of bounds exception because of JAX's behavior
+    log.debug(_buildK(7, mu=[[0.5,1.5]], sigma=sigma)) # this didn't throw out of bounds exception because of JAX's behavior
     
-    ic(_buildK(7, mu=[[1]], sigma=sigma).shape)
+    log.debug(_buildK(7, mu=[[1]], sigma=sigma).shape)
     
-    ic(_buildK(7, mu=npx.asarray([[1,2,0.5]]), sigma=npx.asarray([[1]])).shape) # this didn't throw out of bounds exception because of JAX's behavior
+    log.debug(_buildK(7, mu=npx.asarray([[1,2,0.5]]), sigma=npx.asarray([[1]])).shape) # this didn't throw out of bounds exception because of JAX's behavior
 
-    ic("Constant Drift Rate - 1")
+    log.debug("Constant Drift Rate - 1")
     # Replicating the plots in Busemeyer 2010
     n_states=7
     start_width=3
@@ -422,21 +495,21 @@ if __name__ == "__main__":
         conf_arr.append(Mconf.squeeze())
 
     conf = np.asarray(conf_arr)
-    ic(conf.shape)
+    log.debug(conf.shape)
     pd.Series(conf).plot.line()
     plt.show()
 
-    ic("Constant Drift Rate - 2")
+    log.debug("Constant Drift Rate - 2")
     # Replicating the plots in Busemeyer 2010
     n_states=101
     start_width=4
-    mu=[[0.56]] #drift rate
+    mu=npx.asarray([[0.56]]) #drift rate
     sigma=npx.asarray([[20.09]]) #diffusion
 
     phi_0 = _get_initial_state(n_states, start_width)
     K = _buildK(n_states,mu,sigma,delta=delta)
 
-    df_st, df_avg_conf, df_likl = perform_walk(n_states=n_states, start_width=start_width, mu=mu, sigma=sigma,max_timesteps=300, delta=[[1]], prob=0.25)#, n_noresp=npx.asarray([[1]]))
+    df_st, df_avg_conf, df_likl = perform_walk(n_states=n_states, start_width=start_width, mu=mu, sigma=sigma,max_timesteps=30, delta=[[1]], prob=0.25)#, n_noresp=npx.asarray([[1]]))
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
     sns.relplot(df_avg_conf, x="time",y="avg_conf")
@@ -444,13 +517,13 @@ if __name__ == "__main__":
     plt.show()
 
 
-    ic("Prior Prediction - 1")
-    I, J = 5,6
+    log.debug("Prior Prediction - 1")
+    I, J = 15,6
     prior_predictions = sample_prior_pred_data(n_states, start_width, tau, sigma,  I, J, samples_n=4, get_response=True)
     RT = prior_predictions["RT"]
-    ic(RT.min(), RT.mean(), RT.max())
+    log.debug(RT.min(), RT.mean(), RT.max())
 
-    ic("Posterior Sampling - 1")
+    log.debug("Posterior Sampling - 1")
     
     rt = np.random.uniform(0.1, 10, size=(I,J))
     x = np.random.randint(0,2, size=(I,J))
@@ -462,12 +535,12 @@ if __name__ == "__main__":
     mcmc_chain.print_summary()
     mcmc_samples = mcmc_chain.get_samples()
 
-    ic("Posterior Prediction - 1") # Test here
+    log.debug("Posterior Prediction - 1") # Test here
     RT, X, steps_arr = sample_post_pred_data(n_states, start_width, tau, sigma, mcmc_samples, n_trials=J)
-    ic(RT.min(), RT.mean(), RT.max())
+    log.debug(RT.min(), RT.mean(), RT.max())
 
 
-    ic("Variable Drift Rate - 1")
+    log.debug("Variable Drift Rate - 1")
     phi_0 = _get_initial_state(7, start_width)
     #delta = 90/2
     K = _buildK(7, mu=mu_arr, sigma=10, delta=delta)
@@ -483,7 +556,7 @@ if __name__ == "__main__":
     sns.relplot(df_likl, x="time",y="liklihood")
     plt.show()
 
-    ic("Variable Drift Rate - 2")
+    log.debug("Variable Drift Rate - 2")
     mu_arr = npx.asarray([np.repeat([0.01,0.01,0.01,2],26)[0:101]])
 
     phi_0 = _get_initial_state(n_states, start_width)

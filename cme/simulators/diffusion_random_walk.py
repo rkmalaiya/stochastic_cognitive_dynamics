@@ -144,12 +144,28 @@ def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", in
    RT_arr = []
    X_arr = []
    steps_arr = []
-   max_iter = samples*500
+   max_iter = 500
 
-   ret_ans = Parallel(n_jobs=njobs)(
-       
-     delayed(_perform_walk)(theta, alpha, tau, sigma, *params, process=process, initial=initial) for _ in range(max_iter)
+   for mi in arange(max_iter):
 
+      ret_ans = Parallel(n_jobs=njobs)(delayed(_perform_walk)(theta, alpha, tau, sigma,
+                                                                 *params, process=process, initial=initial) 
+                                                                 for _ in range(samples))
+      for ans in ret_ans:
+         steps, RT, X = ans
+         if RT > 0: 
+            RT_arr.append(RT) 
+            X_arr.append(X)
+            steps_arr.append(steps)
+            if size(RT_arr) >= samples:
+               break
+
+      # We need two breaks in case we need to iterate back and get more samples, 
+      # so the internal for loop does not need to execute for full length of samples
+      if (size(RT_arr) >= samples):
+         break
+
+   
       
          #if RT > 0: 
          #   RT_arr.append(RT) 
@@ -157,18 +173,19 @@ def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", in
          #   steps_arr.append(steps)
          #if size(RT_arr) >= samples:
          #   break 
-   )
+   #)
 
-   for ans in ret_ans:
-      steps, RT, X = ans
-      if RT > 0: 
-         RT_arr.append(RT) 
-         X_arr.append(X)
-         steps_arr.append(steps)
-      if size(RT_arr) >= samples:
-         break 
+   #for ans in ret_ans:
+   #   steps, RT, X = ans
+   #   if RT > 0: 
+   #      RT_arr.append(RT) 
+   #      X_arr.append(X)
+   #      steps_arr.append(steps)
+   #   if size(RT_arr) >= samples:
+   #      break 
 
-
+   if (size(RT_arr) < samples):
+      raise Exception("Could not generate enough RTs")
    
    return RT_arr, X_arr, steps_arr
 
