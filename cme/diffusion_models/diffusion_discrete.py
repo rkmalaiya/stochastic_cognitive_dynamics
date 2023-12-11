@@ -98,18 +98,19 @@ def _get_measurement_matrix(n_states, start_width, prob = 0.5):
 
 def _get_initial_state(n_states, start_width):
 
-    st = stats.dirichlet(npx.ones((start_width))+4).rvs().squeeze()
+    #st_p = stats.halfnorm().rvs()
+    #s_0 = stats.dirichlet(np.repeat(st_p, n_states)).rvs().T[None,...]
     
-    Mid_w = int((start_width+1)/2)
-    Mid = int((n_states+1)/2)
-    s_0 = npx.zeros((n_states,1)) 
-    s_0 = s_0.at[(Mid-Mid_w):(Mid+Mid_w),0].set(st)
-
+    #Mid_w = int((start_width+1)/2)
     #Mid = int((n_states+1)/2)
-    #p_0 = npx.zeros((n_states,1)) 
-    #p_0 = p_0.at[(Mid-start_width-1):(Mid+start_width)].set(1) # additional -1 because indexing starts from 0
-    #p_0 = p_0.reshape(-1,1) # to get column vector
-    #p_0 = p_0 / npx.sum(p_0)
+    #s_0 = npx.zeros((n_states,1)) 
+    #s_0 = s_0.at[(Mid-Mid_w):(Mid+Mid_w),0].set(npx.asarray(st))
+
+    Mid = int((n_states+1)/2)
+    p_0 = npx.zeros((n_states,1)) 
+    p_0 = p_0.at[(Mid-start_width-1):(Mid+start_width)].set(1) # additional -1 because indexing starts from 0
+    p_0 = p_0.reshape(-1,1)[None,...] # to get column vector
+    s_0 = p_0 / npx.sum(p_0)
     return s_0
     
 def sample_states_and_confidence(rt_delta, phi_0, K, Mn, N):
@@ -137,7 +138,7 @@ def sample_states_and_confidence(rt_delta, phi_0, K, Mn, N):
     return phi_t, Mconf, npx.asarray(noresp_traj_arr) if False else None
 
 
-def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn):
+def likelihood(K, rt, ra, phi_0_i, n_noresp, delta, Mc, Mw, Mn):
     #ic(rt.shape)
     #K= _buildK(n_states, mu=mu, sigma=sigma)
     
@@ -154,7 +155,7 @@ def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn):
     phi_noresp_arr_i = []
     for T_t_i, n_i in zip(T_t, n_noresp):
         phi_noresp_arr_i_j = []
-        for T_t_i_j, n_i_j in zip(T_t_i, n_i):
+        for T_t_i_j, n_i_j, phi_0 in zip(T_t_i, n_i, phi_0_i):
             phi_noresp_arr_i_j.append(num_ln.matrix_power(Mn @ T_t_i_j, n_i_j.astype(int).item()-1) @ phi_0) #n_state x 1
         phi_noresp_arr_i.append(npx.asarray(phi_noresp_arr_i_j))    
     phi_noresp = npx.asarray(phi_noresp_arr_i) # n_part x n_trials x n_state x 1
@@ -196,7 +197,7 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
     n_noresp_arr = []
     noresp_traj_arr = []
     rt_arr = []
-    if p_0 is None:
+    if p_0 is None or np.isnan(p_0).sum() > 0:
         p_0 = _get_initial_state(n_states, start_width)
 
     Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, prob)
@@ -265,14 +266,16 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
 
 def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size=2):
     
-    #st = npy.sample("s_0", dist.Dirichlet(npx.ones((start_width))+4))
+    #st_p = npy.sample("st_p", dist.HalfNormal())
+    #s_0 = npy.sample("s_0", dist.Dirichlet(npx.repeat(st_p, n_states)[None].T))
     
     #Mid_w = int((start_width+1)/2)
     #Mid = int((n_states+1)/2)
     #s_0 = npx.zeros((n_states,1)) 
     #s_0 = s_0.at[(Mid-Mid_w):(Mid+Mid_w),0].set(st)
-    s_0 = _get_initial_state(n_states, start_width)
-    s_0 = npy.deterministic("s_0", s_0)
+    #s_0 = npy.deterministic("s_0", s_0)
+
+    #s_0 = _get_initial_state(n_states, start_width)
 
     Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, 0.5)
 
@@ -285,8 +288,9 @@ def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size
     with npy.plate('I', I, dim=-2) as ind: #, subsample_size=batch_size
         #mu =  npy.sample(f"mu", dist.Normal(mu_m,mu_s),sample_shape=(I,1))
         mu = npy.sample("mu", dist.Normal(0,2)) # Drift Rate
-        sigma = npy.sample("sigma", dist.Normal(5,2)) # Diffusion Rate
-        sigma = (mu + sigma)**2 #Sigma cannot be negative and should be larger than mu
+        s = npy.sample("s", dist.Normal(1,2)) # Diffusion Rate
+        s = (mu + s)**2 #Sigma cannot be negative and should be larger than mu
+        sigma = npy.deterministic("sigma", s)
         #if(npx.count_nonzero(npx.array(npx.less_equal(sigma , 0))) > 0):
         #    log.debug(sigma)
         K = _buildK(n_states, mu, sigma, delta=delta)
@@ -339,7 +343,7 @@ def model(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size=2):
 
 def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, num_warmup=100, samples_n=500, num_chains=4, batch_size=2):
 
-    s_0 = _get_initial_state(n_states, start_width)
+    s_0 = None #_get_initial_state(n_states, start_width)
     I,J = DT.shape if I is None else I,DT.shape[1]
 
     #kernel = HMCECS(NUTS(model), num_blocks=10)
@@ -366,22 +370,22 @@ def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=
     #prior_predictive = Predictive(model, num_samples=samples_n)
     prior_predictive = Predictive(model_central, num_samples=samples_n)
     prior_predictions = prior_predictive(_rng_key, n_states, start_width, sigma_s[...,0] if sigma_s is not None else None, 
-                                         tau, None, None, I, J, s_0, batch_size=batch_size)
+                                         tau, None, None, I, J, s_0=s_0, batch_size=batch_size)
 
     
     mu_s = prior_predictions["mu"]
     sigma_s = prior_predictions["sigma"]
-    s_0 = prior_predictions["s_0"][0]
+    s_0_s = prior_predictions["s_0"] if "s_0" in prior_predictions else s_0[None,...] #np.full_like(mu_s, np.nan, dtype=np.float32)
     log.debug(npx.asarray(mu_s.shape))
     log.debug(npx.asarray(sigma_s.shape))
-    log.debug(npx.asarray(s_0.shape))
+    log.debug(npx.asarray(s_0_s.shape))
     
-    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0 = s_0, samples_n=samples_n, njobs=njobs, get_response=get_response, obs_response_range=obs_response_range)
+    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0_s = s_0_s, samples_n=samples_n, njobs=njobs, get_response=get_response, obs_response_range=obs_response_range)
     predictions.update(prior_predictions)
 
     return predictions
 
-def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=None, samples_n=100, njobs=8, get_response=False, obs_response_range=None):
+def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0_s=None, samples_n=100, njobs=8, get_response=False, obs_response_range=None):
     predictions = {}
     theta = int((n_states+1)/2)
 
@@ -398,7 +402,7 @@ def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=Non
         df_st, df_avg_conf, df_likl = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         _, max_obs_resp = obs_response_range
 
-        for mu_p, sigma_p in zip(npx.asarray(mu_s), npx.asarray(sigma_s)): # Each sample. mu_p.shape=(part, within-trial variation)
+        for mu_p, sigma_p, p_0 in zip(npx.asarray(mu_s), npx.asarray(sigma_s), npx.asarray(p_0_s)): # Each sample. mu_p.shape=(part, within-trial variation)
             
             #print(mu.shape)
             #print("in loop muu", mu.shape)
