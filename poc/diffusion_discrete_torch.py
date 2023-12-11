@@ -8,6 +8,7 @@ from pyro.infer import MCMC, NUTS
 import numpy as n
 import arviz as az
 #npy.set_host_device_count(4)
+np.set_num_threads(4)
 
 def _buildK(n_states, mu, sigma, n_part): 
 # m = number of states  
@@ -57,8 +58,10 @@ def likelihood(n_states, start_width, mu, sigma, rt, ra, s_0, Mr, I):
     #phi=ln.matrix_exp(rt) # rt:I,J,1,1; K:I,J,m,m
     A = np.mul(rt,K)
     phi=ln.matrix_exp(A) # rt:I,J,1,1; K:I,J,m,m
+    #print(phi.shape)
     Pt = np.matmul(phi, s_0)
     Mc = np.matmul(mv,Pt)
+    #print(Mc.shape)
     Pcorrect = np.matmul(Mr,Pt) # adding up the probabilities over states for a given response
     Pcorrect = Pcorrect.sum(axis=(-2,-1))
     Pcorrect = np.where(ra==0, 1-Pcorrect, Pcorrect)
@@ -101,9 +104,14 @@ def model(n_states, start_width, rt, ra, s_0, Mr, I, J):
     #I,J = rt.shape if rt is not None else 10,5
     with npy.plate('I', I):
         mu =  npy.sample(f"mu", dist.Normal(0,1))
-        _,lkl ,_ = likelihood(n_states, start_width, mu, 1, rt, ra, s_0, Mr, I)
+        _, _, lkl = likelihood(n_states, start_width, mu, 1, rt, ra, s_0, Mr, I)
     
         npy.factor(f"likelihood", lkl)
+
+
+def guide(n_states, start_width, rt, ra, s_0, Mr, I, J):
+    with npy.plate('I', I, dim=-2):
+        mu =  npy.param(f"mu", lambda: np.tensor(1.))
 
 def sample_posterior_params(DT, X, I, J, num_warmup=100, samples_n=500, n_states=7, start_width=1, num_chains=4):
 
@@ -127,7 +135,8 @@ if __name__ == "__main__":
     print("test 1", K.shape)
     K = _buildK(7, mu=np.as_tensor([1,2,0.5]), sigma=1, n_part=1)
     print("test 2", K.shape)
- 
+
+#%%
 if __name__ == "__main__":
     df_st, df_avg_conf, df_avg_corr = perform_walk(n_states=7, start_width=3, mu=[0.5], sigma=2, n_part=1, timesteps=20, delta=0.1)
     print("test 3")
@@ -145,12 +154,12 @@ if __name__ == "__main__":
     #mcmc_chain = sample_posterior_params(DT, None, samples_n=500)
     #mcmc_chain.print_summary()
 
-    rotation_RT = n.loadtxt("examples/data/final_project_rt.csv",delimiter=",", skiprows=1)
+    rotation_RT = n.loadtxt("../examples/data/final_project_rt.csv",delimiter=",", skiprows=1)
     #rotation_RT_n = rotation_RT.loc[~rotation_RT.isna().any(axis=1),:].to_numpy()
     #rotation_RT_n = np.from_numpy(rotation_RT)
     rotation_RT_n = rotation_RT
 
-    rotation_X = n.loadtxt("examples/data/final_project_ra.csv",delimiter=",", skiprows=1)
+    rotation_X = n.loadtxt("../examples/data/final_project_ra.csv",delimiter=",", skiprows=1)
     #rotation_X_n = np.from_numpy(rotation_X)
     rotation_X_n = rotation_X
 
@@ -192,24 +201,44 @@ if __name__ == "__main__":
     model(103, 11, np.from_numpy(rotation_RT_n), 
                         np.from_numpy(rotation_X_n), s_0, Mr, *rotation_RT_n.shape)
 
-    print("test 7")
+#%%
+if __name__ == "__main__":
+    
+    #rotation_RT = n.loadtxt("../examples/data/final_project_rt.csv",delimiter=",", skiprows=1)
+    rotation_RT = n.loadtxt("../examples/data/tol_RT1.csv",delimiter=",", skiprows=1)
+    #rotation_RT_n = rotation_RT.loc[~rotation_RT.isna().any(axis=1),:].to_numpy()
+    #rotation_RT_n = np.from_numpy(rotation_RT)
+    rotation_RT_n = rotation_RT
 
+    #rotation_X = n.loadtxt("../examples/data/final_project_ra.csv",delimiter=",", skiprows=1)
+    rotation_X = n.loadtxt("../examples/data/tol_X1.csv",delimiter=",", skiprows=1)
+    #rotation_X_n = np.from_numpy(rotation_X)
+    rotation_X_n = rotation_X
+
+#%%
+if __name__ == "__main__":
+    print("test 7")
+    
     s_0, Mr = _get_initial_state(103, 11)
-    auto_guide = npy.infer.autoguide.AutoNormal(model)
-    adam = npy.optim.Adam({"lr": 0.02})
+    guide = npy.infer.autoguide.AutoNormal(model)
+    adam = npy.optim.Adam({"lr": 0.2})
     elbo = npy.infer.Trace_ELBO()
-    svi = npy.infer.SVI(model, auto_guide, adam, elbo)
+    svi = npy.infer.SVI(model, guide, adam, elbo)
     losses = []
-    for step in range(10):  # Consider running for more steps.
-        loss = svi.step(7, 3, np.from_numpy(rotation_RT_n), 
+    for step in range(100):  # Consider running for more steps.
+        loss = svi.step(103, 11, np.from_numpy(rotation_RT_n), 
                         np.from_numpy(rotation_X_n), s_0, Mr, *rotation_RT_n.shape)
         losses.append(loss)
         if step % 1 == 0:
             print("Elbo loss: {}".format(loss))
+
+#%%
+if __name__ == "__main__":
     print("test 8")
 
-    mcmc_chain = sample_posterior_params(rotation_RT_n, rotation_X_n, *rotation_RT_n.shape ,
-                                                num_warmup=10, samples_n=10, n_states=7, start_width=3)
+    mcmc_chain = sample_posterior_params(rotation_RT_n, rotation_X_n, 1,14, #*rotation_RT_n.shape ,
+                                        num_warmup=300, samples_n=500, 
+                                        n_states=103, start_width=11)
     print(az.summary(mcmc_chain))
     print("test 9")
 
