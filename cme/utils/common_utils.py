@@ -80,7 +80,8 @@ def _sample_posterior_DE(model, samples_n, chains, tune, acceptance_rate, likeli
 def _sample_posterior_PyMC(model, samples_n, chains, tune, acceptance_rate, likelihood):
     with model:
         log.debug(model.free_RVs)
-        posterior = pm.sample(samples_n, tune = tune, step=pm.NUTS(target_accept=acceptance_rate,max_treedepth=25),
+        posterior = pm.sample(samples_n, tune = tune, 
+                              step=pm.NUTS(target_accept=acceptance_rate,max_treedepth=25),
         return_inferencedata=True, chains=chains,
         nuts_sampler="pymc",
         cores=_cores, progressbar=True)
