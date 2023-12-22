@@ -75,8 +75,8 @@ def q_diffusion(a_i, v_i, a_p, v_p, t_er, grad=False):
         1 + (V_RT_kj / np.power(E_RT_kj,2))
     )
 
-    sigma_kj = np.sqrt(np.log(
-        1 + (V_RT_kj / np.power(E_RT_kj,2))
+    sigma_kj = np.log(
+        1 + (V_RT_kj / np.power(E_RT_kj,2)
     ))
     return mu_kj, sigma_kj, p_jk
 

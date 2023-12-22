@@ -10,11 +10,10 @@ log = cl.get_logger("random-walk")
 def _get_n_states(alpha, theta, tau, sigma):
     sigma = sigma.squeeze()
     delta_state = alpha * sigma * sqrt(tau)
-    n_states = round(theta/delta_state) #2 * round(theta/delta_state) + 1
-    return n_states
+    n_states = round(theta/delta_state) #2 * round(theta/delta_state) + 1 # #
+    return 101#n_states
 
 def _create_Wiener_Q(n_states, alpha, tau, sigma, mu):
-    
     Q = zeros((n_states, n_states))
     rows_ = arange(1,n_states)
     cols_ = arange(0,n_states-1)
@@ -80,14 +79,14 @@ def _random_walk_next_step(s_t, Q):
       print(f"$$$$$$$$$$$ Floating point error $$$$$$$$$$$$$$$$$$$ {z}")
 
    try:
-      s_t_1 = multinomial.rvs(n=1, p=p_t) 
+      s_t_1 = multinomial(n=1, p=p_t).rvs().squeeze() #Not sure about adding squeeze here
    except Exception as e:
       print("*************")
       print(Q)
       print(p_t)
 
       
-   ind_t_1 = where(s_t_1)[0][0]
+   ind_t_1 = where(s_t_1)[0][0] 
    #print(ind_t - ind_t_1, end=" ")
    if(ind_t - ind_t_1 < -1):
       return s_t, ind_t, p_t
@@ -97,7 +96,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
    steps = []
    RT = -1
    X = -1
-   max_steps = 4000
+   max_steps = 10000
    
    n_states = _get_n_states(alpha, theta, tau, sigma)
 
@@ -111,6 +110,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
    
    for i in range(max_steps): #n_walk):
       s_t_1, s_ind, p_t = _random_walk_next_step(s_t, Q)
+      #print(s_ind)
       steps.append(s_ind)
       s_t = s_t_1
       
@@ -144,7 +144,7 @@ def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", in
    RT_arr = []
    X_arr = []
    steps_arr = []
-   max_iter = 500
+   max_iter = 5000
 
    for mi in arange(max_iter):
 
@@ -185,7 +185,8 @@ def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", in
    #      break 
 
    if (size(RT_arr) < samples):
-      raise Exception("Could not generate enough RTs")
+
+      raise Exception(f"Could not generate enough RTs: {size(RT_arr)}")
    
    return RT_arr, X_arr, steps_arr
 
@@ -258,9 +259,9 @@ def load_randomwalk(file_pre_name):
    return RT, X, steps_arr
 
 if __name__ == "__main__":
-    theta, alpha, tau, sigma = 100, 1.5, 0.01, 1
+    theta, alpha, tau = 100, 1.5, 0.01
 
-    mu = asarray([0.2])
+    mu, sigma = asarray([0.2]), asarray([1])
     get_transition_matrix(alpha, tau,sigma, mu, process="Wiener",n_states = theta)
 
     mu = repeat([0.01,0.02,0.05,0.08], (theta+2)/ 4)[0:theta+10]
@@ -270,7 +271,7 @@ if __name__ == "__main__":
 
 
     mu=asarray([0.2])
-    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener",njobs=8)
+    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener",njobs=1)
     assert len(RT_arr) == 10
     assert len(X_arr) == 10
     log.debug(X_arr)

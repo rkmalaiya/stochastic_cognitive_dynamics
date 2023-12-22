@@ -205,13 +205,15 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     
     #rotation_RT = n.loadtxt("../examples/data/final_project_rt.csv",delimiter=",", skiprows=1)
-    rotation_RT = n.loadtxt("../examples/data/tol_RT1.csv",delimiter=",", skiprows=1)
+    #rotation_RT = n.loadtxt("../examples/data/tol_RT1.csv",delimiter=",", skiprows=1)
+    rotation_RT = n.loadtxt("../examples/data/Fail to Inhibit_Difficulty:High_RT.csv",delimiter=",", skiprows=1)
     #rotation_RT_n = rotation_RT.loc[~rotation_RT.isna().any(axis=1),:].to_numpy()
     #rotation_RT_n = np.from_numpy(rotation_RT)
     rotation_RT_n = rotation_RT
 
     #rotation_X = n.loadtxt("../examples/data/final_project_ra.csv",delimiter=",", skiprows=1)
-    rotation_X = n.loadtxt("../examples/data/tol_X1.csv",delimiter=",", skiprows=1)
+    #rotation_X = n.loadtxt("../examples/data/tol_X1.csv",delimiter=",", skiprows=1)
+    rotation_X = n.loadtxt("../examples/data/Fail to Inhibit_Difficulty:High_X.csv",delimiter=",", skiprows=1)
     #rotation_X_n = np.from_numpy(rotation_X)
     rotation_X_n = rotation_X
 
@@ -236,9 +238,9 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     print("test 8")
 
-    mcmc_chain = sample_posterior_params(rotation_RT_n, rotation_X_n, 1,14, #*rotation_RT_n.shape ,
+    mcmc_chain = sample_posterior_params(rotation_RT_n, rotation_X_n, 1, rotation_RT_n.shape[1],
                                         num_warmup=300, samples_n=500, 
-                                        n_states=103, start_width=11)
+                                        n_states=11, start_width=3)
     print(az.summary(mcmc_chain))
     print("test 9")
 
