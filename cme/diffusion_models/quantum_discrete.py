@@ -551,8 +551,6 @@ if __name__ == "__main__":
     sns.relplot(df_likl, x="time",y="liklihood", kind="line")
     plt.show()
 
-if False:
-
     log.debug("Prior Prediction - 1")
     I, J = 15,6
     prior_predictions = sample_prior_pred_data(n_states, start_width, tau, sigma,  I, J, samples_n=4, get_response=True)
