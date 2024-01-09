@@ -8,7 +8,7 @@ import numpyro.distributions as dist
 from jax import random
 import seaborn as sns
 import matplotlib.pyplot as plt
-import cme.simulators.diffusion_random_walk as drw
+import cme.simulators.quantum_random_walk as drw
 from joblib import Parallel, delayed
 from numpyro.infer.util import log_density
 from cme.utils import common_logging as cl
@@ -29,41 +29,42 @@ npy.set_host_device_count(64)
 _rng_key = random.PRNGKey(0)
 _rng_key, _rng_key_ = random.split(_rng_key)
 
-def _buildK(n_states,mu, sigma): 
+def _buildK(n_states, mu, sigma): 
     # H = buildH(a,b,c)
     # m = number of states  
     # a = off diag left  
     # b = diag  
     # c = off diag right
     
-    mu = npx.asarray(mu)
+    mu = npx.asarray(mu) #Ix1
     n_part, _ = mu.shape
 
     # build Hamiltonian  
-    mv = np.arange(0,n_states) #np.arange(-(Mid-1),(Mid))  # Basis vector
-    b = mu*mv;  
-    a = sigma#*np.ones((ns,1));  
+    Mid = int((n_states+1)/2)
+    mv = np.arange(-(Mid-1),(Mid)) #np.arange(0,n_states) #np.arange(-(Mid-1),(Mid))  # Basis vector
+    b = mu[...,None]*mv[None,None,:];  # I,1,n_states
+    a = sigma#*np.ones((ns,1));  Ix1
     c=a
 
-    H = np.zeros((n_part,1,n_states, n_states))
-    rows_ = np.arange(1,n_states)
-    cols_ = np.arange(0,n_states-1)
-    H[rows_,cols_] = c
-    H[cols_, rows_] =  a
-
-    cols_ = np.arange(0, n_states)
-    H[cols_,cols_] = b
+    H = npx.zeros((n_part,1,n_states, n_states))
+    rows_ = npx.arange(1,n_states)
+    cols_ = npx.arange(0,n_states-1)
+    diags_ = npx.arange(0, n_states)
+    for i in npx.arange(n_part):
+        H = H.at[...,rows_,cols_].set(c[i,0])
+        H = H.at[...,cols_, rows_].set(a[i,0])
+        H = H.at[...,diags_, diags_].set(b[i,0,...])
     return H
 
 
 def _get_measurement_matrix(n_states, start_width, prob = 0.5):
     
     Mcorr = npx.zeros(n_states)
-    Mcorr = Mcorr.at[-start_width:].set(prob)
+    Mcorr = Mcorr.at[-start_width:].set(npx.sqrt(prob))
     Mcorr = npx.diag(Mcorr)
 
     Mincorr = npx.zeros(n_states)
-    Mincorr = Mincorr.at[:start_width].set(prob)
+    Mincorr = Mincorr.at[:start_width].set(npx.sqrt(prob))
     Mincorr = npx.diag(Mincorr)
     
     #Mc = npx.zeros((n_states, n_states)) # correct response
@@ -76,7 +77,8 @@ def _get_measurement_matrix(n_states, start_width, prob = 0.5):
     #    if i < int(n_states/2) - start_width:
     #        Mw = Mw.at[i,i].set(prob)
 
-    Mnoresp = npx.eye(n_states) - Mcorr - Mincorr
+    Mnoresp = npx.sqrt(npx.eye(n_states) - (Mcorr**2 + Mincorr**2))
+    #npx.sqrt(npx.eye(7) - Mc**2 - Mw**2)
 
     return Mcorr, Mincorr, Mnoresp
 
@@ -84,21 +86,21 @@ def _get_initial_state(n_states, start_width,I):
 
     Mid = int((n_states+1)/2)
     p_0 = npx.zeros((I,1,n_states,1)) 
-    p_0 = p_0.at[(Mid-start_width-1):(Mid+start_width)].set(1) # additional -1 because indexing starts from 0
-    p_0 = p_0.reshape(-1,1) # to get column vector
-    p_0 = p_0 / S0/np.sqrt(p_0.T @ p_0)
+    p_0 = p_0.at[:,0,(Mid-start_width-1):(Mid+start_width),0].set(1) # additional -1 because indexing starts from 0
+    #p_0 = p_0.reshape(-1,1) # to get column vector
+    p_0 = p_0 / npx.sqrt(p_0.transpose(0,1,3,2) @ p_0)
     return p_0
 
 
 
-def _get_measurement_matrix(n_states, start_width, prob = 0.5):
+def _get_measurement_matrix_2(n_states, start_width, prob = 0.5):
     
     Mcorr = npx.zeros(n_states)
-    Mcorr = Mcorr.at[-start_width:].set(prob)
+    Mcorr = Mcorr.at[-start_width:].set(np.sqrt(prob))
     Mcorr = npx.diag(Mcorr)
 
     Mincorr = npx.zeros(n_states)
-    Mincorr = Mincorr.at[:start_width].set(prob)
+    Mincorr = Mincorr.at[:start_width].set(np.sqrt(prob))
     Mincorr = npx.diag(Mincorr)
     
     #Mc = npx.zeros((n_states, n_states)) # correct response
@@ -121,9 +123,10 @@ def sample_states_and_confidence(rt_delta, phi_0, K, Mn, N):
     Mid = int((n_states+1)/2)
     mv = npx.arange(-(Mid-1),(Mid)).reshape(1,-1) # to get column vector
 
-    T_t=ln.expm(rt_delta*K) # rt:(); K:m,m This is transaction matrix
+    T_t=ln.expm(-1j*rt_delta*K) # rt:(); K:m,m This is transaction matrix
 
-    phi_t = T_t @ phi_0 # Probability of transition matrix at t time for each response time
+    S_t = T_t @ phi_0 # Probability of transition matrix at t time for each response time
+    phi_t = npx.abs(S_t)**2
     Mconf = mv @ (phi_t)
 
     if False:
@@ -156,17 +159,21 @@ def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn):
     T_t=ln.expm(-1j*delta*K) # delta:I,1,1,1; K:I,J,m,m This is transaction matrix
     
     phi_noresp_arr_i = []
-    for T_t_i, n_i in zip(T_t, n_noresp):
+    for T_t_i, n_i, phi_0_i in zip(T_t, n_noresp, phi_0):
         phi_noresp_arr_i_j = []
-        for T_t_i_j, n_i_j in zip(T_t_i, n_i):
-            Pt_i_j = num_ln.matrix_power(Mn @ T_t_i_j, n_i_j.astype(int).item()-1) @ phi_0
-            Pt_i_j = npx.abs(Pt_i_j)**2
+        for T_t_i_j, n_i_j, phi_0_i_j in zip(T_t_i, n_i, phi_0_i):
+            Pt_i_j = T_t_i_j @ num_ln.matrix_power(Mn @ T_t_i_j, n_i_j.astype(int).item()-1) @ phi_0_i_j
+            #Pt_i_j = npx.abs(Pt_i_j)**2
             phi_noresp_arr_i_j.append(Pt_i_j) #n_state x 1
         phi_noresp_arr_i.append(npx.asarray(phi_noresp_arr_i_j))    
     phi_noresp = npx.asarray(phi_noresp_arr_i) # n_part x n_trials x n_state x 1
 
     Pcorrect = (Mc @ phi_noresp).sum(axis=(-2,-1))
     Pincorrect = (Mw @ phi_noresp).sum(axis=(-2,-1))
+
+    Pcorrect = npx.abs(Pcorrect)**2
+    Pincorrect = npx.abs(Pincorrect)**2
+    
 
     #ic(Pcorrect.shape)
 
@@ -188,13 +195,13 @@ def get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw
 
         #print(p_0, "**********")
     
-    K= _buildK(n_states, mu=mu, sigma=sigma, delta=delta)
+    K= _buildK(n_states, mu=mu, sigma=sigma)
 
     likl = likelihood(K, rt, ra, p_0, n_noresp_1, delta, Mc, Mw, Mn) #K,rt, ra, phi_0, delta, Mc, Mw, Mn
     Pt, Mconf, noresp_traj = sample_states_and_confidence(rt, p_0, K, Mn, n_noresp_1.squeeze())
     return delta, n_noresp_1, likl, Pt, Mconf, noresp_traj, rt
 
-def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10, delta=None, prob=0.5, n_noresp = None, njobs=2):
+def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10, delta=None, prob=0.5, n_noresp = None, njobs=1):
 
     avg_conf = [];  
     state_prob = []
@@ -203,7 +210,7 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
     noresp_traj_arr = []
     rt_arr = []
     if p_0 is None:
-        p_0 = _get_initial_state(n_states, start_width)
+        p_0 = _get_initial_state(n_states, start_width, 1)
 
     Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, prob)
     ra = npx.asarray([[1]])
@@ -213,7 +220,7 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
     if n_noresp is not None:
         n_noresp = npx.asarray(n_noresp)
     
-    get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, 0.2)
+    get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, delta[0,0])
 
     dely_get_likl_states_confidence = delayed(get_likl_states_confidence)
     # parallelized over timesteps
@@ -277,7 +284,7 @@ def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size
     #Mid = int((n_states+1)/2)
     #s_0 = npx.zeros((n_states,1)) 
     #s_0 = s_0.at[(Mid-Mid_w):(Mid+Mid_w),0].set(st)
-    s_0 = _get_initial_state(n_states, start_width)
+    s_0 = _get_initial_state(n_states, start_width,I)
     s_0 = npy.deterministic("s_0", s_0)
 
     Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, 0.5)
@@ -295,7 +302,7 @@ def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size
         sigma = (mu + sigma)**2 #Sigma cannot be negative and should be larger than mu
         #if(npx.count_nonzero(npx.array(npx.less_equal(sigma , 0))) > 0):
         #    log.debug(sigma)
-        K = _buildK(n_states, mu, sigma, delta=delta)
+        K = _buildK(n_states, mu, sigma)
     
     #with npy.plate('Obs', I, subsample_size=10) as ind: #,
         #mu =  npy.sample(f"mu", dist.Normal(0,5)) #,sample_shape=(I,)
@@ -345,7 +352,7 @@ def model(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size=2):
 
 def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, num_warmup=100, samples_n=500, num_chains=4, batch_size=2):
 
-    s_0 = _get_initial_state(n_states, start_width)
+    s_0 = _get_initial_state(n_states, start_width,I)
     I,J = DT.shape if I is None else I,DT.shape[1]
 
     #kernel = HMCECS(NUTS(model), num_blocks=10)
@@ -366,8 +373,8 @@ def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, 
     post_likl = mcmc_chain.get_extra_fields()['potential_energy']
     return mcmc_chain, post_likl
 
-def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=100, njobs=8, get_response=False, obs_response_range=None, batch_size=2):
-    s_0 = _get_initial_state(n_states, start_width)
+def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=100, njobs=1, get_response=False, obs_response_range=None, batch_size=2):
+    s_0 = _get_initial_state(n_states, start_width, I)
 
     #prior_predictive = Predictive(model, num_samples=samples_n)
     prior_predictive = Predictive(model_central, num_samples=samples_n)
@@ -387,11 +394,11 @@ def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=
 
     return predictions
 
-def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=None, samples_n=100, njobs=8, get_response=False, obs_response_range=None):
+def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=None, samples_n=100, njobs=1, get_response=False, obs_response_range=None):
     predictions = {}
     theta = int((n_states+1)/2)
 
-    if get_response:
+    if False: #get_response:
         log.debug("Getting Response Times")
         RT, X, Steps = get_rt_sample(theta, 1.5, tau, sigma_s, mu_s, n_trials = J, njobs=njobs)
 
@@ -433,7 +440,7 @@ def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=Non
     return predictions
 
 
-def get_rt_sample(theta, alpha, tau, sigma, mu_s, n_trials, njobs=8):
+def get_rt_sample(theta, alpha, tau, sigma, mu_s, n_trials, njobs=1):
 
     C, I, _ = mu_s.shape
 
@@ -455,7 +462,7 @@ def get_rt_sample(theta, alpha, tau, sigma, mu_s, n_trials, njobs=8):
     return RT, X, Steps
 
 
-def sample_post_pred_data(n_states, start_width, tau, sigma_s, I, J, mcmc_samples, njobs=8, get_response=False, obs_response_range=None):
+def sample_post_pred_data(n_states, start_width, tau, sigma_s, I, J, mcmc_samples, njobs=1, get_response=False, obs_response_range=None):
     mu_s = mcmc_samples["mu"][0:100,...]
     sigma_s = mcmc_samples["sigma"][0:100,...]
     s_0 = mcmc_samples["s_0"][0:100,...]
@@ -468,7 +475,8 @@ def sample_post_pred_data(n_states, start_width, tau, sigma_s, I, J, mcmc_sample
     
 if __name__ == "__main__":
     
-    mu_arr, sigma = npx.asarray([[0.01,0.01,0.01,0.01, 1,1,1]]), npx.asarray([[10]])
+    mu_arr, sigma = npx.asarray([[0.01,1]]).T, npx.asarray([[5,10]]).T
+    I=2
 
     log.debug(_buildK(7, mu=mu_arr, sigma=sigma))
     
@@ -483,51 +491,73 @@ if __name__ == "__main__":
     log.debug("Constant Drift Rate - 1")
     # Replicating the plots in Busemeyer 2010
     n_states=7
-    start_width=3
-    mu=[[0.5]] #drift rate
-    sigma=npx.asarray([[2]]) #diffusion
+    start_width=4
+    mu=[[1]] #drift rate
+    sigma=npx.asarray([[1]]) #diffusion
     tau = 0.001
     delta=[[tau]]
 
-    phi_0 = _get_initial_state(n_states, start_width)
-    K = _buildK(n_states,mu,sigma, delta)
+    phi_0 = _get_initial_state(n_states, start_width,I)
+    K = _buildK(n_states,mu,sigma)
     Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, 0.25)
 
 
     conf_arr = []
-    
-    for r in np.arange(0,20,0.1):
+    P_t_arr = []
+    likl_arr = []
+
+    phi_0 = _get_initial_state(n_states, start_width,I=1)
+    for r in np.arange(0,100):
         P_t, Mconf, noresp_traj_arr = sample_states_and_confidence(r, phi_0, K, Mn, 1)
         conf_arr.append(Mconf.squeeze())
+        P_t_arr.append(np.asarray(P_t.squeeze()))
+
+        likl = likelihood(K,None,1,phi_0,npx.asarray([[r+1]]),npx.asarray([[1]]),Mc,Mw,Mn) # if delta is 1, then n_noresp simply becomes the response time
+        likl_arr.append(likl)
 
     conf = np.asarray(conf_arr)
     log.debug(conf.shape)
     pd.Series(conf).plot.line()
-    plt.show()
 
+    df_st = pd.DataFrame(P_t_arr).reset_index(names="time").melt(id_vars="time", var_name="state")
+    log.debug(df_st.shape)
+    sns.relplot(df_st, x="time", y="state", size="value",sizes=(50, 300), color="black")
+    
+    likl = np.asarray(likl_arr)
+    log.debug(likl.shape)
+    pd.Series(likl).plot.line()
+
+
+    plt.show()
+    
     log.debug("Constant Drift Rate - 2")
     # Replicating the plots in Busemeyer 2010
     n_states=101
-    start_width=4
-    mu=npx.asarray([[0.56]]) #drift rate
-    sigma=npx.asarray([[20.09]]) #diffusion
+    start_width=11
+    mu=npx.asarray([[0.2]]) #drift rate
+    sigma=npx.asarray([[2]]) #diffusion
+    #mu=npx.asarray(mu)
+    #sigma = npx.asarray(sigma)
 
-    phi_0 = _get_initial_state(n_states, start_width)
-    K = _buildK(n_states,mu,sigma,delta=delta)
+    phi_0 = _get_initial_state(n_states, start_width, 1)
+    K = _buildK(n_states,mu,sigma)
 
-    df_st, df_avg_conf, df_likl = perform_walk(n_states=n_states, start_width=start_width, mu=mu, sigma=sigma,max_timesteps=30, delta=[[1]], prob=0.25)#, n_noresp=npx.asarray([[1]]))
+    df_st, df_avg_conf, df_likl = perform_walk(n_states=n_states, start_width=start_width, 
+                                    mu=mu, sigma=sigma,max_timesteps=200, 
+                                    delta=[[1]], prob=0.25)#, n_noresp=npx.asarray([[1]]))
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
-    sns.relplot(df_avg_conf, x="time",y="avg_conf")
-    sns.relplot(df_likl, x="time",y="liklihood")
+    sns.relplot(df_avg_conf, x="time",y="avg_conf", kind="line")
+    sns.relplot(df_likl, x="time",y="liklihood", kind="line")
     plt.show()
 
+if False:
 
     log.debug("Prior Prediction - 1")
     I, J = 15,6
     prior_predictions = sample_prior_pred_data(n_states, start_width, tau, sigma,  I, J, samples_n=4, get_response=True)
-    RT = prior_predictions["RT"]
-    log.debug(RT.min(), RT.mean(), RT.max())
+    #RT = prior_predictions["RT"]
+    #log.debug(RT.min(), RT.mean(), RT.max())
 
     log.debug("Posterior Sampling - 1")
     
@@ -537,44 +567,16 @@ if __name__ == "__main__":
     start_width=1
     
 
-    mcmc_chain = sample_posterior_params(DT=rt, X=x, sigma=sigma, tau=tau, I=I, n_states=n_states, start_width=start_width, num_warmup=10, samples_n=4 )
+    mcmc_chain, post_likl = sample_posterior_params(DT=rt, X=x, sigma=sigma, tau=tau, I=I, n_states=n_states, start_width=start_width, num_warmup=10, samples_n=4 )
     mcmc_chain.print_summary()
     mcmc_samples = mcmc_chain.get_samples()
 
     log.debug("Posterior Prediction - 1") # Test here
-    RT, X, steps_arr = sample_post_pred_data(n_states, start_width, tau, sigma, mcmc_samples, n_trials=J)
+    RT, X, steps_arr = sample_post_pred_data(n_states, start_width, tau, sigma, mcmc_samples,obs_response_range=(1,60))
     log.debug(RT.min(), RT.mean(), RT.max())
 
 
-    log.debug("Variable Drift Rate - 1")
-    phi_0 = _get_initial_state(7, start_width)
-    #delta = 90/2
-    K = _buildK(7, mu=mu_arr, sigma=10, delta=delta)
-    
-    Mc, Mw, Mn = _get_measurement_matrix(7, start_width, 0.25)
-
-    Pt, Mconf, noresp_traj = sample_states_and_confidence(90, phi_0, K.squeeze(), Mn, npx.asarray([[2]]))
-
-    df_st, df_avg_conf, df_likl = perform_walk(n_states=7, start_width=3, mu=mu_arr, sigma=10, max_timesteps=1, delta=delta)#, n_noresp=npx.asarray([[2]]))
-    
-    sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
-    sns.relplot(df_avg_conf, x="time",y="avg_conf")
-    sns.relplot(df_likl, x="time",y="liklihood")
-    plt.show()
-
-    log.debug("Variable Drift Rate - 2")
-    mu_arr = npx.asarray([np.repeat([0.01,0.01,0.01,2],26)[0:101]])
-
-    phi_0 = _get_initial_state(n_states, start_width)
-    K = _buildK(7, mu=mu_arr, sigma=sigma, delta=delta)
-
-    df_st, df_avg_conf, df_likl = perform_walk(n_states=101, start_width=11, mu=mu_arr, sigma=10,max_timesteps=1, delta=delta)#, n_noresp=npx.asarray([[5]]))
-    
-    sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
-    sns.relplot(df_avg_conf, x="time",y="avg_conf")
-    sns.relplot(df_likl, x="time",y="liklihood")
-    plt.show()
-   
+       
 
 
 
