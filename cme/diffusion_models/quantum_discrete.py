@@ -12,7 +12,7 @@ import cme.simulators.quantum_random_walk as drw
 from joblib import Parallel, delayed
 from numpyro.infer.util import log_density
 from cme.utils import common_logging as cl
-from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive
+from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive, MixedHMC, HMC
 import scipy.stats as stats
 
 #from numpyro.contrib.tfp.mcmc import TFPKernel
@@ -192,6 +192,7 @@ def get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw
         n_noresp_1 = rt/delta
     else: 
         delta = rt/n_noresp
+        n_noresp_1 = n_noresp
 
         #print(p_0, "**********")
     
@@ -201,7 +202,7 @@ def get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw
     Pt, Mconf, noresp_traj = sample_states_and_confidence(rt, p_0, K, Mn, n_noresp_1.squeeze())
     return delta, n_noresp_1, likl, Pt, Mconf, noresp_traj, rt
 
-def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10, delta=None, prob=0.5, n_noresp = None, njobs=1):
+def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10, ra = npx.asarray([[1]]), delta=None, prob=0.5, n_noresp = None, njobs=1):
 
     avg_conf = [];  
     state_prob = []
@@ -213,19 +214,25 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
         p_0 = _get_initial_state(n_states, start_width, 1)
 
     Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, prob)
-    ra = npx.asarray([[1]])
+    
     if delta is not None:
         delta = npx.asarray(delta)
+        #step = delta[0,0]
+    else:
+        n_noresp = npx.asarray(n_noresp)
+        delta = max_timesteps/n_noresp
+    
+    step = delta[0,0]
 
     if n_noresp is not None:
         n_noresp = npx.asarray(n_noresp)
     
-    get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, delta[0,0])
-
+    get_likl_states_confidence(n_states, mu, sigma, npx.asarray([[1]]), n_noresp, p_0, Mc, Mw, Mn, ra, step)
+    log.debug(f"Starting Walk for {max_timesteps} steps with step size {step}; mu {mu.shape}")
     dely_get_likl_states_confidence = delayed(get_likl_states_confidence)
     # parallelized over timesteps
     res = Parallel(n_jobs=njobs)(dely_get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, rt) 
-                                 for rt in list(npx.arange(delta[0,0], max_timesteps, step=delta[0,0]))
+                                 for rt in list(npx.arange(step, max_timesteps, step=step))
                                  #for rt in np.linspace(0,max_timesteps, 3000)
                                  )
 
@@ -242,7 +249,12 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
     levels=list(zip(np.array(npx.mean(mu, axis=-1)), np.array(npx.mean(sigma, axis=-1))))
     col_names = pd.MultiIndex.from_tuples(levels)
 
-    df_avg_conf = pd.DataFrame(np.asarray(avg_conf).squeeze(), columns=col_names)# averaging over within-trial drift rates   .rename({0:"avg_conf"}, axis=1)
+
+    conf_arr = np.asarray(avg_conf).squeeze()
+    if conf_arr.ndim > 2:
+        conf_arr = conf_arr.mean(axis=1)
+    #conf_arr = conf_arr.reshape(conf_arr.shape[0],-1)
+    df_avg_conf = pd.DataFrame(conf_arr, columns=col_names) # timestep x n_part 
     df_avg_conf = df_avg_conf.reset_index().rename({"index":"time"}, axis=1)
     df_avg_conf.loc[:,"rt"] = pd.Series(rt_arr) #df_avg_conf["time"] * delta
     df_avg_conf = df_avg_conf.melt(id_vars=["rt","time"], value_name="avg_conf").rename(columns = {"variable_0":"drift_rate", "variable_1":"sigma"})
@@ -287,19 +299,20 @@ def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size
     s_0 = _get_initial_state(n_states, start_width,I)
     s_0 = npy.deterministic("s_0", s_0)
 
-    Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, 0.5)
+    Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, 0.25)
 
     #mu_m =  npy.sample(f"mu_m", dist.Normal(2,3))
     #mu_s =  npy.sample(f"mu_s", dist.HalfNormal(2))
-    delta = np.asarray([[tau]])
+    delta = np.asarray(tau)
     
     n_noresp = rt/delta if rt is not None else 10
         
     with npy.plate('I', I, dim=-2) as ind: #, subsample_size=batch_size
         #mu =  npy.sample(f"mu", dist.Normal(mu_m,mu_s),sample_shape=(I,1))
-        mu = npy.sample("mu", dist.Normal(0,2)) # Drift Rate
-        sigma = npy.sample("sigma", dist.Normal(5,2)) # Diffusion Rate
-        sigma = (mu + sigma)**2 #Sigma cannot be negative and should be larger than mu
+        mu = npy.sample("mu", dist.Normal(0,1)) # Drift Rate
+        sigma_t = npy.sample("sigma_t", dist.Normal(0,1)) # Diffusion Rate
+        sigma = npy.deterministic("sigma",sigma_t**2 + 1) #Sigma cannot be negative
+        #n_noresp = npy.sample("N", dist.Binomial(total_count=n_noresp_max, probs=0.5))
         #if(npx.count_nonzero(npx.array(npx.less_equal(sigma , 0))) > 0):
         #    log.debug(sigma)
         K = _buildK(n_states, mu, sigma)
@@ -361,6 +374,7 @@ def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, 
 
     #kernel = NUTS(model)
     kernel = NUTS(model_central)
+    #kernel = MixedHMC(HMC(model_central, trajectory_length=1.2), num_discrete_updates=20)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
     mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('potential_energy',))
 
@@ -384,17 +398,18 @@ def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=
     
     mu_s = prior_predictions["mu"]
     sigma_s = prior_predictions["sigma"]
-    s_0 = prior_predictions["s_0"][0]
-    log.debug(npx.asarray(mu_s.shape))
-    log.debug(npx.asarray(sigma_s.shape))
-    log.debug(npx.asarray(s_0.shape))
+    #N_s = prior_predictions["N"]
+    s_0 = prior_predictions["s_0"][0] # picking the first sample because all samples will have same value 
+    log.debug(f"mu: {mu_s.shape}")
+    log.debug(f"sigma: {sigma_s.shape}")
+    log.debug(f"s_0: {s_0.shape}")
     
-    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0 = s_0, samples_n=samples_n, njobs=njobs, get_response=get_response, obs_response_range=obs_response_range)
+    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0 = s_0, n_noresp_s=None, samples_n=samples_n, njobs=njobs, get_response=get_response, obs_response_range=obs_response_range)
     predictions.update(prior_predictions)
 
     return predictions
 
-def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=None, samples_n=100, njobs=1, get_response=False, obs_response_range=None):
+def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=None, n_noresp_s=None, samples_n=100, njobs=1, get_response=False, obs_response_range=None):
     predictions = {}
     theta = int((n_states+1)/2)
 
@@ -416,7 +431,8 @@ def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=Non
             #print(mu.shape)
             #print("in loop muu", mu.shape)
             #print("sgimau", sigma.shape)
-            df_st_t, df_avg_conf_t, df_likl_t = perform_walk(n_states, start_width, mu_p, sigma_p, p_0=p_0,
+            log.debug(f"Perform walk: {mu_p.shape}")
+            df_st_t, df_avg_conf_t, df_likl_t = perform_walk(n_states, start_width, mu_p, sigma_p, p_0=p_0, n_noresp=None,
                                                              max_timesteps=max_obs_resp, delta=tau, njobs=njobs)
 
             #for (_,df_st_t), (_,df_avg_conf_t), mu, sigma in zip(df_st_m.iteritems(), df_avg_conf_m.iteritems(), mu_p, sigma_p):
@@ -463,12 +479,14 @@ def get_rt_sample(theta, alpha, tau, sigma, mu_s, n_trials, njobs=1):
 
 
 def sample_post_pred_data(n_states, start_width, tau, sigma_s, I, J, mcmc_samples, njobs=1, get_response=False, obs_response_range=None):
-    mu_s = mcmc_samples["mu"][0:100,...]
-    sigma_s = mcmc_samples["sigma"][0:100,...]
-    s_0 = mcmc_samples["s_0"][0:100,...]
+    mu_s = mcmc_samples["mu"]#.reshape((-1, mcmc_samples["mu"].shape[-1])) #[0:100,...] # reshaping is done to merge the samples and participants into a single dimension
+    sigma_s = mcmc_samples["sigma"]#.reshape((-1, mcmc_samples["sigma"].shape[-1]))#[0:100,...]
+    #N_s = mcmc_samples["N"]
+    s_0 = mcmc_samples["s_0"][0]#.reshape((-1, mcmc_samples["s_0"].shape[-1]))#[0:100,...]
 
-    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0 = s_0, samples_n= 100, njobs= njobs, get_response=get_response, obs_response_range=obs_response_range)
-    predictions.update("mu", mu_s)
+    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0 = s_0, n_noresp_s=None, samples_n= 100, njobs= njobs, get_response=get_response, obs_response_range=obs_response_range)
+    predictions.update({"mu": mu_s})
+    predictions.update({"sigma": sigma_s})
 
     return predictions
 
@@ -494,7 +512,7 @@ if __name__ == "__main__":
     start_width=4
     mu=[[1]] #drift rate
     sigma=npx.asarray([[1]]) #diffusion
-    tau = 0.001
+    tau = 1
     delta=[[tau]]
 
     phi_0 = _get_initial_state(n_states, start_width,I)
@@ -522,12 +540,11 @@ if __name__ == "__main__":
     df_st = pd.DataFrame(P_t_arr).reset_index(names="time").melt(id_vars="time", var_name="state")
     log.debug(df_st.shape)
     sns.relplot(df_st, x="time", y="state", size="value",sizes=(50, 300), color="black")
-    
+    plt.show()
+
     likl = np.asarray(likl_arr)
     log.debug(likl.shape)
     pd.Series(likl).plot.line()
-
-
     plt.show()
     
     log.debug("Constant Drift Rate - 2")
@@ -548,12 +565,33 @@ if __name__ == "__main__":
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
     sns.relplot(df_avg_conf, x="time",y="avg_conf", kind="line")
+    plt.show()
     sns.relplot(df_likl, x="time",y="liklihood", kind="line")
     plt.show()
 
+    #log.debug("Constant Drift Rate - 3")
+    #df_st, df_avg_conf, df_likl = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    #for N in range(100,200, 10):
+
+    #    df_st_t, df_avg_conf_t, df_likl_t = perform_walk(n_states=n_states, start_width=start_width, 
+    #                                    mu=mu, sigma=sigma,max_timesteps=200, n_noresp=[[N]],
+    #                                    delta=None, prob=0.25)#, n_noresp=npx.asarray([[1]]))
+    #    df_st = pd.concat([df_st, df_st_t.assign(N=N)])
+    #    df_avg_conf = pd.concat([df_avg_conf, df_avg_conf_t.assign(N=N)])
+    #    df_likl = pd.concat([df_likl, df_likl_t.assign(N=N)])    
+    
+    #sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
+    #sns.relplot(df_avg_conf, x="time",y="avg_conf", hue="N", kind="line")
+    #plt.show()
+    #sns.relplot(df_likl, x="time",y="liklihood", hue="N", kind="line")
+    #plt.show()
+
+
+
+
     log.debug("Prior Prediction - 1")
-    I, J = 15,6
-    prior_predictions = sample_prior_pred_data(n_states, start_width, tau, sigma,  I, J, samples_n=4, get_response=True)
+    I, J = 5,3
+    prior_predictions = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=2, obs_response_range=(1,100))
     #RT = prior_predictions["RT"]
     #log.debug(RT.min(), RT.mean(), RT.max())
 
@@ -565,13 +603,13 @@ if __name__ == "__main__":
     start_width=1
     
 
-    mcmc_chain, post_likl = sample_posterior_params(DT=rt, X=x, sigma=sigma, tau=tau, I=I, n_states=n_states, start_width=start_width, num_warmup=10, samples_n=4 )
+    mcmc_chain, post_likl = sample_posterior_params(DT=rt, X=x, sigma=sigma, tau=[[tau]], I=I, n_states=n_states, start_width=start_width, num_warmup=10, samples_n=4 )
     mcmc_chain.print_summary()
     mcmc_samples = mcmc_chain.get_samples()
 
     log.debug("Posterior Prediction - 1") # Test here
-    RT, X, steps_arr = sample_post_pred_data(n_states, start_width, tau, sigma, mcmc_samples,obs_response_range=(1,60))
-    log.debug(RT.min(), RT.mean(), RT.max())
+    predictions = sample_post_pred_data(n_states, start_width, [[tau]], sigma, I,J, mcmc_samples,obs_response_range=(1,100))
+    #log.debug(RT.min(), RT.mean(), RT.max())
 
 
        

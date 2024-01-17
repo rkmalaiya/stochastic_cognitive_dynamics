@@ -80,30 +80,35 @@ def perform_walk(num_states, start_width, mu, sigma=1,rt=200,type="C"):
     # time loop  
     avg_conf = [];  
     state_prob = []
+
     for t in tv: 
         
         U = expm(-1j*t*H) #-1i 
         
         St = U@S0  
+  
+        if (t == 5): # Make no choice
+            
+            St1 = Mnoresp @ St
+            St1 = St1/np.sqrt((np.abs(St1)**2).sum()) # The probability amplitude is normalized 
+            St2 = U@St1
+            #Pt2 = np.abs(St2)**2
+            #Mc = mv@Pt2
+            St = St2 # For further calculations
+
+        if (t == 10): # Make no choice
+            St2 = Mnoresp @ St2
+            St2 = St2/np.sqrt((np.abs(St2)**2).sum()) # The probability amplitude is normalized 
+            St3 = U@St2
+            #Pt2 = np.abs(St2)**2
+            #Mc = mv@Pt2
+            St = St3 # for further calculations
+            
+
         Pt = (np.abs(St)**2)
         state_prob.append(Pt)
 
-        Mc = mv@Pt  
-
-        if (t == 5):
-            Pt = Pt/Pt.sum() # Pt is not a probability distribution, hence normalizing Pt
-            St2 = U@Pt
-            Pt2 = np.abs(St2)**2
-            Mc = mv@Pt2
-            S0=St2
-
-        if (t == 10):
-            Pt2 = Pt2/Pt2.sum() # Pt is not a probability distribution, hence normalizing Pt
-            St3 = U@Pt2
-            Pt3 = np.abs(St3)**2
-            Mc = mv@Pt3
-            S0=St3
-
+        Mc = mv@Pt
         
         avg_conf.append(Mc)  
     
