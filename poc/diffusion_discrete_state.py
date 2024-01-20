@@ -77,11 +77,35 @@ n = int(RT/delta_t)
 K = _buildK(b_m, a, b_p)
 
 likl_arr = []
-for rt in range(1,RT):
-    n = int(rt/delta_t)
-    likl =  Mcorr @ ((t2 := linalg.matrix_power(Mnoresp @ ln.expm(delta_t*K), n-1)) @ S0)
-    likl_arr.append(likl.sum())
+mconf_arr = []
+ts_arr = []
 
+Mid = int((ns+1)/2)
+mv = arange(-(Mid-1),(Mid))
 import pandas as pd
-pd.DataFrame(likl_arr).plot()
+df_likl, df_conf = pd.DataFrame(), pd.DataFrame()
+
+for delta_t in range(10, RT, 10):
+    likl_arr = []
+    mconf_arr = []
+    ts_arr = []
+    for rt in range(delta_t,RT,delta_t):
+        n = int(rt/delta_t)
+        Pt = ln.expm(delta_t*K) @ ((t2 := linalg.matrix_power(Mnoresp @ ln.expm(delta_t*K), n-1)) @ S0)
+        likl =  Mcorr @ Pt
+        likl_arr.append(likl.sum())
+        conf = mv @ Pt
+        mconf_arr.append(conf)
+        ts_arr.append(rt)
+    df_likl = pd.concat([df_likl, pd.DataFrame(likl_arr).assign(delta=delta_t, rt = ts_arr)])
+    df_conf = pd.concat([df_conf, pd.DataFrame(mconf_arr).assign(delta=delta_t, rt = ts_arr)])
 # %%
+import seaborn as sns
+sns.kdeplot(df_likl, x=0, hue="delta")
+df_conf.groupby("delta").mean()[0].plot.bar()
+sns.lineplot(
+    df_conf,
+    x="rt",
+    y=0,
+    hue="delta"
+)
