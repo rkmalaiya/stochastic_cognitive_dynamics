@@ -73,19 +73,13 @@ def _get_initial_state(n_states):
 def _random_walk_next_step(s_t, Q):
    ind_t = where(s_t)[0][0] #dot(Q, s_t) #select correct row
    p_t = Q[ind_t,:]
-   p_t = around(p_t.squeeze(),decimals=2)
+   #p_t = around(p_t.squeeze(),decimals=2)
    z=sum(p_t)
    while(z>1):
       print(f"$$$$$$$$$$$ Floating point error $$$$$$$$$$$$$$$$$$$ {z}")
 
-   try:
-      s_t_1 = multinomial(n=1, p=p_t).rvs().squeeze() #Not sure about adding squeeze here
-   except Exception as e:
-      print("*************")
-      print(Q)
-      print(p_t)
+   s_t_1 = multinomial(n=1, p=p_t).rvs().squeeze() #Not sure about adding squeeze here
 
-      
    ind_t_1 = where(s_t_1)[0][0] 
    #print(ind_t - ind_t_1, end=" ")
    if(ind_t - ind_t_1 < -1):
@@ -140,7 +134,7 @@ def get_transition_matrix(alpha, tau, sigma, *params, process, n_states):
     return Q
 
 
-def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Any", njobs=8):
+def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Any", njobs=1):
    RT_arr = []
    X_arr = []
    steps_arr = []

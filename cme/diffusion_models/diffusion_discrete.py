@@ -165,7 +165,7 @@ def likelihood(K, rt, ra, phi_0_s, n_noresp, delta, Mc, Mw, Mn):
     for T_t_i, n_i, phi_0_i in zip(T_t, n_noresp, phi_0_s):
         phi_noresp_arr_i_j = []
         for T_t_i_j, n_i_j in zip(T_t_i, n_i):
-            phi_noresp_arr_i_j.append(num_ln.matrix_power(Mn @ T_t_i_j, n_i_j.astype(int).item()-1) @ phi_0_i[0,...]) #n_state x 1
+            phi_noresp_arr_i_j.append(T_t_i_j @ num_ln.matrix_power(Mn @ T_t_i_j, n_i_j.astype(int).item()-1) @ phi_0_i[0,...]) #n_state x 1
         phi_noresp_arr_i.append(npx.asarray(phi_noresp_arr_i_j))    
     phi_noresp = npx.asarray(phi_noresp_arr_i) # n_part x n_trials x n_state x 1
 
@@ -594,7 +594,7 @@ if __name__ == "__main__":
     phi_0 = _get_initial_state(n_states, start_width)
     K = _buildK(n_states,mu,sigma,delta=delta)
 
-    df_conf_likl_st = perform_walk(n_states=n_states, start_width=start_width, mu=mu, sigma=sigma, p_0=phi_0, max_timesteps=300, delta=[[1]], prob=0.5)#, n_noresp=npx.asarray([[1]]))
+    df_conf_likl_st = perform_walk(n_states=n_states, start_width=start_width, mu=mu, sigma=sigma, p_0=phi_0, max_timesteps=700, delta=[[1]], prob=0.5)#, n_noresp=npx.asarray([[1]]))
     
 
     Mid = int((n_states+1)/2)
@@ -612,7 +612,7 @@ if __name__ == "__main__":
     sns.relplot(df_avg_conf, x="rt",y="avg_conf")
     sns.relplot(df_likl, x="rt",y="likelihood")
     plt.show()
-if False:
+
     log.debug("Prior Prediction - 1")
     I, J = 15,6
     prior_predictions = sample_prior_pred_data(n_states, start_width, tau, sigma,  I, J, samples_n=4, get_response=True)
