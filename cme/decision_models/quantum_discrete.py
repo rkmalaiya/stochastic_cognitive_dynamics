@@ -120,7 +120,7 @@ def _get_initial_state(n_states, start_width, I = 1, prob=1):
     return Mcorr, Mincorr, Mnoresp """
 
     
-def sample_states_and_confidence(rt, phi_0, K, Mn, N, delta = None, n_noresp = None,  noisy=False, has_intermediate = False):
+def sample_states_and_confidence(rt, phi_0, K, Mn, N, ra = None, delta = None, n_noresp = None,  noisy=False, has_intermediate = False):
     n_states = K.shape[-1] # picking the last dimension because the dimensions are I,J,K,K
     Mid = int((n_states+1)/2)
     mv = npx.arange(-(Mid-1),(Mid)).reshape(1,-1) # to get column vector
@@ -129,15 +129,17 @@ def sample_states_and_confidence(rt, phi_0, K, Mn, N, delta = None, n_noresp = N
 
     #S_t = T_t @ phi_0 # Probability of transition matrix at t time for each response time
 
-    if has_intermediate:
-       phi_t = _state_transition_with_intermediate(K, rt[:-1], ra[:-1], phi_0, n_noresp[:-1], delta[:-1], Mc, Mw, Mn, noisy=noisy)
-       ra = ra[-1]
-       rt = rt[-1]
+    if has_intermediate: 
+       # here the last response is not being sent because we don't want to multiple response measurement matrix to the last record.
+       phi_t = _state_transition_with_intermediate(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=noisy)
+       #ra = ra[-1]
+       #rt = rt[-1]
+       #phi_0 = phi_t
     else:
         phi_t = _state_transition(K, phi_0, rt, delta, n_noresp, Mn, noisy=noisy)
 
-    phi_t = npx.abs(phi_t)**2
-    Mconf = mv @ (phi_t)
+    P_t = npx.abs(phi_t)**2
+    Mconf = mv @ (P_t)
 
     if False:
         noresp_traj_arr = []
@@ -151,7 +153,7 @@ def sample_states_and_confidence(rt, phi_0, K, Mn, N, delta = None, n_noresp = N
         phi_t = noresp_state @ phi_0
         Mconf = mv @ phi_t
 
-    return phi_t, Mconf, npx.asarray(noresp_traj_arr) if False else None
+    return P_t, Mconf, phi_t 
 
 
 
@@ -160,6 +162,7 @@ def _state_transition(K, phi_0, t, delta = None, n_noresp = None, Mn = None, noi
     if noisy:
         delta = npx.expand_dims(delta, axis=2)
         delta = npx.expand_dims(delta, axis=2)
+        n_noresp = t/delta
 
         T_t=ln.expm(-1j*delta*K) # delta:I,1,1,1; K:I,J,m,m This is transaction matrix
         
@@ -182,17 +185,23 @@ def _state_transition_with_intermediate(K, rt, ra, phi_0, n_noresp, delta, Mc, M
     phi_t = None
     phi_0_in = phi_0
 
-    for rt_in, ra_in, delta_in, n_noresp_in in zip(rt,ra, delta, n_noresp):
-            phi_t_in = _state_transition(K, phi_0_in, rt_in, delta_in, n_noresp_in, Mn, noisy=noisy)
-            phi_t_in_correct = (Mc @ phi_t_in)
-            phi_t_in_incorrect = (Mw @ phi_t_in)
-            phi_t_in = npx.where(ra_in==0, phi_t_in_incorrect, phi_t_in_correct)
-            if phi_t is None:
-                phi_t = phi_t_in
-            else:
-                phi_t = phi_t @ phi_t_in
+    for i, (rt_in, ra_in) in enumerate(zip(rt,ra)):
+            phi_t_in = _state_transition(K, phi_0_in, rt_in, delta, n_noresp, Mn, noisy=noisy)
 
+            if i != (len(rt) - 1): 
+            # avoid these steps for the last response
+                phi_t_in_correct = (Mc @ phi_t_in)
+                phi_t_in_incorrect = (Mw @ phi_t_in)
+                phi_t = npx.where(ra_in==0, phi_t_in_incorrect, phi_t_in_correct)
+            #if phi_t is None:
+                #phi_t = phi_t_in
+            #else:
+            #    phi_t = phi_t @ phi_t_in  
+            else: 
+                phi_t = phi_t_in
+            
             phi_0_in = phi_t
+
     return phi_t
 
 def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=False, has_intermediate = False):
@@ -205,9 +214,9 @@ def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=False, has_i
     #    rt = npx.expand_dims(rt, axis=2)
 
     if has_intermediate:
-       phi_t = _state_transition_with_intermediate(K, rt[:-1], ra[:-1], phi_0, n_noresp[:-1], delta[:-1], Mc, Mw, Mn, noisy=noisy)
-       ra = ra[-1]
-       rt = rt[-1]
+       phi_t = _state_transition_with_intermediate(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=noisy)
+       #ra = ra[-1]
+       #rt = rt[-1]
     else:
         phi_t = _state_transition(K, phi_0, rt, delta, n_noresp, Mn, noisy=noisy)
 
@@ -227,21 +236,26 @@ def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=False, has_i
 
 def get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, rt, noisy=False, has_intermediate=False):
     
-    rt = npx.asarray([[rt]])
-    if n_noresp is None:
-        n_noresp_1 = rt/delta
-    else: 
-        delta = rt/n_noresp
-        n_noresp_1 = n_noresp
+    #if not has_intermediate:
+    #    rt = npx.asarray([[rt]])
+    #if n_noresp is None:
+    #    n_noresp_1 = rt/delta
+    #else: 
+    #    delta = rt/n_noresp
+    #    n_noresp_1 = n_noresp
 
         #print(p_0, "**********")
     
-    K= _buildH(n_states, mu=mu, sigma=sigma, 
-               n_trials = None if noisy else rt.shape[1])
+    if has_intermediate:
+        I,J = rt[0].shape
+    else:
+        I,J = rt.shape
 
-    likl = likelihood(K, rt, ra, p_0, n_noresp_1, delta, Mc, Mw, Mn) #K,rt, ra, phi_0, delta, Mc, Mw, Mn
-    Pt, Mconf, noresp_traj = sample_states_and_confidence(rt, p_0, K, Mn, n_noresp_1.squeeze())
-    return delta, n_noresp_1, likl, Pt, Mconf, noresp_traj, rt
+    K= _buildH(n_states, mu=mu, sigma=sigma, n_trials = None if noisy else J)
+    n_noresp_1 = None
+    likl = likelihood(K, rt, ra, p_0, n_noresp_1, delta, Mc, Mw, Mn, noisy=noisy, has_intermediate=has_intermediate) #K,rt, ra, phi_0, delta, Mc, Mw, Mn
+    Pt, Mconf, phi_t = sample_states_and_confidence(rt, p_0, K, Mn, n_noresp_1, ra=ra, noisy=noisy, has_intermediate=has_intermediate)
+    return delta, n_noresp_1, likl, Pt, Mconf, phi_t, rt
 
 def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10, ra = npx.asarray([[1]]), delta=None, prob=0.5, n_noresp = None, noisy=False, has_intermediate=False, njobs=1):
 
@@ -249,7 +263,7 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
     state_prob = []
     likl_prob = []
     n_noresp_arr = []
-    noresp_traj_arr = []
+    phi_t_arr = []
     rt_arr = []
     #I,J = ra.shape
     if p_0 is None:
@@ -260,33 +274,68 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
     if delta is not None:
         delta = npx.asarray(delta)
         #step = delta[0,0]
-    else:
+    elif False:
         n_noresp = npx.asarray(n_noresp)
         delta = max_timesteps/n_noresp
     
     step = delta[0,0]
+    n_noresp = None
+    #if n_noresp is not None:
+    #    n_noresp = npx.asarray(n_noresp)
+    rt_last_iter = []
+    ra_last_iter = []
 
-    if n_noresp is not None:
-        n_noresp = npx.asarray(n_noresp)
-    
-    get_likl_states_confidence(n_states, mu, sigma, npx.asarray([[1]]), n_noresp, p_0, Mc, Mw, Mn, ra, step)
-    log.debug(f"Starting Walk for {max_timesteps} steps with step size {step}; mu {mu.shape}")
-    dely_get_likl_states_confidence = delayed(get_likl_states_confidence)
-    # parallelized over timesteps
-    res = Parallel(n_jobs=njobs)(dely_get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, rt) 
-                                 for rt in list(npx.arange(step, max_timesteps, step=step))
-                                 #for rt in np.linspace(0,max_timesteps, 3000)
-                                 )
+    # Because while walking, the joint probability will only be evaluated after the first response time is over
+    #has_inter_temp = False
+    if has_intermediate:
+        for rt_in, ra_in in zip(max_timesteps, ra):            
+            #get_likl_states_confidence(n_states, mu, sigma, npx.asarray([[1]]), n_noresp, p_0, Mc, Mw, Mn, ra_last_iter + [ra_in], rt_last_iter + [step], has_intermediate=has_inter_temp)
+            log.debug(f"Starting Walk for ({step}:{rt_in}) steps with step size {step}; mu {mu.shape}")
+            dely_get_likl_states_confidence = delayed(get_likl_states_confidence)
+            # parallelized over timesteps
+            res = Parallel(n_jobs=njobs)(dely_get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra_last_iter + [ra_in], rt_last_iter + [npx.asarray([[rt]])], has_intermediate=True) 
+                                        for rt in list(npx.arange(step, rt_in, step=step))
+                                        #for rt in np.linspace(0,max_timesteps, 3000)
+                                        )
+            
+            for delta, n_noresp_1, likl, Pt, Mconf, phi_t, rt in res:
+                state_prob.append(Pt)
+                likl_prob.append(likl)
+                avg_conf.append(Mconf)
+                phi_t_arr.append(phi_t)
+                n_noresp_arr.append(n_noresp_1)
+                rt_arr.append(npx.asarray(rt).sum()) # add multiple time points
+            
+            
+            rt_last_iter.append(npx.asarray([[rt_in]]))
+            ra_last_iter.append(ra_in)
+            #phi_0_c = Mc @ phi_t # updating initial state of next response with current state of last response time
+            #phi_0_w = Mw @ phi_t
 
-    
-    #for rt in np.linspace(1,max_timesteps, 50):
-    for delta, n_noresp_1, likl, Pt, Mconf, noresp_traj, rt in res:
-        state_prob.append(Pt)
-        likl_prob.append(likl)
-        avg_conf.append(Mconf)
-        noresp_traj_arr.append(noresp_traj)
-        n_noresp_arr.append(n_noresp_1)
-        rt_arr.append(rt.squeeze())
+            # Here the last state is used as initial point for next walk.
+            # It's important to note that this updated state now contains imaginary numbers 
+            # (which is not the case of original starting point)
+            #p_0 = np.where(ra_in == 1, phi_0_c, phi_0_w)
+            #has_inter_temp = True
+    else:
+        #get_likl_states_confidence(n_states, mu, sigma, npx.asarray([[1]]), n_noresp, p_0, Mc, Mw, Mn, ra, npx.asarray([[step]]))
+        log.debug(f"Starting Walk for {max_timesteps} steps with step size {step}; mu {mu.shape}")
+        dely_get_likl_states_confidence = delayed(get_likl_states_confidence)
+        # parallelized over timesteps
+        res = Parallel(n_jobs=njobs)(dely_get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, npx.asarray([[rt]])) 
+                                    for rt in list(npx.arange(step, max_timesteps, step=step))
+                                    #for rt in np.linspace(0,max_timesteps, 3000)
+                                    )
+
+
+#for rt in np.linspace(1,max_timesteps, 50):
+        for delta, n_noresp_1, likl, Pt, Mconf, phi_t, rt in res:
+            state_prob.append(Pt)
+            likl_prob.append(likl)
+            avg_conf.append(Mconf)
+            phi_t_arr.append(phi_t)
+            n_noresp_arr.append(n_noresp_1)
+            rt_arr.append(rt.squeeze())
         
     levels=list(zip(np.array(npx.mean(mu, axis=-1)), np.array(npx.mean(sigma, axis=-1))))
     col_names = pd.MultiIndex.from_tuples(levels)
@@ -407,10 +456,13 @@ def model(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size=2):
             lkl = likelihood(K, rt1, ra1, s_0, n_noresp, delta, Mc, Mw, Mn)
             npy.factor(f"likelihood", lkl)
 
-def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, num_warmup=100, samples_n=500, num_chains=4, batch_size=2):
+def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, num_warmup=100, samples_n=500, num_chains=4, batch_size=2, noisy=False, has_intermediate=False):
 
     s_0 = _get_initial_state(n_states, start_width,I)
-    I,J = DT.shape if I is None else I,DT.shape[1]
+    if has_intermediate:
+        I,J = DT[0].shape if I is None else I, DT[0].shape[1]
+    else:
+        I,J = DT.shape if I is None else I, DT.shape[1]
 
     #kernel = HMCECS(NUTS(model), num_blocks=10)
     #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
@@ -420,7 +472,7 @@ def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, 
     kernel = NUTS(model_central)
     #kernel = MixedHMC(HMC(model_central, trajectory_length=1.2), num_discrete_updates=20)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
-    mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('potential_energy',))
+    mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, noisy=noisy, has_intermediate=has_intermediate, extra_fields=('potential_energy',))
 
     #kernel = TFPKernel[tfp.mcmc.NoUTurnSampler](model, step_size=1.)
     #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
@@ -631,6 +683,28 @@ if __name__ == "__main__":
     #plt.show()
 
 
+    log.debug("Constant Drift Rate (with Intermediate) - 1")
+    # Replicating the plots in Busemeyer 2010
+    n_states=7
+    start_width=1
+    mu=npx.asarray([[0.2]]) #drift rate
+    sigma=npx.asarray([[2]]) #diffusion
+    #mu=npx.asarray(mu)
+    #sigma = npx.asarray(sigma)
+
+    phi_0 = _get_initial_state(n_states, start_width, 1, 5)
+    K = _buildH(n_states,mu,sigma)
+    ra_s = [npx.asarray([[0]]), npx.asarray([[1]])]
+    df_st, df_avg_conf, df_likl = perform_walk(n_states=n_states, start_width=start_width, 
+                                    mu=mu, sigma=sigma,max_timesteps=[200,100], ra=ra_s,
+                                    delta=[[1]], prob=0.25, noisy=False, has_intermediate=True)#, n_noresp=npx.asarray([[1]]))
+    
+    sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
+    sns.relplot(df_avg_conf, x="time",y="avg_conf", kind="line")
+    plt.show()
+    sns.relplot(df_likl, x="time",y="liklihood", kind="line")
+    plt.show()
+
 
 
     log.debug("Prior Prediction - 1")
@@ -650,6 +724,21 @@ if __name__ == "__main__":
     mcmc_chain, post_likl = sample_posterior_params(DT=rt, X=x, sigma=sigma, tau=[[tau]], I=I, n_states=n_states, start_width=start_width, num_warmup=10, samples_n=4 )
     mcmc_chain.print_summary()
     mcmc_samples = mcmc_chain.get_samples()
+
+    log.debug("Posterior Sampling (with intermediate) - 1")
+    
+    rts = [np.random.uniform(0.1, 10, size=(I,J)), np.random.uniform(0.1, 10, size=(I,J))]
+    xs = [np.random.randint(0,2, size=(I,J)), np.random.randint(0,2, size=(I,J))]
+    n_states=7
+    start_width=1
+    
+
+    mcmc_chain, post_likl = sample_posterior_params(DT=rts, X=xs, sigma=sigma, tau=[[tau]], 
+                                                    I=I, n_states=n_states, start_width=start_width, 
+                                                    num_warmup=10, samples_n=4, has_intermediate=True )
+    mcmc_chain.print_summary()
+    mcmc_samples = mcmc_chain.get_samples()
+
 
     log.debug("Posterior Prediction - 1") # Test here
     predictions = sample_post_pred_data(n_states, start_width, [[tau]], sigma, I,J, mcmc_samples,obs_response_range=(1,100))
