@@ -193,7 +193,7 @@ def _state_transition_with_intermediate(K, rt, ra, phi_0, n_noresp, delta, Mc, M
                 phi_t_in_correct = (Mc @ phi_t_in)
                 phi_t_in_incorrect = (Mw @ phi_t_in)
                 phi_t = npx.where(ra_in[..., None, None]==0, phi_t_in_incorrect, phi_t_in_correct)
-                print(f"************** {phi_t.shape}")
+                #print(f"************** {phi_t.shape}")
             #if phi_t is None:
                 #phi_t = phi_t_in
             #else:
