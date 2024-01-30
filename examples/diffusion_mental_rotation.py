@@ -1,5 +1,5 @@
 # %%
-from cme.diffusion_models import diffusion_loop_method as dd
+from cme.decision_models import diffusion_loop_method as dd
 import pandas as pd
 import numpy as np
 from cme.utils import common_utils as ut

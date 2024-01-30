@@ -29,7 +29,7 @@ def _get_confidence_measurement_matrix(n_states, prob = 0.5):
 
     
 
-    return Mcorr, Mincorr, Mnoresp
+    return Mcorr, Mincorr
 
 def _get_measurement_matrix(n_states, start_width, prob = 0.5):
     
