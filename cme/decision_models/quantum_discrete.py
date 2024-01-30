@@ -192,7 +192,8 @@ def _state_transition_with_intermediate(K, rt, ra, phi_0, n_noresp, delta, Mc, M
             # avoid these steps for the last response
                 phi_t_in_correct = (Mc @ phi_t_in)
                 phi_t_in_incorrect = (Mw @ phi_t_in)
-                phi_t = npx.where(ra_in==0, phi_t_in_incorrect, phi_t_in_correct)
+                phi_t = npx.where(ra_in[..., None, None]==0, phi_t_in_incorrect, phi_t_in_correct)
+                print(f"************** {phi_t.shape}")
             #if phi_t is None:
                 #phi_t = phi_t_in
             #else:
@@ -417,7 +418,7 @@ def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size
         if rt is not None:
             if not noisy:
                 rt1 = rt1[...,None,None]
-            lkl = likelihood(K, rt1, ra1, s_0, n_noresp, delta, Mc, Mw, Mn)
+            lkl = likelihood(K, rt1, ra1, s_0, n_noresp, delta, Mc, Mw, Mn, noisy=noisy, has_intermediate=has_intermediate)
             #lkl = npx.where(npx.less_equal(K.at[1,1], npx.asarray(0)), npx.asarray(0), lkl)
             
             npy.factor(f"likelihood", lkl)
@@ -694,7 +695,7 @@ if __name__ == "__main__":
 
     phi_0 = _get_initial_state(n_states, start_width, 1, 5)
     K = _buildH(n_states,mu,sigma)
-    ra_s = [npx.asarray([[0]]), npx.asarray([[1]])]
+    ra_s = [npx.asarray([[1]]), npx.asarray([[1]])]
     df_st, df_avg_conf, df_likl = perform_walk(n_states=n_states, start_width=start_width, 
                                     mu=mu, sigma=sigma,max_timesteps=[200,100], ra=ra_s,
                                     delta=[[1]], prob=0.25, noisy=False, has_intermediate=True)#, n_noresp=npx.asarray([[1]]))
