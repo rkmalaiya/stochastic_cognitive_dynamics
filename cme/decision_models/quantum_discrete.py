@@ -257,7 +257,7 @@ def get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw
     Pt, Mconf, phi_t = sample_states_and_confidence(rt, p_0, K, Mn, n_noresp_1, delta=delta, ra=ra, noisy=noisy, has_intermediate=has_intermediate)
     return delta, n_noresp_1, likl, Pt, Mconf, phi_t, rt
 
-def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10, ra = npx.asarray([[1]]), delta=None, prob=0.5, n_noresp = None, noisy=False, has_intermediate=False, njobs=1):
+def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10, ra = npx.asarray([[1]]), delta=None, prob=0.5, n_noresp = None, dataset_id=1, noisy=False, has_intermediate=False, njobs=1):
 
     avg_conf = [];  
     state_prob = []
@@ -299,12 +299,13 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
                                         )
             
             for delta, n_noresp_1, likl, Pt, Mconf, phi_t, rt in res:
-                state_prob.append(Pt)
-                likl_prob.append(likl)
-                avg_conf.append(Mconf)
-                phi_t_arr.append(phi_t)
+                state_prob.append(np.asarray(Pt))
+                likl_prob.append(np.asarray(likl))
+                avg_conf.append(np.asarray(Mconf))
+                phi_t_arr.append(np.asarray(phi_t))
                 n_noresp_arr.append(n_noresp_1)
-                rt_arr.append(npx.asarray(rt).sum()) # add multiple time points
+                rt_arr.append(np.asarray(rt).sum()) # add multiple time points
+
             
             
             rt_last_iter.append(npx.asarray([[rt_in]]))
@@ -330,12 +331,12 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
 
 #for rt in np.linspace(1,max_timesteps, 50):
         for delta, n_noresp_1, likl, Pt, Mconf, phi_t, rt in res:
-            state_prob.append(Pt)
-            likl_prob.append(likl)
-            avg_conf.append(Mconf)
-            phi_t_arr.append(phi_t)
+            state_prob.append(np.asarray(Pt))
+            likl_prob.append(np.asarray(likl))
+            avg_conf.append(np.asarray(Mconf))
+            phi_t_arr.append(np.asarray(phi_t))
             n_noresp_arr.append(n_noresp_1)
-            rt_arr.append(rt.squeeze())
+            rt_arr.append(np.asarray(rt).squeeze())
         
     levels=list(zip(np.array(npx.mean(mu, axis=-1)), np.array(npx.mean(sigma, axis=-1))))
     col_names = pd.MultiIndex.from_tuples(levels)
@@ -349,10 +350,12 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
     df_avg_conf = df_avg_conf.reset_index().rename({"index":"time"}, axis=1)
     df_avg_conf.loc[:,"rt"] = pd.Series(rt_arr) #df_avg_conf["time"] * delta
     df_avg_conf = df_avg_conf.melt(id_vars=["rt","time"], value_name="avg_conf").rename(columns = {"variable_0":"drift_rate", "variable_1":"sigma"})
+    df_avg_conf = df_avg_conf.assign(sample_id=dataset_id)
 
     df_likl = pd.DataFrame(np.asarray(likl_prob)).rename({0:"liklihood"}, axis=1) # likelihood already integrated over participants and within-trial drift rates
     df_likl = df_likl.reset_index().rename({"index":"time"}, axis=1).assign(drift_rate=np.mean(mu), sigma=np.mean(sigma))
     df_likl.loc[:,"rt"] = pd.Series(rt_arr) 
+    df_likl = df_likl.assign(sample_id=dataset_id)
     
     # State Prob has a shape of timesteps x participants x states. Hence, creating array of dataframes for each participant
     df_st_arr = []
@@ -376,8 +379,9 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
         df_st_arr.append(df_st)
 
     df_st = pd.concat(df_st_arr)
+    df_st = df_st.assign(sample_id=dataset_id)
 
-    return df_st, df_avg_conf, df_likl
+    return df_st, df_avg_conf, df_likl, pd.DataFrame(mu), pd.DataFrame(sigma)
 
 def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size=2, noisy=False, has_intermediate=False):
     
@@ -480,7 +484,7 @@ def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, 
 
     #post_likl = log_density(model, model_args=(n_states, start_width,  sigma, tau, DT, X, I, J, s_0), model_kwargs = None, params=mcmc_chain.get_samples())
     #post_likl = mcmc_chain.get_extra_fields()['hmc_state'].potential_energy
-    post_likl = mcmc_chain.get_extra_fields()['potential_energy']
+    post_likl = mcmc_chain.get_extra_fields()['potential_energy'] # This is negative log likelihood
     return mcmc_chain, post_likl
 
 def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=100, njobs=1, get_response=False, obs_response_range=None, batch_size=2):
@@ -518,28 +522,32 @@ def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=Non
         predictions["Steps"] = Steps
 
     if ~get_response and obs_response_range is not None:
-        log.debug("Confidence and Likelihood")
-        df_st, df_avg_conf, df_likl = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        log.debug(f"Confidence and Likelihood for parameter size {npx.asarray(mu_s).shape}")
+        df_st, df_avg_conf, df_likl, df_mu, df_sigma = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         _, max_obs_resp = obs_response_range
 
-        for mu_p, sigma_p in zip(npx.asarray(mu_s), npx.asarray(sigma_s)): # Each sample. mu_p.shape=(part, within-trial variation)
+        for d_id, (mu_d, sigma_d) in enumerate(zip(npx.asarray(mu_s), npx.asarray(sigma_s))): # Each sample. mu_p.shape=(part, within-trial variation)
             
             #print(mu.shape)
             #print("in loop muu", mu.shape)
             #print("sgimau", sigma.shape)
-            log.debug(f"Perform walk: {mu_p.shape}")
-            df_st_t, df_avg_conf_t, df_likl_t = perform_walk(n_states, start_width, mu_p, sigma_p, p_0=p_0, n_noresp=None,
-                                                             max_timesteps=max_obs_resp, delta=tau, njobs=njobs, noisy=noisy, has_intermediate=has_intermediate)
+            #log.debug(f"Perform walk: {mu_p}")
+            df_st_t, df_avg_conf_t, df_likl_t, df_mu_t, df_sigma_t = perform_walk(n_states, start_width, mu_d, sigma_d, p_0=p_0, n_noresp=None,
+                                                             max_timesteps=max_obs_resp, delta=tau, njobs=njobs, noisy=noisy, has_intermediate=has_intermediate, dataset_id = d_id)
 
             #for (_,df_st_t), (_,df_avg_conf_t), mu, sigma in zip(df_st_m.iteritems(), df_avg_conf_m.iteritems(), mu_p, sigma_p):
             
             df_st = pd.concat([df_st, df_st_t])
             df_avg_conf = pd.concat([df_avg_conf, df_avg_conf_t])
             df_likl = pd.concat([df_likl, df_likl_t])
+            df_mu = pd.concat([df_mu, df_mu_t])
+            df_sigma = pd.concat([df_sigma, df_sigma_t])
     
         predictions["States"] = df_st
         predictions["Confidence"] = df_avg_conf
         predictions["Likelihood"] = df_likl
+        predictions["For_mu"] = df_mu
+        predictions["For_sigma"] = df_sigma
 
 
     #C = mu_s.shape[0]
@@ -655,7 +663,7 @@ if __name__ == "__main__":
     phi_0 = _get_initial_state(n_states, start_width, 1, 5)
     K = _buildH(n_states,mu,sigma)
 
-    df_st, df_avg_conf, df_likl = perform_walk(n_states=n_states, start_width=start_width, 
+    df_st, df_avg_conf, df_likl, df_mu, df_sigma = perform_walk(n_states=n_states, start_width=start_width, 
                                     mu=mu, sigma=sigma,max_timesteps=200, 
                                     delta=[[1]], prob=0.25, noisy=False, has_intermediate=False)#, n_noresp=npx.asarray([[1]]))
     
@@ -695,7 +703,7 @@ if __name__ == "__main__":
     phi_0 = _get_initial_state(n_states, start_width, 1, 5)
     K = _buildH(n_states,mu,sigma)
     ra_s = [npx.asarray([[1]]), npx.asarray([[1]])]
-    df_st, df_avg_conf, df_likl = perform_walk(n_states=n_states, start_width=start_width, 
+    df_st, df_avg_conf, df_likl, df_mu, df_sigma = perform_walk(n_states=n_states, start_width=start_width, 
                                     mu=mu, sigma=sigma,max_timesteps=[200,100], ra=ra_s,
                                     delta=[[1]], prob=0.25, noisy=False, has_intermediate=True)#, n_noresp=npx.asarray([[1]]))
     
