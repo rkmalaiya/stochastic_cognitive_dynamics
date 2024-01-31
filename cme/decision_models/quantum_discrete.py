@@ -25,7 +25,7 @@ jax.config.update('jax_platforms', 'cpu')
 
 
 
-npy.set_host_device_count(64)
+npy.set_host_device_count(21)
 _rng_key = random.PRNGKey(0)
 _rng_key, _rng_key_ = random.split(_rng_key)
 
@@ -157,8 +157,7 @@ def sample_states_and_confidence(rt, phi_0, K, Mn, N, ra = None, delta = None, n
 
 
 
-def _state_transition(K, phi_0, t, delta = None, n_noresp = None, Mn = None, noisy=False):
-    
+def _state_transition(K, phi_0, t, delta=None, n_noresp = None, Mn = None, noisy=False):
     if noisy:
         delta = npx.expand_dims(delta, axis=2)
         delta = npx.expand_dims(delta, axis=2)
@@ -255,7 +254,7 @@ def get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw
     K= _buildH(n_states, mu=mu, sigma=sigma, n_trials = None if noisy else J)
     n_noresp_1 = None
     likl = likelihood(K, rt, ra, p_0, n_noresp_1, delta, Mc, Mw, Mn, noisy=noisy, has_intermediate=has_intermediate) #K,rt, ra, phi_0, delta, Mc, Mw, Mn
-    Pt, Mconf, phi_t = sample_states_and_confidence(rt, p_0, K, Mn, n_noresp_1, ra=ra, noisy=noisy, has_intermediate=has_intermediate)
+    Pt, Mconf, phi_t = sample_states_and_confidence(rt, p_0, K, Mn, n_noresp_1, delta=delta, ra=ra, noisy=noisy, has_intermediate=has_intermediate)
     return delta, n_noresp_1, likl, Pt, Mconf, phi_t, rt
 
 def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10, ra = npx.asarray([[1]]), delta=None, prob=0.5, n_noresp = None, noisy=False, has_intermediate=False, njobs=1):
@@ -294,7 +293,7 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
             log.debug(f"Starting Walk for ({step}:{rt_in}) steps with step size {step}; mu {mu.shape}")
             dely_get_likl_states_confidence = delayed(get_likl_states_confidence)
             # parallelized over timesteps
-            res = Parallel(n_jobs=njobs)(dely_get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra_last_iter + [ra_in], rt_last_iter + [npx.asarray([[rt]])], has_intermediate=True) 
+            res = Parallel(n_jobs=njobs)(dely_get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra_last_iter + [ra_in], rt_last_iter + [npx.asarray([[rt]])], noisy=noisy, has_intermediate=has_intermediate) 
                                         for rt in list(npx.arange(step, rt_in, step=step))
                                         #for rt in np.linspace(0,max_timesteps, 3000)
                                         )
@@ -323,7 +322,7 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
         log.debug(f"Starting Walk for {max_timesteps} steps with step size {step}; mu {mu.shape}")
         dely_get_likl_states_confidence = delayed(get_likl_states_confidence)
         # parallelized over timesteps
-        res = Parallel(n_jobs=njobs)(dely_get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, npx.asarray([[rt]])) 
+        res = Parallel(n_jobs=njobs)(dely_get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, npx.asarray([[rt]]), noisy=noisy, has_intermediate=has_intermediate) 
                                     for rt in list(npx.arange(step, max_timesteps, step=step))
                                     #for rt in np.linspace(0,max_timesteps, 3000)
                                     )
