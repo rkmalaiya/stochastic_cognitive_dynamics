@@ -120,7 +120,7 @@ def _get_initial_state(n_states, start_width, I = 1, prob=1):
     return Mcorr, Mincorr, Mnoresp """
 
     
-def sample_states_and_confidence(rt, phi_0, K, Mn, N, ra = None, delta = None, n_noresp = None,  noisy=False, has_intermediate = False):
+def sample_states_and_confidence(rt, phi_0, K, Mc, Mw, Mn, N, ra = None, delta = None, n_noresp = None,  noisy=False, has_intermediate = False):
     n_states = K.shape[-1] # picking the last dimension because the dimensions are I,J,K,K
     Mid = int((n_states+1)/2)
     mv = npx.arange(-(Mid-1),(Mid)).reshape(1,-1) # to get column vector
@@ -278,7 +278,7 @@ def get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw
     K= _buildH(n_states, mu=mu, sigma=sigma, n_trials = None if noisy else J)
     n_noresp_1 = None
     likl = likelihood(K, rt, ra, p_0, n_noresp_1, delta, Mc, Mw, Mn, noisy=noisy, has_intermediate=has_intermediate) #K,rt, ra, phi_0, delta, Mc, Mw, Mn
-    Pt, Mconf, phi_t = sample_states_and_confidence(rt, p_0, K, Mn, n_noresp_1, delta=delta, ra=ra, noisy=noisy, has_intermediate=has_intermediate)
+    Pt, Mconf, phi_t = sample_states_and_confidence(rt, p_0, K, Mc, Mw, Mn, n_noresp_1, delta=delta, ra=ra, noisy=noisy, has_intermediate=has_intermediate)
     return delta, n_noresp_1, likl, Pt, Mconf, phi_t, rt
 
 def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10, ra = npx.asarray([[1]]), delta=None, prob=0.5, n_noresp = None, dataset_id=1, noisy=False, has_intermediate=False, njobs=1):
@@ -294,7 +294,6 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
         p_0 = _get_initial_state(n_states, start_width, 1)
 
     Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, prob)
-    
     if delta is not None:
         delta = npx.asarray(delta)
         #step = delta[0,0]
@@ -312,7 +311,7 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
     # Because while walking, the joint probability will only be evaluated after the first response time is over
     #has_inter_temp = False
     if has_intermediate:
-        for rt_in, ra_in in zip(max_timesteps, ra):            
+        for rt_in, ra_in in zip(max_timesteps, ra):   
             #get_likl_states_confidence(n_states, mu, sigma, npx.asarray([[1]]), n_noresp, p_0, Mc, Mw, Mn, ra_last_iter + [ra_in], rt_last_iter + [step], has_intermediate=has_inter_temp)
             log.debug(f"(Multiple RTs) Starting Walk for ({step}:{rt_in}) steps with step size {step}; mu {mu.shape}")
             dely_get_likl_states_confidence = delayed(get_likl_states_confidence)
@@ -514,7 +513,7 @@ def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, 
     post_likl = mcmc_chain.get_extra_fields()['potential_energy'] # This is negative log likelihood
     return mcmc_chain, post_likl
 
-def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=100, njobs=1, get_response=False, obs_response_range=None, batch_size=2, noisy=False, has_intermediate=False):
+def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=100, njobs=1, get_response=False, obs_response_range=None, ra_s = None, batch_size=2, noisy=False, has_intermediate=False):
     s_0 = _get_initial_state(n_states, start_width, I)
 
     #prior_predictive = Predictive(model, num_samples=samples_n)
@@ -532,14 +531,14 @@ def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=
     log.debug(f"s_0: {s_0.shape}")
     
     predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0 = s_0, n_noresp_s=None, 
-                                         samples_n=samples_n, njobs=njobs, get_response=get_response, 
+                                         samples_n=samples_n, njobs=njobs, get_response=get_response, ra_s = ra_s,
                                          obs_response_range=obs_response_range, 
                                          noisy=noisy, has_intermediate=has_intermediate)
     predictions.update(prior_predictions)
 
     return predictions
 
-def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=None, n_noresp_s=None, samples_n=100, njobs=1, get_response=False, obs_response_range=None, noisy=False, has_intermediate=False):
+def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=None, n_noresp_s=None, samples_n=100, njobs=1, get_response=False, obs_response_range=None, ra_s = None, noisy=False, has_intermediate=False):
     predictions = {}
     theta = int((n_states+1)/2)
 
@@ -564,7 +563,7 @@ def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=Non
             #log.debug(f"Perform walk: {mu_p}")
             df_st_t, df_avg_conf_t, df_likl_t, df_mu_t, df_sigma_t = perform_walk(n_states, start_width, mu_d, 
                                                                                   sigma_d, p_0=p_0, n_noresp=None, 
-                                                                                  max_timesteps=max_obs_resp, 
+                                                                                  max_timesteps=max_obs_resp, ra = ra_s,
                                                                                   delta=tau, njobs=njobs, 
                                                                                   noisy=noisy, has_intermediate=has_intermediate, 
                                                                                   dataset_id = d_id)
@@ -788,7 +787,8 @@ if __name__ == "__main__":
 
     log.debug("Prior Prediction (noisy, intermediate) - 1")
     I, J = 5,3
-    prior_predictions = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=2, obs_response_range=(1,[10,8]), noisy=True, has_intermediate=True)
+    ra_s = [npx.asarray([[1]]), npx.asarray([[1]])]
+    prior_predictions = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=2, obs_response_range=(1,[10,8]), ra_s = ra_s, noisy=True, has_intermediate=True)
     #RT = prior_predictions["RT"]
     #log.debug(RT.min(), RT.mean(), RT.max())
 
