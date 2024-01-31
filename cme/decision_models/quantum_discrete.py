@@ -487,7 +487,7 @@ def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, 
     post_likl = mcmc_chain.get_extra_fields()['potential_energy'] # This is negative log likelihood
     return mcmc_chain, post_likl
 
-def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=100, njobs=1, get_response=False, obs_response_range=None, batch_size=2):
+def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=100, njobs=1, get_response=False, obs_response_range=None, batch_size=2, noisy=False, has_intermediate=False):
     s_0 = _get_initial_state(n_states, start_width, I)
 
     #prior_predictive = Predictive(model, num_samples=samples_n)
@@ -504,7 +504,10 @@ def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=
     log.debug(f"sigma: {sigma_s.shape}")
     log.debug(f"s_0: {s_0.shape}")
     
-    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0 = s_0, n_noresp_s=None, samples_n=samples_n, njobs=njobs, get_response=get_response, obs_response_range=obs_response_range)
+    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0 = s_0, n_noresp_s=None, 
+                                         samples_n=samples_n, njobs=njobs, get_response=get_response, 
+                                         obs_response_range=obs_response_range, 
+                                         noisy=noisy, has_intermediate=has_intermediate)
     predictions.update(prior_predictions)
 
     return predictions
