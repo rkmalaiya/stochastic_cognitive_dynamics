@@ -663,7 +663,7 @@ if __name__ == "__main__":
 
     phi_0 = _get_initial_state(n_states, start_width,I=1)
     for r in np.arange(0,10):
-        P_t, Mconf, noresp_traj_arr = sample_states_and_confidence(r, phi_0, K, Mn, 1)
+        P_t, Mconf, noresp_traj_arr = sample_states_and_confidence(r, phi_0, K, Mc, Mw, Mn, 1)
         conf_arr.append(Mconf.squeeze())
         P_t_arr.append(np.asarray(P_t.squeeze()))
 
