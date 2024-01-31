@@ -139,7 +139,9 @@ def sample_states_and_confidence(rt, phi_0, K, Mn, N, ra = None, delta = None, n
         phi_t = _state_transition(K, phi_0, rt, delta, n_noresp, Mn, noisy=noisy)
 
     P_t = npx.abs(phi_t)**2
+
     Mconf = mv @ (P_t)
+
 
     if False:
         noresp_traj_arr = []
@@ -157,26 +159,41 @@ def sample_states_and_confidence(rt, phi_0, K, Mn, N, ra = None, delta = None, n
 
 
 
-def _state_transition(K, phi_0, t, delta=None, n_noresp = None, Mn = None, noisy=False):
+def _state_transition(K, phi_0, rt, delta=None, n_noresp = None, Mn = None, noisy=False):
     if noisy:
-        delta = npx.expand_dims(delta, axis=2)
-        delta = npx.expand_dims(delta, axis=2)
-        n_noresp = t/delta
+        #delta = npx.expand_dims(delta, axis=2)
+        #delta = npx.expand_dims(delta, axis=2)
+        if n_noresp is None:
+            n_noresp = rt/delta
 
         T_t=ln.expm(-1j*delta*K) # delta:I,1,1,1; K:I,J,m,m This is transaction matrix
         
+        #n_noresp should be IxJ
+        #if n_noresp.shape != T_t.shape[:2]:
+        #    n_noresp = npx.broadcast_to(n_noresp, T_t.shape[:2])
+
         phi_noresp_arr_i = []
-        for T_t_i, n_i, phi_0_i in zip(T_t, n_noresp, phi_0):
+
+        T_t = npx.broadcast_to(T_t, rt.shape + T_t.shape[-2:]) # Because T_t is same for each trial. So if the dimensions are not broadcasted, below for loop with fail.
+        phi_0 = npx.broadcast_to(phi_0, rt.shape + phi_0.shape[-2:])
+
+        for T_t_i, n_i, phi_0_i in zip(T_t, n_noresp, phi_0): # Iterating on participant dimension
             phi_noresp_arr_i_j = []
-            for T_t_i_j, n_i_j, phi_0_i_j in zip(T_t_i, n_i, phi_0_i):
-                Pt_i_j = T_t_i_j @ num_ln.matrix_power(Mn @ T_t_i_j, n_i_j.astype(int).item()-1) @ phi_0_i_j
+            
+            for T_t_i_j, n_i_j, phi_0_i_j in zip(T_t_i, n_i, phi_0_i): # Iterating on trial dimension
+
+                Pt_i_j = T_t_i_j @ num_ln.matrix_power(Mn @ T_t_i_j, n_i_j.astype(int).item() - 1) @ phi_0_i_j
                 #Pt_i_j = npx.abs(Pt_i_j)**2
                 phi_noresp_arr_i_j.append(Pt_i_j) #n_state x 1
+            
             phi_noresp_arr_i.append(npx.asarray(phi_noresp_arr_i_j))    
         phi_t = npx.asarray(phi_noresp_arr_i) # n_part x n_trials x n_state x 1
 
     else:
-        phi_t = ln.expm(-1j * K * t) @ phi_0
+        if rt.ndim < K.ndim:
+            phi_t = ln.expm(-1j * K * rt[...,None,None]) @ phi_0 # n_part x n_trials x n_state x 1
+        else:    
+            phi_t = ln.expm(-1j * K * rt) @ phi_0 # n_part x n_trials x n_state x 1
     
     return phi_t
 
@@ -185,6 +202,7 @@ def _state_transition_with_intermediate(K, rt, ra, phi_0, n_noresp, delta, Mc, M
     phi_0_in = phi_0
 
     for i, (rt_in, ra_in) in enumerate(zip(rt,ra)):
+            #n_noresp = rt_in/delta
             phi_t_in = _state_transition(K, phi_0_in, rt_in, delta, n_noresp, Mn, noisy=noisy)
 
             if i != (len(rt) - 1): 
@@ -218,6 +236,7 @@ def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=False, has_i
        #ra = ra[-1]
        #rt = rt[-1]
     else:
+        
         phi_t = _state_transition(K, phi_0, rt, delta, n_noresp, Mn, noisy=noisy)
 
     P_correct = (npx.abs(Mc @ phi_t)**2).sum(axis=(-2,-1)) # Mc @ phi_t is KxK @ IxJxKxK; *correct should be IxJ
@@ -245,11 +264,16 @@ def get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw
     #    n_noresp_1 = n_noresp
 
         #print(p_0, "**********")
-    
+
     if has_intermediate:
         I,J = rt[0].shape
+        for i, t in enumerate(rt):
+            if(mu.shape[0] != t.shape[0]):
+                rt[i] = npx.broadcast_to(t, [mu.shape[0]] + [t.shape[1]])
     else:
         I,J = rt.shape
+        if(mu.shape[0] != rt.shape[0]):
+                rt = npx.broadcast_to(rt, [mu.shape[0]] + [rt.shape[1]])
 
     K= _buildH(n_states, mu=mu, sigma=sigma, n_trials = None if noisy else J)
     n_noresp_1 = None
@@ -290,7 +314,7 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
     if has_intermediate:
         for rt_in, ra_in in zip(max_timesteps, ra):            
             #get_likl_states_confidence(n_states, mu, sigma, npx.asarray([[1]]), n_noresp, p_0, Mc, Mw, Mn, ra_last_iter + [ra_in], rt_last_iter + [step], has_intermediate=has_inter_temp)
-            log.debug(f"Starting Walk for ({step}:{rt_in}) steps with step size {step}; mu {mu.shape}")
+            log.debug(f"(Multiple RTs) Starting Walk for ({step}:{rt_in}) steps with step size {step}; mu {mu.shape}")
             dely_get_likl_states_confidence = delayed(get_likl_states_confidence)
             # parallelized over timesteps
             res = Parallel(n_jobs=njobs)(dely_get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra_last_iter + [ra_in], rt_last_iter + [npx.asarray([[rt]])], noisy=noisy, has_intermediate=has_intermediate) 
@@ -320,7 +344,7 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
             #has_inter_temp = True
     else:
         #get_likl_states_confidence(n_states, mu, sigma, npx.asarray([[1]]), n_noresp, p_0, Mc, Mw, Mn, ra, npx.asarray([[step]]))
-        log.debug(f"Starting Walk for {max_timesteps} steps with step size {step}; mu {mu.shape}")
+        log.debug(f"(Single RT) Starting Walk for {max_timesteps} steps with step size {step}; mu {mu.shape}")
         dely_get_likl_states_confidence = delayed(get_likl_states_confidence)
         # parallelized over timesteps
         res = Parallel(n_jobs=njobs)(dely_get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, npx.asarray([[rt]]), noisy=noisy, has_intermediate=has_intermediate) 
@@ -343,7 +367,9 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
 
 
     conf_arr = np.asarray(avg_conf).squeeze()
+    #print("1) *********", conf_arr.ndim, conf_arr.shape)
     if conf_arr.ndim > 2:
+        #print("in")
         conf_arr = conf_arr.mean(axis=1)
     #conf_arr = conf_arr.reshape(conf_arr.shape[0],-1)
     df_avg_conf = pd.DataFrame(conf_arr, columns=col_names) # timestep x n_part 
@@ -400,7 +426,8 @@ def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size
     #mu_s =  npy.sample(f"mu_s", dist.HalfNormal(2))
     delta = np.asarray(tau)
     
-    n_noresp = rt/delta if rt is not None else 10
+    #n_noresp = rt/delta if rt is not None else 10
+    n_noresp = None
         
     with npy.plate('I', I, dim=-2) as ind: #, subsample_size=batch_size
         #mu =  npy.sample(f"mu", dist.Normal(mu_m,mu_s),sample_shape=(I,1))
@@ -415,12 +442,12 @@ def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size
     #with npy.plate('Obs', I, subsample_size=10) as ind: #,
         #mu =  npy.sample(f"mu", dist.Normal(0,5)) #,sample_shape=(I,)
     
-        rt1 = rt if rt is None else npx.asarray(rt)#[ind]
-        ra1 = ra if ra is None else npx.asarray(ra)#[ind]
+        rt1 = rt #if rt is None else npx.asarray(rt)#[ind]
+        ra1 = ra #if ra is None else npx.asarray(ra)#[ind]
         #_,lkl ,_ = likelihood(n_states, mu[ind], 1, rt1, ra1, s_0, Mr)
         if rt is not None:
-            if not noisy:
-                rt1 = rt1[...,None,None]
+        #    if not noisy:
+        #        rt1 = rt1[...,None,None] # To multiply with Intensity Matrix
             lkl = likelihood(K, rt1, ra1, s_0, n_noresp, delta, Mc, Mw, Mn, noisy=noisy, has_intermediate=has_intermediate)
             #lkl = npx.where(npx.less_equal(K.at[1,1], npx.asarray(0)), npx.asarray(0), lkl)
             
@@ -535,8 +562,12 @@ def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=Non
             #print("in loop muu", mu.shape)
             #print("sgimau", sigma.shape)
             #log.debug(f"Perform walk: {mu_p}")
-            df_st_t, df_avg_conf_t, df_likl_t, df_mu_t, df_sigma_t = perform_walk(n_states, start_width, mu_d, sigma_d, p_0=p_0, n_noresp=None,
-                                                             max_timesteps=max_obs_resp, delta=tau, njobs=njobs, noisy=noisy, has_intermediate=has_intermediate, dataset_id = d_id)
+            df_st_t, df_avg_conf_t, df_likl_t, df_mu_t, df_sigma_t = perform_walk(n_states, start_width, mu_d, 
+                                                                                  sigma_d, p_0=p_0, n_noresp=None, 
+                                                                                  max_timesteps=max_obs_resp, 
+                                                                                  delta=tau, njobs=njobs, 
+                                                                                  noisy=noisy, has_intermediate=has_intermediate, 
+                                                                                  dataset_id = d_id)
 
             #for (_,df_st_t), (_,df_avg_conf_t), mu, sigma in zip(df_st_m.iteritems(), df_avg_conf_m.iteritems(), mu_p, sigma_p):
             
@@ -599,7 +630,7 @@ def sample_post_pred_data(n_states, start_width, tau, sigma_s, I, J, mcmc_sample
 
     
 if __name__ == "__main__":
-    
+
     mu_arr, sigma = npx.asarray([[0.01,1]]).T, npx.asarray([[5,10]]).T
     I=2
 
@@ -632,7 +663,7 @@ if __name__ == "__main__":
     likl_arr = []
 
     phi_0 = _get_initial_state(n_states, start_width,I=1)
-    for r in np.arange(0,100):
+    for r in np.arange(0,10):
         P_t, Mconf, noresp_traj_arr = sample_states_and_confidence(r, phi_0, K, Mn, 1)
         conf_arr.append(Mconf.squeeze())
         P_t_arr.append(np.asarray(P_t.squeeze()))
@@ -667,7 +698,7 @@ if __name__ == "__main__":
     K = _buildH(n_states,mu,sigma)
 
     df_st, df_avg_conf, df_likl, df_mu, df_sigma = perform_walk(n_states=n_states, start_width=start_width, 
-                                    mu=mu, sigma=sigma,max_timesteps=200, 
+                                    mu=mu, sigma=sigma,max_timesteps=20, 
                                     delta=[[1]], prob=0.25, noisy=False, has_intermediate=False)#, n_noresp=npx.asarray([[1]]))
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
@@ -707,7 +738,7 @@ if __name__ == "__main__":
     K = _buildH(n_states,mu,sigma)
     ra_s = [npx.asarray([[1]]), npx.asarray([[1]])]
     df_st, df_avg_conf, df_likl, df_mu, df_sigma = perform_walk(n_states=n_states, start_width=start_width, 
-                                    mu=mu, sigma=sigma,max_timesteps=[200,100], ra=ra_s,
+                                    mu=mu, sigma=sigma,max_timesteps=[20,10], ra=ra_s,
                                     delta=[[1]], prob=0.25, noisy=False, has_intermediate=True)#, n_noresp=npx.asarray([[1]]))
     
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
@@ -716,11 +747,48 @@ if __name__ == "__main__":
     sns.relplot(df_likl, x="time",y="liklihood", kind="line")
     plt.show()
 
+    log.debug("Constant Drift Rate (with Intermediate, Noisy) - 1")
+    # Replicating the plots in Busemeyer 2010
+    n_states=7
+    start_width=1
+    mu=npx.asarray([[0.2]]) #drift rate
+    sigma=npx.asarray([[2]]) #diffusion
+    #mu=npx.asarray(mu)
+    #sigma = npx.asarray(sigma)
 
+    phi_0 = _get_initial_state(n_states, start_width, 1, 5)
+    K = _buildH(n_states,mu,sigma)
+    ra_s = [npx.asarray([[1]]), npx.asarray([[1]])]
+    df_st, df_avg_conf, df_likl, df_mu, df_sigma = perform_walk(n_states=n_states, start_width=start_width, 
+                                    mu=mu, sigma=sigma,max_timesteps=[20,10], ra=ra_s,
+                                    delta=[[1]], prob=0.25, noisy=True, has_intermediate=True)#, n_noresp=npx.asarray([[1]]))
+    
+    sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
+    sns.relplot(df_avg_conf, x="time",y="avg_conf", kind="line")
+    plt.show()
+    sns.relplot(df_likl, x="time",y="liklihood", kind="line")
+    plt.show()
 
     log.debug("Prior Prediction - 1")
     I, J = 5,3
-    prior_predictions = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=2, obs_response_range=(1,100))
+    sigma=None
+    prior_predictions = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=2, obs_response_range=(1,10), noisy=False)
+    #RT = prior_predictions["RT"]
+    #log.debug(RT.min(), RT.mean(), RT.max())
+
+    log.debug("Prior Prediction (noisy) - 1")
+    n_states=7
+    start_width=1
+    I, J = 5,3
+    tau = 1
+    sigma=None
+    prior_predictions = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=2, obs_response_range=(1,10), noisy=True)
+    #RT = prior_predictions["RT"]
+    #log.debug(RT.min(), RT.mean(), RT.max())
+
+    log.debug("Prior Prediction (noisy, intermediate) - 1")
+    I, J = 5,3
+    prior_predictions = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=2, obs_response_range=(1,[10,8]), noisy=True, has_intermediate=True)
     #RT = prior_predictions["RT"]
     #log.debug(RT.min(), RT.mean(), RT.max())
 
@@ -732,11 +800,13 @@ if __name__ == "__main__":
     start_width=1
     
 
-    mcmc_chain, post_likl = sample_posterior_params(DT=rt, X=x, sigma=sigma, tau=[[tau]], I=I, n_states=n_states, start_width=start_width, num_warmup=10, samples_n=4 )
+    mcmc_chain, post_likl = sample_posterior_params(DT=rt, X=x, sigma=sigma, tau=[[tau]], 
+                                                    I=I, n_states=n_states, start_width=start_width, 
+                                                    num_warmup=10, samples_n=4 )
     mcmc_chain.print_summary()
     mcmc_samples = mcmc_chain.get_samples()
 
-    log.debug("Posterior Sampling (with intermediate) - 1")
+    log.debug("Posterior Sampling (Intermediate) - 1")
     
     rts = [np.random.uniform(0.1, 10, size=(I,J)), np.random.uniform(0.1, 10, size=(I,J))]
     xs = [np.random.randint(0,2, size=(I,J)), np.random.randint(0,2, size=(I,J))]
@@ -747,6 +817,34 @@ if __name__ == "__main__":
     mcmc_chain, post_likl = sample_posterior_params(DT=rts, X=xs, sigma=sigma, tau=[[tau]], 
                                                     I=I, n_states=n_states, start_width=start_width, 
                                                     num_warmup=10, samples_n=4, has_intermediate=True )
+    mcmc_chain.print_summary()
+    mcmc_samples = mcmc_chain.get_samples()
+
+    log.debug("Posterior Sampling (noisy) - 1")
+    
+    rt = np.random.uniform(0.1, 10, size=(I,J))
+    x = np.random.randint(0,2, size=(I,J))
+    n_states=7
+    start_width=1
+    
+
+    mcmc_chain, post_likl = sample_posterior_params(DT=rt, X=x, sigma=sigma, tau=[[tau]], 
+                                                    I=I, n_states=n_states, start_width=start_width, 
+                                                    num_warmup=10, samples_n=4, noisy=True )
+    mcmc_chain.print_summary()
+    mcmc_samples = mcmc_chain.get_samples()
+
+    log.debug("Posterior Sampling (Noisy, Intermediate) - 1")
+    
+    rts = [np.random.uniform(0.1, 10, size=(I,J)), np.random.uniform(0.1, 10, size=(I,J))]
+    xs = [np.random.randint(0,2, size=(I,J)), np.random.randint(0,2, size=(I,J))]
+    n_states=7
+    start_width=1
+    
+
+    mcmc_chain, post_likl = sample_posterior_params(DT=rts, X=xs, sigma=sigma, tau=[[tau]], 
+                                                    I=I, n_states=n_states, start_width=start_width, 
+                                                    num_warmup=10, samples_n=4, has_intermediate=True, noisy=True )
     mcmc_chain.print_summary()
     mcmc_samples = mcmc_chain.get_samples()
 
