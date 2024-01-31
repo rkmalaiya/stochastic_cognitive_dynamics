@@ -505,7 +505,7 @@ def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=
 
     return predictions
 
-def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=None, n_noresp_s=None, samples_n=100, njobs=1, get_response=False, obs_response_range=None):
+def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=None, n_noresp_s=None, samples_n=100, njobs=1, get_response=False, obs_response_range=None, noisy=False, has_intermediate=False):
     predictions = {}
     theta = int((n_states+1)/2)
 
@@ -529,7 +529,7 @@ def get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0=Non
             #print("sgimau", sigma.shape)
             log.debug(f"Perform walk: {mu_p.shape}")
             df_st_t, df_avg_conf_t, df_likl_t = perform_walk(n_states, start_width, mu_p, sigma_p, p_0=p_0, n_noresp=None,
-                                                             max_timesteps=max_obs_resp, delta=tau, njobs=njobs)
+                                                             max_timesteps=max_obs_resp, delta=tau, njobs=njobs, noisy=noisy, has_intermediate=noisy)
 
             #for (_,df_st_t), (_,df_avg_conf_t), mu, sigma in zip(df_st_m.iteritems(), df_avg_conf_m.iteritems(), mu_p, sigma_p):
             
