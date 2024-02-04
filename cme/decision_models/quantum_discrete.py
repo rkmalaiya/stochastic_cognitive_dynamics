@@ -53,9 +53,13 @@ def _buildH(n_states, mu, sigma, n_trials = None):
     cols_ = npx.arange(0,n_states-1)
     diags_ = npx.arange(0, n_states)
     for i in npx.arange(n_part):
-        H = H.at[...,rows_,cols_].set(c[i,0])
-        H = H.at[...,cols_, rows_].set(a[i,0])
-        H = H.at[...,diags_, diags_].set(b[i,0,...])
+        H = H.at[i,:,rows_,cols_].set(c[i,0])
+        H = H.at[i,:,cols_, rows_].set(a[i,0])
+        if n_trials is None:
+            H = H.at[i,0,diags_, diags_].set(b[i,0,...])
+        else:
+            for n in range(n_trials):
+                H = H.at[i,n,diags_, diags_].set(b[i,0,...])
     return H
 
 
@@ -141,8 +145,8 @@ def sample_states_and_confidence(rt, phi_0, K, Mc, Mw, Mn, N, ra = None, delta =
     P_t = npx.abs(phi_t)**2
 
     Mconf = mv @ (P_t)
-
-
+    #print("Mconf",Mconf)
+    
     if False:
         noresp_traj_arr = []
         noresp_state = Mn @ T_t
@@ -209,17 +213,24 @@ def _state_transition_with_intermediate(K, rt, ra, phi_0, n_noresp, delta, Mc, M
             # avoid these steps for the last response
                 phi_t_in_correct = (Mc @ phi_t_in)
                 phi_t_in_incorrect = (Mw @ phi_t_in)
+
                 phi_t = npx.where(ra_in[..., None, None]==0, phi_t_in_incorrect, phi_t_in_correct)
+                
                 #print(f"************** {phi_t.shape}")
             #if phi_t is None:
                 #phi_t = phi_t_in
             #else:
             #    phi_t = phi_t @ phi_t_in  
             else: 
-                phi_t = phi_t_in
+                #phi_t = phi_t_in
+
+                phi_t_in_correct = (Mc @ phi_t_in)
+                phi_t_in_incorrect = (Mw @ phi_t_in)
+
+                phi_t = npx.where(ra_in[..., None, None]==0, phi_t_in_incorrect, phi_t_in_correct)
+                
             
             phi_0_in = phi_t
-
     return phi_t
 
 def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=False, has_intermediate = False):
@@ -231,7 +242,7 @@ def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=False, has_i
     #    rt = npx.expand_dims(rt, axis=2)
     #    rt = npx.expand_dims(rt, axis=2)
 
-    if has_intermediate:
+    if has_intermediate: # should have two or more arrays of resposne time and response accuracy
        phi_t = _state_transition_with_intermediate(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=noisy)
        #ra = ra[-1]
        #rt = rt[-1]
@@ -253,7 +264,7 @@ def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=False, has_i
     return likl #likelihood hence adding up over all responses.
 
 
-def get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra, rt, noisy=False, has_intermediate=False):
+def get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc1, Mw1, Mn1, ra, rt, noisy=False, has_intermediate=False):
     
     #if not has_intermediate:
     #    rt = npx.asarray([[rt]])
@@ -267,21 +278,28 @@ def get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw
 
     if has_intermediate:
         I,J = rt[0].shape
-        for i, t in enumerate(rt):
+        for i, (t,a) in enumerate(zip(rt, ra)):
             if(mu.shape[0] != t.shape[0]):
                 rt[i] = npx.broadcast_to(t, [mu.shape[0]] + [t.shape[1]])
+                ra[i] = npx.broadcast_to(a, [mu.shape[0]] + [a.shape[1]])
     else:
         I,J = rt.shape
         if(mu.shape[0] != rt.shape[0]):
                 rt = npx.broadcast_to(rt, [mu.shape[0]] + [rt.shape[1]])
+                #ra = npx.broadcast_to(ra, [mu.shape[0]] + [ra.shape[1]])
 
     K= _buildH(n_states, mu=mu, sigma=sigma, n_trials = None if noisy else J)
     n_noresp_1 = None
-    likl = likelihood(K, rt, ra, p_0, n_noresp_1, delta, Mc, Mw, Mn, noisy=noisy, has_intermediate=has_intermediate) #K,rt, ra, phi_0, delta, Mc, Mw, Mn
-    Pt, Mconf, phi_t = sample_states_and_confidence(rt, p_0, K, Mc, Mw, Mn, n_noresp_1, delta=delta, ra=ra, noisy=noisy, has_intermediate=has_intermediate)
+    likl = likelihood(K, rt, ra, p_0, n_noresp_1, delta, Mc1, Mw1, Mn1, noisy=noisy, has_intermediate=has_intermediate) #K,rt, ra, phi_0, delta, Mc, Mw, Mn
+    Pt, Mconf, phi_t = sample_states_and_confidence(rt, p_0, K, Mc1, Mw1, Mn1, n_noresp_1, delta=delta, ra=ra, noisy=noisy, has_intermediate=has_intermediate)
     return delta, n_noresp_1, likl, Pt, Mconf, phi_t, rt
 
 def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10, ra = npx.asarray([[1]]), delta=None, prob=0.5, n_noresp = None, dataset_id=1, noisy=False, has_intermediate=False, njobs=1):
+
+    """This function performs walks for multiple participants. 
+       But, response time and response accuracy is considered same between participants.
+       Only, model parameters (e.g., drift rate) is allowed to change between participants.
+    """
 
     avg_conf = [];  
     state_prob = []
@@ -309,11 +327,11 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
     ra_last_iter = []
 
     # Because while walking, the joint probability will only be evaluated after the first response time is over
-    #has_inter_temp = False
+    has_inter_temp = False
     if has_intermediate:
         for rt_in, ra_in in zip(max_timesteps, ra):   
             #get_likl_states_confidence(n_states, mu, sigma, npx.asarray([[1]]), n_noresp, p_0, Mc, Mw, Mn, ra_last_iter + [ra_in], rt_last_iter + [step], has_intermediate=has_inter_temp)
-            log.debug(f"(Multiple RTs) Starting Walk for ({step}:{rt_in}) steps with step size {step}; mu {mu.shape}")
+            log.debug(f"(Multiple RTs) Starting Walk for ({step}:{rt_in}), {ra_in} steps with step size {step}; mu {mu.flatten()}")
             dely_get_likl_states_confidence = delayed(get_likl_states_confidence)
             # parallelized over timesteps
             res = Parallel(n_jobs=njobs)(dely_get_likl_states_confidence(n_states, mu, sigma, delta, n_noresp, p_0, Mc, Mw, Mn, ra_last_iter + [ra_in], rt_last_iter + [npx.asarray([[rt]])], noisy=noisy, has_intermediate=has_intermediate) 
@@ -340,7 +358,7 @@ def perform_walk(n_states, start_width, mu, sigma, p_0 = None, max_timesteps=10,
             # It's important to note that this updated state now contains imaginary numbers 
             # (which is not the case of original starting point)
             #p_0 = np.where(ra_in == 1, phi_0_c, phi_0_w)
-            #has_inter_temp = True
+            has_inter_temp = True
     else:
         #get_likl_states_confidence(n_states, mu, sigma, npx.asarray([[1]]), n_noresp, p_0, Mc, Mw, Mn, ra, npx.asarray([[step]]))
         log.debug(f"(Single RT) Starting Walk for {max_timesteps} steps with step size {step}; mu {mu.shape}")
@@ -419,7 +437,7 @@ def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size
     s_0 = _get_initial_state(n_states, start_width,I)
     s_0 = npy.deterministic("s_0", s_0)
 
-    Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, 0.25)
+    Mc, Mw, Mn = _get_measurement_matrix(n_states, start_width, 0.75)
 
     #mu_m =  npy.sample(f"mu_m", dist.Normal(2,3))
     #mu_s =  npy.sample(f"mu_s", dist.HalfNormal(2))
@@ -615,13 +633,16 @@ def get_rt_sample(theta, alpha, tau, sigma, mu_s, n_trials, njobs=1):
     return RT, X, Steps
 
 
-def sample_post_pred_data(n_states, start_width, tau, sigma_s, I, J, mcmc_samples, njobs=1, get_response=False, obs_response_range=None):
+def sample_post_pred_data(n_states, start_width, tau, sigma_s, I, J, mcmc_samples, njobs=1, get_response=False, ra_s = None, obs_response_range=None, noisy=False, has_intermediate=False):
     mu_s = mcmc_samples["mu"]#.reshape((-1, mcmc_samples["mu"].shape[-1])) #[0:100,...] # reshaping is done to merge the samples and participants into a single dimension
     sigma_s = mcmc_samples["sigma"]#.reshape((-1, mcmc_samples["sigma"].shape[-1]))#[0:100,...]
     #N_s = mcmc_samples["N"]
     s_0 = mcmc_samples["s_0"][0]#.reshape((-1, mcmc_samples["s_0"].shape[-1]))#[0:100,...]
 
-    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, p_0 = s_0, n_noresp_s=None, samples_n= 100, njobs= njobs, get_response=get_response, obs_response_range=obs_response_range)
+    predictions = get_predictive_samples(n_states, start_width, mu_s, tau, sigma_s, J, 
+                                         p_0 = s_0, n_noresp_s=None, samples_n= 100, njobs= njobs,
+                                           get_response=get_response, obs_response_range=obs_response_range, ra_s = ra_s,
+                                           noisy=noisy, has_intermediate=has_intermediate)
     predictions.update({"mu": mu_s})
     predictions.update({"sigma": sigma_s})
 
@@ -629,6 +650,29 @@ def sample_post_pred_data(n_states, start_width, tau, sigma_s, I, J, mcmc_sample
 
     
 if __name__ == "__main__":
+
+    log.debug("Prior Prediction (noisy) - 1")
+    n_states=7
+    start_width=1
+    I, J = 5,3
+    tau = 1
+    sigma=None
+
+    #prior_predictions = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=2, obs_response_range=(1,10), noisy=True)
+    #RT = prior_predictions["RT"]
+    #log.debug(RT.min(), RT.mean(), RT.max())
+
+    log.debug("Prior Prediction (noisy, intermediate) - 1")
+    I, J = 5,3
+    ra_s = [npx.asarray([[0]]), npx.asarray([[1]])]
+    prior_predictions1 = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=1, obs_response_range=(1,[4,5]), ra_s = ra_s, noisy=True, has_intermediate=True)
+    print(prior_predictions1["Confidence"]["avg_conf"])
+    print("starting second")
+    ra_s = [npx.asarray([[1]]), npx.asarray([[0]])]
+    prior_predictions2 = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=1, obs_response_range=(1,[4,5]), ra_s = ra_s, noisy=True, has_intermediate=True)
+    print(prior_predictions2["Confidence"]["avg_conf"])
+
+if False:
 
     mu_arr, sigma = npx.asarray([[0.01,1]]).T, npx.asarray([[5,10]]).T
     I=2
@@ -787,7 +831,7 @@ if __name__ == "__main__":
 
     log.debug("Prior Prediction (noisy, intermediate) - 1")
     I, J = 5,3
-    ra_s = [npx.asarray([[1]]), npx.asarray([[1]])]
+    ra_s = [npx.asarray([[0]]), npx.asarray([[1]])]
     prior_predictions = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=2, obs_response_range=(1,[10,8]), ra_s = ra_s, noisy=True, has_intermediate=True)
     #RT = prior_predictions["RT"]
     #log.debug(RT.min(), RT.mean(), RT.max())
