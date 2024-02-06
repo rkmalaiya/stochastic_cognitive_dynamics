@@ -25,7 +25,7 @@ jax.config.update('jax_platforms', 'cpu')
 
 
 
-npy.set_host_device_count(21)
+npy.set_host_device_count(64)
 _rng_key = random.PRNGKey(0)
 _rng_key, _rng_key_ = random.split(_rng_key)
 
@@ -448,7 +448,7 @@ def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size
         
     with npy.plate('I', I, dim=-2) as ind: #, subsample_size=batch_size
         #mu =  npy.sample(f"mu", dist.Normal(mu_m,mu_s),sample_shape=(I,1))
-        mu = npy.sample("mu", dist.Normal(0,1)) # Drift Rate
+        mu = npy.sample("mu", dist.Normal(0,2)) # Drift Rate
         sigma_t = npy.sample("sigma_t", dist.Normal(0,1)) # Diffusion Rate
         sigma = npy.deterministic("sigma",sigma_t**2 + 1) #Sigma cannot be negative
         #n_noresp = npy.sample("N", dist.Binomial(total_count=n_noresp_max, probs=0.5))
@@ -671,8 +671,6 @@ if __name__ == "__main__":
     ra_s = [npx.asarray([[1]]), npx.asarray([[0]])]
     prior_predictions2 = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=1, obs_response_range=(1,[4,5]), ra_s = ra_s, noisy=True, has_intermediate=True)
     print(prior_predictions2["Confidence"]["avg_conf"])
-
-if False:
 
     mu_arr, sigma = npx.asarray([[0.01,1]]).T, npx.asarray([[5,10]]).T
     I=2
