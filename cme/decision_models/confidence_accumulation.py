@@ -136,16 +136,19 @@ def likelihood(intensity_matrix, phi_0, delta, RT, RA, Mc, Mw, Mn, transition_ty
     if model_type == "Markov":
         P_t_c = (Mc @ phi_t).sum(axis=(-2,-1))
         P_t_w = (Mw @ phi_t).sum(axis=(-2,-1))
-        P_t = npx.where(RA==1, P_t_c, P_t_w)
+        #P_t = npx.where(RA==1, P_t_c, P_t_w)
         
     elif model_type == "Quantum":
         P_t_c = (npx.abs(Mc @ phi_t)**2).sum(axis=(-2,-1))
         P_t_w = (npx.abs(Mw @ phi_t)**2).sum(axis=(-2,-1))
-        P_t = npx.where(RA==1, P_t_c, P_t_w)
+        #P_t = npx.where(RA==1, P_t_c, P_t_w)
         
     else:
         raise Exception(f"Please select one of {model_type}")
     
+    P_t = npx.where(RA==1, P_t_c, P_t_w)
+    P_t = npx.where(RT <= 0, 0, P_t)
+
     return P_t # summing over all participants and trials
 
 def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
@@ -457,8 +460,8 @@ if __name__ == "__main__":
         #sns.relplot(x=mean_rt_pred, y=lp, col=i)
         #sns.kdeplot(x=mean_rt_pred_s.flatten(), hue=i)
         df_plot = pd.concat([df_plot, pd.DataFrame(dict(mean_rt=mean_rt_pred_s.flatten(), 
-                                                        posterior = i))])
-    sns.kdeplot(df_plot, x="mean_rt", hue="posterior")
+                                                        prior = i))])
+    sns.kdeplot(df_plot, x="mean_rt", hue="prior")
     plt.show()
 
     log.debug("Constant Drift Rate - Posterior Samples 1")
