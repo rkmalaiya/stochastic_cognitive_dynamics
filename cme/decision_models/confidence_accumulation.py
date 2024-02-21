@@ -444,7 +444,7 @@ if __name__ == "__main__":
 
     predictive_samples = sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=delta,
                                                   measurement_prob=measurement_prob, X=X, n_samples=2,
-                                                  params_type="NonCentralized", model_type="Markov", transition_type="RT", likelihood_type="SINGLE" 
+                                                  params_type="NonCentralized", model_type="Quantum", transition_type="RT", likelihood_type="SINGLE" 
                                                  )
     # The predictive_samples contains posterior RT samples for each posterior parameter indexed by [0] below.
     #predictive_samples[0]["predictive_chain"]   
@@ -470,7 +470,7 @@ if __name__ == "__main__":
     X = stats.bernoulli(0.5).rvs(size=(I,J))
     RT = stats.lognorm(1,1).rvs(size=(I,J))
     post_chain = sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
-                            params_type="NonCentralized", model_type="Markov", transition_type="RT", likelihood_type="SINGLE" 
+                            params_type="NonCentralized", model_type="Quantum", transition_type="RT", likelihood_type="SINGLE" 
                             )
     post_samples = post_chain.get_samples()
     #log.debug(az.summary(az.from_numpyro(post_chain)))
@@ -484,7 +484,7 @@ if __name__ == "__main__":
     post_predictive_samples = sample_post_pred_params(n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
                                                  X=X, 
                                                  drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, phi_0_samples=phi_0_samples,
-                                                 params_type="NonCentralized", model_type="Markov", transition_type="RT", likelihood_type="SINGLE"
+                                                 params_type="NonCentralized", model_type="Quantum", transition_type="RT", likelihood_type="SINGLE"
                                                  )
     
     post_predictive_samples[0]["predictive_chain"]  

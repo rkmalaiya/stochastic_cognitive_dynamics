@@ -80,7 +80,7 @@ def get_initial_state(num_states, start_width, Mid, type="L|C|H"):
     if type=="L":
         S0[:start_width] = 1
     elif type=="C":
-        S0[(Mid-start_width):(Mid+start_width)] = 1;
+        S0[(Mid-start_width-1):(Mid+start_width)] = 1;
     elif type=="H":
         S0[-start_width:] = 1
     else:
@@ -98,26 +98,24 @@ def perform_walk(num_states, start_width, mu, sigma=1,rt=200,type="C"):
     S0 = get_initial_state(num_states,start_width, Mid,type)
     
     # build Hamiltonian  
-    mv = np.arange(0,num_states) #np.arange(-(Mid-1),(Mid))  # Basis vector
+    mv = np.arange(-(Mid-1),(Mid))  # Basis vector np.arange(0,num_states) #
     b = mu*mv;  
     a = sigma#*np.ones((ns,1));  
     H = _buildH(num_states,a,b,a); # function given below  
-
-    tv = np.arange(0,rt,1) # no of time steps 
-
+    tv = np.arange(0,rt,0.1) # no of time steps 
+    nt = tv.shape[0]
     # time loop  
     avg_conf = [];  
     state_prob = []
     likl_arr = []
-
-    for t in tv: 
-        
+    
+    for n in range(1, nt):
+        t = tv[n]
         U = expm(-1j*t*H) #-1i 
         St = U@S0  
         Pt = (np.abs(St)**2)
         Mc = mv@Pt #mean confidence
         likl = np.abs(Mcorr @ St)**2
-
         state_prob.append(Pt)
         likl_arr.append(likl.sum()) 
         avg_conf.append(Mc)  
@@ -151,7 +149,7 @@ def perform_walk_interfere(num_states, start_width, mu, sigma=1,rt=200,type="C",
     a = sigma#*np.ones((ns,1));  
     H = _buildH(num_states,a,b,a); # function given below  
 
-    tv = np.arange(0,rt,1) # no of time steps 
+    tv = np.arange(0,rt,0.1) # no of time steps 
 
     # time loop  
     avg_conf = [];  
@@ -190,21 +188,11 @@ def perform_walk_interfere(num_states, start_width, mu, sigma=1,rt=200,type="C",
 if __name__ == "__main__":
     mu = 1
     sigma = 1
-    num_states = 11 # choose a odd number
+    num_states = 7 # choose a odd number
     start_width = 3
-    rt=400
+    rt=20
 
-    df_st, df_avg_conf, ds_likl = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
-
-    for delta in range(10, 400, 10):
-        df_st_t, df_avg_conf_t, ds_likl_t = perform_walk_interfere(num_states, start_width, mu, sigma,rt=rt, delta=delta)
-        df_st = pd.concat([df_st, df_st_t.assign(delta=delta)])
-        df_avg_conf = pd.concat([df_avg_conf, df_avg_conf_t.assign(delta=delta)])
-        ds_likl = pd.concat([ds_likl, ds_likl_t.assign(delta=delta)])
-    
-
-    df_st_t, df_avg_conf_t, ds_likl_t = perform_walk(num_states, start_width, mu, sigma,rt=rt)
+    df_st, df_avg_conf, ds_likl = perform_walk(num_states, start_width, mu, sigma,rt=rt)
 
     #print(df_st.shape)
     #print(df_avg_conf.shape)
@@ -214,7 +202,7 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
 
-    df_avg_conf.iloc[:,1].plot.hist()
+    df_avg_conf.iloc[:,1].plot()
 
     import seaborn as sns
     sns.relplot(df_st, x="time",y="state",size="probability",sizes=(50, 300), color="black")
@@ -222,10 +210,14 @@ if __name__ == "__main__":
     ds_likl.plot()
     plt.show()
 
-    #df_avg_conf.pivot(index="time", columns="delta", values="avg_conf").plot.kde()
-    
+    df_st, df_avg_conf, ds_likl = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    for delta in range(1, rt, 1):
+        df_st_t, df_avg_conf_t, ds_likl_t = perform_walk_interfere(num_states, start_width, mu, sigma,rt=rt, delta=delta)
+        df_st = pd.concat([df_st, df_st_t.assign(delta=delta)])
+        df_avg_conf = pd.concat([df_avg_conf, df_avg_conf_t.assign(delta=delta)])
+        ds_likl = pd.concat([ds_likl, ds_likl_t.assign(delta=delta)])
     df_avg_conf.groupby("delta")["avg_conf"].mean().plot.bar()
 
-    sns.barplot(df_avg_conf.groupby("delta")["avg_conf"].mean().reset_index().assign(N = lambda df: np.round(400/df["delta"])),
+    sns.barplot(df_avg_conf.groupby("delta")["avg_conf"].mean().reset_index().assign(N = lambda df: np.round(rt/df["delta"])),
         x="N",
         y="avg_conf", color="Grey")

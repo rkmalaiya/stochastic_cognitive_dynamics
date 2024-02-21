@@ -163,7 +163,11 @@ def sample_states_and_confidence(rt, phi_0, K, Mc, Mw, Mn, N, ra = None, delta =
 
 
 
-def _state_transition(K, phi_0, rt, delta=None, n_noresp = None, Mn = None, noisy=False):
+def _state_transition(K, phi_0, rt, delta=None, n_noresp = None, Mn = None, noisy=False, ind=None):
+
+    if(ind is not None): #subsampling RT
+        rt = rt[ind]
+
     if noisy:
         #delta = npx.expand_dims(delta, axis=2)
         #delta = npx.expand_dims(delta, axis=2)
@@ -201,13 +205,13 @@ def _state_transition(K, phi_0, rt, delta=None, n_noresp = None, Mn = None, nois
     
     return phi_t
 
-def _state_transition_with_intermediate(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy):
+def _state_transition_with_intermediate(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=False, ind=None):
     phi_t = None
     phi_0_in = phi_0
 
     for i, (rt_in, ra_in) in enumerate(zip(rt,ra)):
             #n_noresp = rt_in/delta
-            phi_t_in = _state_transition(K, phi_0_in, rt_in, delta, n_noresp, Mn, noisy=noisy)
+            phi_t_in = _state_transition(K, phi_0_in, rt_in, delta, n_noresp, Mn, noisy=noisy, ind = ind)
 
             if i != (len(rt) - 1): 
             # avoid these steps for the last response
@@ -222,18 +226,18 @@ def _state_transition_with_intermediate(K, rt, ra, phi_0, n_noresp, delta, Mc, M
             #else:
             #    phi_t = phi_t @ phi_t_in  
             else: 
-                #phi_t = phi_t_in
+                phi_t = phi_t_in
 
-                phi_t_in_correct = (Mc @ phi_t_in)
-                phi_t_in_incorrect = (Mw @ phi_t_in)
+                #phi_t_in_correct = (Mc @ phi_t_in)
+                #phi_t_in_incorrect = (Mw @ phi_t_in)
 
-                phi_t = npx.where(ra_in[..., None, None]==0, phi_t_in_incorrect, phi_t_in_correct)
+                #phi_t = npx.where(ra_in[..., None, None]==0, phi_t_in_incorrect, phi_t_in_correct)
                 
             
             phi_0_in = phi_t
     return phi_t
 
-def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=False, has_intermediate = False):
+def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=False, has_intermediate = False, ind=None):
     #ic(rt.shape)
     #K= _buildK(n_states, mu=mu, sigma=sigma)
     
@@ -253,7 +257,10 @@ def likelihood(K, rt, ra, phi_0, n_noresp, delta, Mc, Mw, Mn, noisy=False, has_i
     P_correct = (npx.abs(Mc @ phi_t)**2).sum(axis=(-2,-1)) # Mc @ phi_t is KxK @ IxJxKxK; *correct should be IxJ
     P_incorrect = (npx.abs(Mw @ phi_t)**2).sum(axis=(-2,-1))
 
-    P_i_j = npx.where(ra==0, P_incorrect, P_correct)
+    if has_intermediate:
+        P_i_j = npx.where(ra[1]==0, P_incorrect, P_correct)
+    else:
+        P_i_j = npx.where(ra==0, P_incorrect, P_correct) 
     
     #ic(Pcorrect.shape)
 
@@ -446,7 +453,8 @@ def model_central(n_states, start_width, sigma, tau, rt, ra,I,J, s_0, batch_size
     #n_noresp = rt/delta if rt is not None else 10
     n_noresp = None
         
-    with npy.plate('I', I, dim=-2) as ind: #, subsample_size=batch_size
+    #with npy.plate('I', I, dim=-2) as ind: #, subsample_size=batch_size
+    with npy.plate('I', I, dim=-2, subsample_size=batch_size) as ind: 
         #mu =  npy.sample(f"mu", dist.Normal(mu_m,mu_s),sample_shape=(I,1))
         mu = npy.sample("mu", dist.Normal(0,2)) # Drift Rate
         sigma_t = npy.sample("sigma_t", dist.Normal(0,1)) # Diffusion Rate
@@ -512,15 +520,17 @@ def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, 
     else:
         I,J = DT.shape if I is None else I, DT.shape[1]
 
-    #kernel = HMCECS(NUTS(model), num_blocks=10)
-    #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
-    #mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
-
     #kernel = NUTS(model)
     kernel = NUTS(model_central)
-    #kernel = MixedHMC(HMC(model_central, trajectory_length=1.2), num_discrete_updates=20)
+    
+    kernel = HMCECS(kernel, num_blocks=10)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
-    mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, noisy=noisy, has_intermediate=has_intermediate, extra_fields=('potential_energy',))
+    ext_field = "hmc_state"
+    #mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
+
+    #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
+    #ext_field = "potential_energy"
+    mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, noisy=noisy, has_intermediate=has_intermediate, extra_fields=(ext_field,))
 
     #kernel = TFPKernel[tfp.mcmc.NoUTurnSampler](model, step_size=1.)
     #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
@@ -528,7 +538,7 @@ def sample_posterior_params(DT, X, n_states, start_width, sigma, tau, I = None, 
 
     #post_likl = log_density(model, model_args=(n_states, start_width,  sigma, tau, DT, X, I, J, s_0), model_kwargs = None, params=mcmc_chain.get_samples())
     #post_likl = mcmc_chain.get_extra_fields()['hmc_state'].potential_energy
-    post_likl = mcmc_chain.get_extra_fields()['potential_energy'] # This is negative log likelihood
+    post_likl = mcmc_chain.get_extra_fields()[ext_field] # This is negative log likelihood
     return mcmc_chain, post_likl
 
 def sample_prior_pred_data(n_states, start_width, tau, sigma_s, I, J, samples_n=100, njobs=1, get_response=False, obs_response_range=None, ra_s = None, batch_size=2, noisy=False, has_intermediate=False):
@@ -651,27 +661,6 @@ def sample_post_pred_data(n_states, start_width, tau, sigma_s, I, J, mcmc_sample
     
 if __name__ == "__main__":
 
-    log.debug("Prior Prediction (noisy) - 1")
-    n_states=7
-    start_width=1
-    I, J = 5,3
-    tau = 1
-    sigma=None
-
-    #prior_predictions = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=2, obs_response_range=(1,10), noisy=True)
-    #RT = prior_predictions["RT"]
-    #log.debug(RT.min(), RT.mean(), RT.max())
-
-    log.debug("Prior Prediction (noisy, intermediate) - 1")
-    I, J = 5,3
-    ra_s = [npx.asarray([[0]]), npx.asarray([[1]])]
-    prior_predictions1 = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=1, obs_response_range=(1,[4,5]), ra_s = ra_s, noisy=True, has_intermediate=True)
-    print(prior_predictions1["Confidence"]["avg_conf"])
-    print("starting second")
-    ra_s = [npx.asarray([[1]]), npx.asarray([[0]])]
-    prior_predictions2 = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=1, obs_response_range=(1,[4,5]), ra_s = ra_s, noisy=True, has_intermediate=True)
-    print(prior_predictions2["Confidence"]["avg_conf"])
-
     mu_arr, sigma = npx.asarray([[0.01,1]]).T, npx.asarray([[5,10]]).T
     I=2
 
@@ -688,7 +677,7 @@ if __name__ == "__main__":
     log.debug("Constant Drift Rate - 1")
     # Replicating the plots in Busemeyer 2010
     n_states=7
-    start_width=4
+    start_width=3
     mu=[[1]] #drift rate
     sigma=npx.asarray([[1]]) #diffusion
     tau = 1
@@ -704,7 +693,7 @@ if __name__ == "__main__":
     likl_arr = []
 
     phi_0 = _get_initial_state(n_states, start_width,I=1)
-    for r in np.arange(0,10):
+    for r in np.arange(0,20,0.1):
         P_t, Mconf, noresp_traj_arr = sample_states_and_confidence(r, phi_0, K, Mc, Mw, Mn, 1)
         conf_arr.append(Mconf.squeeze())
         P_t_arr.append(np.asarray(P_t.squeeze()))
@@ -725,7 +714,7 @@ if __name__ == "__main__":
     log.debug(likl.shape)
     pd.Series(likl).plot.line()
     plt.show()
-    
+
     log.debug("Constant Drift Rate - 2")
     # Replicating the plots in Busemeyer 2010
     n_states=101
@@ -833,6 +822,22 @@ if __name__ == "__main__":
     prior_predictions = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=2, obs_response_range=(1,[10,8]), ra_s = ra_s, noisy=True, has_intermediate=True)
     #RT = prior_predictions["RT"]
     #log.debug(RT.min(), RT.mean(), RT.max())
+    
+    log.debug("Prior Prediction (noisy, intermediate) - 2")
+    n_states=7
+    start_width=1
+    I, J = 5,3
+    tau = 1
+    sigma=None
+    I, J = 5,3
+    ra_s = [npx.asarray([[0]]), npx.asarray([[1]])]
+    prior_predictions1 = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=1, obs_response_range=(1,[4,5]), ra_s = ra_s, noisy=True, has_intermediate=True)
+    print(prior_predictions1["Confidence"]["avg_conf"])
+    print("starting second")
+    ra_s = [npx.asarray([[1]]), npx.asarray([[0]])]
+    prior_predictions2 = sample_prior_pred_data(n_states, start_width, [[tau]], sigma,  I, J, samples_n=1, obs_response_range=(1,[4,5]), ra_s = ra_s, noisy=True, has_intermediate=True)
+    print(prior_predictions2["Confidence"]["avg_conf"])
+
 
     log.debug("Posterior Sampling - 1")
     
