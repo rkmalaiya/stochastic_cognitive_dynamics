@@ -506,7 +506,8 @@ if __name__ == "__main__":
     X = stats.bernoulli(0.5).rvs(size=(I,J))
     RT = stats.lognorm(1,1).rvs(size=(I,J))
     post_chain = sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
-                            params_type="NonCentralized", model_type="Quantum", transition_type="RT", likelihood_type="SINGLE" 
+                                         num_warmup=100, samples_n=100,
+                                         params_type="NonCentralized", model_type="Quantum", transition_type="RT", likelihood_type="SINGLE" 
                             )
     post_samples = post_chain.get_samples()
     #log.debug(az.summary(az.from_numpyro(post_chain)))
@@ -517,7 +518,8 @@ if __name__ == "__main__":
     X_s = [stats.bernoulli(0.5).rvs(size=(I,J)), stats.bernoulli(0.5).rvs(size=(I,J))]
     RT_s = [stats.lognorm(1,1).rvs(size=(I,J)), stats.lognorm(1,1).rvs(size=(I,J))]
     post_chain_joint = sample_posterior_params(RT_s, X_s, n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
-                            params_type="NonCentralized", model_type="Quantum", transition_type="RT", likelihood_type="JOINT" 
+                                                num_warmup=100, samples_n=100,
+                                                params_type="NonCentralized", model_type="Quantum", transition_type="RT", likelihood_type="JOINT" 
                             )
     post_samples_joint = post_chain_joint.get_samples()
 
