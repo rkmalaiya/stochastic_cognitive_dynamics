@@ -8,7 +8,7 @@ log = cl.get_logger("random-walk")
 
 
 def _get_n_states(alpha, theta, tau, sigma):
-    sigma = sigma.squeeze()
+    sigma = sigma#.squeeze()
     delta_state = alpha * sigma * sqrt(tau)
     n_states = round(theta/delta_state) #2 * round(theta/delta_state) + 1 # #
     return 101#n_states

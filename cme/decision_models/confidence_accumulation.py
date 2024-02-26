@@ -20,7 +20,7 @@ log = cl.get_logger("confidence_accumulation")
 
 pyro.set_platform("cpu")
 pyro.set_host_device_count(64)
-#pyro.enable_x64()
+pyro.enable_x64()
 
 _rng_key = random.PRNGKey(0)
 _rng_key, _rng_key_ = random.split(_rng_key)
@@ -148,19 +148,6 @@ def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transitio
     phi_t = perform_state_transition(intensity_matrix, RT_s, RA_s, Mc, Mw, Mn, phi_0, delta, 
                                      transition_type=transition_type, likelihood_type=likelihood_type)
 
-    if model_type == "Markov":
-        P_t_c = (Mc @ phi_t).sum(axis=(-2,-1))
-        P_t_w = (Mw @ phi_t).sum(axis=(-2,-1))
-        #P_t = npx.where(RA==1, P_t_c, P_t_w)
-        
-    elif model_type == "Quantum":
-        P_t_c = (npx.abs(Mc @ phi_t)**2).sum(axis=(-2,-1))
-        P_t_w = (npx.abs(Mw @ phi_t)**2).sum(axis=(-2,-1))
-        #P_t = npx.where(RA==1, P_t_c, P_t_w)
-        
-    else:
-        raise Exception(f"Please select one of {model_type}")
-    
     if likelihood_type == "SINGLE":
         RA = RA_s
         RT = RT_s
@@ -169,11 +156,35 @@ def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transitio
         RT = RT_s[0] * RT_s[1] # So that even if a single RT is 0, the likelihood for that participant becomes 0
     else:
         raise Exception(f"Please select one of {likelihood_type} values for likelihood_type variable")
-    P_t = npx.where(RA==1, P_t_c, P_t_w)
+
+    P_t_c = (Mc @ phi_t)
+    P_t_w = (Mw @ phi_t)
+    P_t = npx.where(RA[...,None,None]==1, P_t_c, P_t_w)
+
+    if model_type == "Markov":
+        #P_t_c = (Mc @ phi_t).sum(axis=(-2,-1))
+        #P_t_w = (Mw @ phi_t).sum(axis=(-2,-1))
+
+        P_t = P_t.sum(axis=(-2,-1)) # Adding over states
+        
+        #P_t = npx.where(RA==1, P_t_c, P_t_w)
+        
+    elif model_type == "Quantum":
+        #P_t_c = (npx.abs(Mc @ phi_t)**2).sum(axis=(-2,-1))
+        #P_t_w = (npx.abs(Mw @ phi_t)**2).sum(axis=(-2,-1))
+
+        P_t = (npx.abs(P_t)**2).sum(axis=(-2,-1)) #Adding over states
+        
+
+        #P_t = npx.where(RA==1, P_t_c, P_t_w)
+        
+    else:
+        raise Exception(f"Please select one of {model_type}")
     
+        
     P_t = npx.where(RT <= 0, 0, P_t)
 
-    return P_t # summing over all participants and trials
+    return npx.log(npx.sum(P_t)) # summing over all participants and trials
 
 def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
     if likelihood_type == "SINGLE":
@@ -206,8 +217,9 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
     Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, start_width=start_width, prob=measurement_prob, model_type = model_type)
 
     if RT_s is not None:
-        likl = likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-        pyro.factor(f"likelihood", npx.sum(npx.log(likl)))
+        likl = likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, 
+                          transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
+        pyro.factor(f"likelihood", likl)
 
 
 def predictive_model(RT_pred, n_states, start_width, delta, measurement_prob, phi_0, RA, 
@@ -234,7 +246,7 @@ def predictive_model(RT_pred, n_states, start_width, delta, measurement_prob, ph
                       transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
     #pyro.deterministic("likl_prnt", likl)
     #pyro.factor("likelihood", likl)
-    return -npx.sum(npx.log(likl))
+    return likl
 
 def sample_posterior_params(DT, X, n_states, start_width, delta, measurement_prob,
                             num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  
@@ -267,7 +279,7 @@ def predictive_mcmc_fn(n_states, start_width, delta, measurement_prob, X,
                                                         X, drift_rate, diffusion_rate,
                                                         transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type,))
             pred_shape = 4, *X.shape
-            predictive_mcmc = MCMC(kernel, num_warmup=300, num_samples=200, num_chains=4)
+            predictive_mcmc = MCMC(kernel, num_warmup=300, num_samples=100, num_chains=4)
             predictive_mcmc.run(_rng_key, init_params=stats.lognorm(s=1).rvs((pred_shape)),
                             extra_fields=('potential_energy',)
                             )
@@ -308,7 +320,7 @@ def sample_prior_pred_params(n_states, start_width, delta, measurement_prob, X,
 
 def sample_post_pred_params(n_states, start_width, delta, measurement_prob, X, 
                             drift_rate_samples, diffusion_rate_samples, phi_0_samples,
-                            n_samples=100, 
+                            n_samples=50, 
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
 
     predictive_samples = predictive_mcmc_fn(n_states, start_width, delta, measurement_prob, X, 
@@ -358,12 +370,12 @@ if __name__ == "__main__":
     log.debug("Constant Drift Rate - Likelihood 1")
 
     likl_markov = likelihood(intensity_matrix=intensity_matrix_markov, phi_0=phi_0_markov, delta=delta,
-                            RT_s=10, RA_s=1, 
+                            RT_s=npx.asarray([[10]]), RA_s=npx.asarray([[1]]),  
                             Mc=m_Mc, Mw=m_Mw, Mn=m_Mn, 
                             transition_type="RT", likelihood_type="SINGLE", model_type="Markov")
     
     likl_quantum = likelihood(intensity_matrix=intensity_matrix_quantum, phi_0=phi_0_quantum, delta=delta,
-                            RT_s=10, RA_s=1, 
+                            RT_s=npx.asarray([[10]]), RA_s=npx.asarray([[1]]),  
                             Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, 
                             transition_type="RT", likelihood_type="SINGLE", model_type="Quantum")
     
@@ -377,14 +389,14 @@ if __name__ == "__main__":
 
     for t in range(1,100):
         likl_markov = likelihood(intensity_matrix=intensity_matrix_markov, phi_0=phi_0_markov, delta=delta,
-                                RT_s=t, RA_s=1, 
+                                RT_s=npx.asarray([[t]]), RA_s=npx.asarray([[1]]),  
                                 Mc=m_Mc, Mw=m_Mw, Mn=m_Mn, 
                                 transition_type="RT", likelihood_type="SINGLE", model_type="Markov")
         likl_markov_arr.append(likl_markov.squeeze())
 
         
         likl_quantum = likelihood(intensity_matrix=intensity_matrix_quantum, phi_0=phi_0_quantum, delta=delta,
-                                RT_s=t, RA_s=1, 
+                                RT_s=npx.asarray([[t]]), RA_s=npx.asarray([[1]]),
                                 Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, 
                                 transition_type="RT", likelihood_type="SINGLE", model_type="Quantum")
         likl_quantum_arr.append(likl_quantum.squeeze())
@@ -401,14 +413,14 @@ if __name__ == "__main__":
 
     for t in range(1,100):
         likl_markov = likelihood(intensity_matrix=intensity_matrix_markov, phi_0=phi_0_markov, delta=delta,
-                                RT_s=t, RA_s=0, 
+                                RT_s=npx.asarray([[t]]), RA_s=npx.asarray([[0]]),
                                 Mc=m_Mc, Mw=m_Mw, Mn=m_Mn, 
                                 transition_type="RT", likelihood_type="SINGLE", model_type="Markov")
         likl_markov_arr.append(likl_markov.squeeze())
 
         
         likl_quantum = likelihood(intensity_matrix=intensity_matrix_quantum, phi_0=phi_0_quantum, delta=delta,
-                                RT_s=t, RA_s=0, 
+                                RT_s=npx.asarray([[t]]), RA_s=npx.asarray([[0]]), 
                                 Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, 
                                 transition_type="RT", likelihood_type="SINGLE", model_type="Quantum")
         likl_quantum_arr.append(likl_quantum.squeeze())
@@ -428,14 +440,14 @@ if __name__ == "__main__":
 
         for t in range(1,100):
             likl_markov = likelihood(intensity_matrix=intensity_matrix_markov, phi_0=phi_0_markov, delta=delta,
-                                    RT_s=t, RA_s=1, 
+                                    RT_s=npx.asarray([[t]]), RA_s=npx.asarray([[1]]), 
                                     Mc=m_Mc, Mw=m_Mw, Mn=m_Mn, 
                                     transition_type="RT", likelihood_type="SINGLE", model_type="Markov")
             likl_markov_arr.append(likl_markov.squeeze())
 
             
             likl_quantum = likelihood(intensity_matrix=intensity_matrix_quantum, phi_0=phi_0_quantum, delta=delta,
-                                    RT_s=t, RA_s=1, 
+                                    RT_s=npx.asarray([[t]]), RA_s=npx.asarray([[1]]), 
                                     Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, 
                                     transition_type="RT", likelihood_type="SINGLE", model_type="Quantum")
             likl_quantum_arr.append(likl_quantum.squeeze())
@@ -455,14 +467,14 @@ if __name__ == "__main__":
 
         for t in range(1,100):
             likl_markov = likelihood(intensity_matrix=intensity_matrix_markov, phi_0=phi_0_markov, delta=delta,
-                                    RT_s=npx.asarray([[t]]), RA_s=1, 
+                                    RT_s=npx.asarray([[t]]), RA_s=npx.asarray([[1]]), 
                                     Mc=m_Mc, Mw=m_Mw, Mn=m_Mn, 
                                     transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Markov")
             likl_markov_arr.append(likl_markov.squeeze())
 
             
             likl_quantum = likelihood(intensity_matrix=intensity_matrix_quantum, phi_0=phi_0_quantum, delta=delta,
-                                    RT_s=npx.asarray([[t]]), RA_s=1, 
+                                    RT_s=npx.asarray([[t]]), RA_s=npx.asarray([[1]]), 
                                     Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, 
                                     transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Quantum")
             likl_quantum_arr.append(likl_quantum.squeeze())

@@ -74,7 +74,7 @@ def _buildH(n_states, mu, sigma, n_trials = None):
     
     params = {"a":a, "b":b, "c":c, "H":H}
 
-    i, params = lax.scan(_create, 0, params)
+    i, params = lax.scan(_create, 0, params, unroll=True)
 
     return params["H"]
 
