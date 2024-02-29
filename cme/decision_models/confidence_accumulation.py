@@ -1,3 +1,4 @@
+from csv import excel_tab
 import jax.numpy as npx
 import jax.scipy as sci
 import numpyro as pyro
@@ -7,6 +8,7 @@ import jax
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive
 from jax import random
+from jax import lax
 import arviz as az 
 
 import numpy as np 
@@ -59,6 +61,43 @@ def non_centralized_parameters(I):
 
 def _timestep_transition_matrix(n, T_delta, Mn):
 
+    n1 = n
+    i1 = 0
+    j1 = 0
+    Mn1 = Mn
+
+    def _take_step_j(j, params):
+        nonlocal n1
+        nonlocal j1
+        nonlocal i1
+        n_i_j = n1[i1, j1]
+        T_delta_i_j = params["T_delta"]
+        
+        T_i_j = npx.linalg.matrix_power(Mn1 @ T_delta_i_j, n_i_j.astype(int).item() - 1)
+        params["T_nt"] = T_i_j
+        j1 = j1 + 1
+        return (j,params)
+
+    def _take_step_i(i, params):
+        nonlocal i1
+        i, params = lax.scan(_take_step_j, 0, params)
+        i1 = i1 + 1
+        return (i, params)
+        
+    T_nt = npx.empty(T_delta.shape)
+    #print(n.shape, T_delta.shape, T_nt.shape)
+    params = {"T_delta":T_delta, "T_nt":T_nt}
+
+    i, params = lax.scan(_take_step_i, 0, params)
+    T_nt = params["T_nt"]
+
+    T_t = T_delta @ T_nt
+        
+    return T_t
+
+
+def _timestep_transition_matrix_t(n, T_delta, Mn):
+
     T_i = []
     for n_i, T_delta_i in zip(n, T_delta):
         T_i_j = []
@@ -75,7 +114,7 @@ def _timestep_transition_matrix(n, T_delta, Mn):
 def _get_transition_matrix(intensity_matrix, RT, delta=None, Mn = None, transition_type="RT|TIMESTEP"):
    
     if transition_type == "RT":
-        T_t = sci.linalg.expm(intensity_matrix * (RT[...,None,None] if not npx.isscalar(RT) else RT))
+        T_t = sci.linalg.expm(intensity_matrix * ((RT[...,None,None]/delta) if not npx.isscalar(RT) else (RT/delta)))
     elif transition_type == "TIMESTEP":
         ns=np.ceil(RT/delta)
         T_delta = sci.linalg.expm(intensity_matrix * delta)
@@ -245,6 +284,40 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
         pyro.factor(f"likelihood", likl)
 
 
+def simulate_RT(RT_max, n_states, start_width, delta, measurement_prob, RA, 
+                     drift_rate, diffusion_rate, phi_0, n_datasets = 10,
+                     model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
+    
+    sim_RT = []
+    for mu, sigma in zip(drift_rate, diffusion_rate):
+        for RT in np.arange(delta, RT_max, delta):
+            likl = predictive_model(RT, n_states, start_width, delta, measurement_prob, phi_0, RA, 
+                     npx.asarray([mu]), npx.asarray([sigma]), 
+                     model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
+
+            sim_RT.append(pd.DataFrame({"RT":[RT], "mu":[mu], "sigma":[sigma], "Likelihood":[likl]}).astype(float))
+
+    df_sim_RT = pd.concat(sim_RT)
+    df_sim_RT.loc[:,"Likelihood"] = np.exp( - df_sim_RT.loc[:,"Likelihood"])
+
+
+    samples_arr = []
+    for i in range(n_datasets):
+        for key, df in df_sim_RT.groupby(["mu", "sigma"]):
+            samples_arr.append(
+               df.sample(n=df.shape[0], weights=df.Likelihood, replace=True).assign(dataset_number=i)
+                #pd.DataFrame({"samples":df.sample(n=df.shape[0], weights=df.Likelihood), "dataset_number":i, "key":key})
+                
+                )
+
+        #samples_arr.append(pd.DataFrame({"samples":df_sim_RT.RT.sample(n=df_sim_RT.shape[0], weights = df_sim_RT.Likelihood),
+#                      "sample_number":i}))
+    df_samples = pd.concat(samples_arr)
+
+    return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "Likelihood":df_sim_RT, "Samples":df_samples}
+
+
+
 def predictive_model(RT_pred, n_states, start_width, delta, measurement_prob, phi_0, RA, 
                      drift_rate, diffusion_rate, 
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
@@ -324,8 +397,9 @@ def predictive_mcmc_fn(n_states, start_width, delta, measurement_prob, X,
     return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "predictive_chain":az.from_numpyro(predictive_mcmc)} #predictive_samples
 
 def sample_prior_pred_params(n_states, start_width, delta, measurement_prob, X, 
-                        n_samples=10, 
-                        params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
+                        n_samples=10, RT_max = 10,
+                        params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
+                        transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN"):
     
     prior_predictive = Predictive(model, num_samples=n_samples)    
     prior_samples = prior_predictive(_rng_key, n_states, start_width,  delta, X, None, measurement_prob,
@@ -338,24 +412,46 @@ def sample_prior_pred_params(n_states, start_width, delta, measurement_prob, X,
     predictive_samples = []
     parallel = Parallel(n_jobs=1)#drift_rate_samples.shape[0])
 
-    predictive_samples = parallel(delayed(predictive_mcmc_fn)(n_states, start_width, delta, measurement_prob, X, 
-                                            drift_rate, diffusion_rate, phi_0,
-                                            params_type, model_type, transition_type, likelihood_type)
-                                for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
-                                )
+    if sampling_type == "MCMC":
+        predictive_samples = parallel(delayed(predictive_mcmc_fn)(n_states, start_width, delta, measurement_prob, X, 
+                                                drift_rate, diffusion_rate, phi_0,
+                                                params_type = params_type, model_type = model_type, transition_type = transition_type, likelihood_type = likelihood_type)
+                                    for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
+                                    )
+    elif sampling_type == "GEN":
+            predictive_samples = parallel(delayed(simulate_RT)(RT_max, n_states, start_width, delta, measurement_prob, X, 
+                                                drift_rate, diffusion_rate, phi_0,
+                                                model_type = model_type, transition_type = transition_type, 
+                                                likelihood_type = likelihood_type, n_datasets = n_samples)
+                                    for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
+                                    )
+    else:
+        raise Exception(f"Please select one of {sampling_type}")
     return predictive_samples
 
 def sample_post_pred_params(n_states, start_width, delta, measurement_prob, X, 
                             drift_rate_samples, diffusion_rate_samples, phi_0_samples,
-                            n_samples=50, 
-                            params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
+                            n_samples=10, RT_max = 10, 
+                            params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
+                            transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN"):
     predictive_samples = []
     parallel = Parallel(n_jobs=drift_rate_samples.shape[0])
-    predictive_samples = parallel(delayed(predictive_mcmc_fn)(n_states, start_width, delta, measurement_prob, X, 
-                                            drift_rate, diffusion_rate, phi_0,
-                                            params_type, model_type, transition_type, likelihood_type)
-                                for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
-                                )
+    if sampling_type == "MCMC":
+        predictive_samples = parallel(delayed(predictive_mcmc_fn)(n_states, start_width, delta, measurement_prob, X, 
+                                                drift_rate, diffusion_rate, phi_0,
+                                                params_type, model_type, transition_type, likelihood_type)
+                                    for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
+                                    )
+    elif sampling_type == "GEN":
+            predictive_samples = parallel(delayed(simulate_RT)(RT_max, n_states, start_width, 0.1, measurement_prob, X, 
+                                                drift_rate, diffusion_rate, phi_0,
+                                                model_type = model_type, transition_type = transition_type, 
+                                                likelihood_type = likelihood_type, n_datasets = n_samples)
+                                    for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
+                                    )
+    else:
+        raise Exception(f"Please select one of {sampling_type}")
+    
     return predictive_samples
 
 
@@ -373,6 +469,11 @@ if __name__ == "__main__":
     phi_0_markov = _get_initial_state(n_states, start_width,model_type="Markov")
     phi_0_quantum = _get_initial_state(n_states, start_width,model_type="Quantum")
 
+    mean_conf_quantum = get_mean_confidence(n_states, intensity_matrix=intensity_matrix_quantum, 
+                                            phi_0=phi_0_quantum, delta=1, Mn=q_Mn, t=np.asarray([[10]]), transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Quantum")
+    
+    print(mean_conf_quantum)
+    
     mean_conf_markov = get_mean_confidence(n_states, intensity_matrix=intensity_matrix_markov, 
                                            phi_0=phi_0_markov, delta=delta, Mn=m_Mn, t=10, transition_type="RT", likelihood_type="SINGLE", model_type="Markov")
     mean_conf_quantum = get_mean_confidence(n_states, intensity_matrix=intensity_matrix_quantum, 
@@ -522,12 +623,33 @@ if __name__ == "__main__":
 
     predictive_samples = sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=delta,
                                                   measurement_prob=measurement_prob, X=X, n_samples=2,
-                                                  params_type="Centralized", model_type="Quantum", transition_type="RT", likelihood_type="SINGLE" 
+                                                  params_type="Centralized", model_type="Quantum", transition_type="RT", 
+                                                  likelihood_type="SINGLE", sampling_type="GEN", RT_max=10
+                                                 )
+    # The predictive_samples contains posterior RT samples for each posterior parameter indexed by [0] below.
+    #predictive_samples[0]["predictive_chain"]   
+    #log.debug(az.summary(predictive_samples[0]["predictive_chain"]))
+    df_samples = predictive_samples[0]["Samples"]
+    sns.kdeplot(df_samples.assign(hue = 
+                                  lambda df: df.mu.astype(str) + df.sigma.astype(str) + df.dataset_number.astype(str)), 
+                x="RT", hue="hue", legend=False)
+    plt.xlim(0,10) # because RT_max is set as 1000
+
+
+    log.debug("Constant Drift Rate - Prior 2")
+
+    X = stats.bernoulli(0.5).rvs(size=(I,J))
+
+    predictive_samples = sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=0.01,
+                                                  measurement_prob=measurement_prob, X=X, n_samples=2,
+                                                  params_type="Centralized", model_type="Quantum", transition_type="RT", 
+                                                  likelihood_type="SINGLE", sampling_type="MCMC"
                                                  )
     # The predictive_samples contains posterior RT samples for each posterior parameter indexed by [0] below.
     #predictive_samples[0]["predictive_chain"]   
     #log.debug(az.summary(predictive_samples[0]["predictive_chain"]))
     log.debug(f"Mean Rhat {az.rhat(predictive_samples[0]['predictive_chain'])['Param:0'].values.mean()}")     
+
     df_plot = pd.DataFrame()
     for i, prior_predictive_sample in enumerate(predictive_samples):
         #RT_pred = prior_predictive_sample["predictive_chain"]["posterior"]["Param:0"].values.reshape((-1, I, J))
@@ -552,6 +674,7 @@ if __name__ == "__main__":
         )
     plt.show()
 
+
  
     log.debug("Constant Drift Rate - Posterior Samples 1")
 
@@ -572,7 +695,7 @@ if __name__ == "__main__":
     post_predictive_samples = sample_post_pred_params(n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
                                                  X=X, 
                                                  drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, phi_0_samples=phi_0_samples,
-                                                 params_type="Centralized", model_type="Quantum", transition_type="RT", likelihood_type="SINGLE"
+                                                 params_type="Centralized", model_type="Quantum", transition_type="RT", likelihood_type="SINGLE", sampling_type="MCMC"
                                                  )
     
     log.debug(f"Mean Rhat {az.rhat(post_predictive_samples[0]['predictive_chain'])['Param:0'].values.mean()}")  
@@ -598,6 +721,26 @@ if __name__ == "__main__":
                 hue="posterior"
                 )
     plt.show()
+
+    log.debug("Constant Drift Rate - Post Predictive Samples 2")
+    drift_rate_samples = post_samples["mu"][-2:,...]
+    diffusion_rate_samples = post_samples["sigma_final"][-2:,...]
+    phi_0_samples = post_samples["phi_0"][-2:,...]
+    
+    post_predictive_samples = sample_post_pred_params(n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
+                                                 X=X, 
+                                                 drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, phi_0_samples=phi_0_samples,
+                                                 params_type="Centralized", model_type="Quantum", transition_type="RT", 
+                                                 likelihood_type="SINGLE", sampling_type="GEN", RT_max=10
+                                                 )
+
+    df_samples = post_predictive_samples[0]["Samples"]
+    sns.kdeplot(df_samples.assign(hue = 
+                                  lambda df: df.mu.astype(str) + df.sigma.astype(str) + df.dataset_number.astype(str)), 
+                x="RT", hue="hue", legend=False)
+    plt.xlim(0,10) # because RT_max is set as 1000
+
+
 
 if False:
 
