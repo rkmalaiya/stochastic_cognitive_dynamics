@@ -202,7 +202,7 @@ def transformed_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, M
 def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
     P_t = likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
     P_t = npx.where(P_t == 0, 0, npx.log(P_t))
-    return P_t.sum()
+    return P_t#.sum()
 
 def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
 
@@ -285,14 +285,14 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
 
 
 def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA, 
-                     drift_rate, diffusion_rate, phi_0, n_datasets = 10,
+                     drift_rate, diffusion_rate, phi_0_s, n_datasets = 10,
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
     
     sim_RT = []
-    for mu, sigma in zip(drift_rate, diffusion_rate):
+    for mu, sigma, phi_0 in zip(drift_rate, diffusion_rate,phi_0_s):
         #for RT in np.arange(delta, RT_max, delta):
-        for t in RT.flatten():
-            likl = predictive_model(t, n_states, start_width, delta, measurement_prob, phi_0, RA, 
+        for t, x in zip(RT.flatten(), RA.flatten()):
+            likl = predictive_model(t, n_states, start_width, delta, measurement_prob, phi_0, x, 
                     npx.asarray([mu]), npx.asarray([sigma]), 
                     model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
 
@@ -343,7 +343,7 @@ def predictive_model(RT_pred, n_states, start_width, delta, measurement_prob, ph
                       transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
     #pyro.deterministic("likl_prnt", likl)
     #pyro.factor("likelihood", likl)
-    return likl
+    return likl.sum()
 
 def sample_posterior_params(DT, X, n_states, start_width, delta, measurement_prob,
                             num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  
@@ -376,7 +376,7 @@ def predictive_mcmc_fn(n_states, start_width, delta, measurement_prob, X,
                                                     X, drift_rate, diffusion_rate,
                                                     transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type,))
         pred_shape = 4, *X.shape
-        predictive_mcmc = MCMC(kernel, num_warmup=300, num_samples=100, num_chains=4)
+        predictive_mcmc = MCMC(kernel, num_warmup=100, num_samples=100, num_chains=4)
         predictive_mcmc.run(_rng_key, init_params=stats.lognorm(s=1).rvs((pred_shape)),
                         extra_fields=('potential_energy',)
                         )
@@ -684,7 +684,7 @@ if __name__ == "__main__":
     X = stats.bernoulli(0.5).rvs(size=(I,J))
     RT = stats.lognorm(1,1).rvs(size=(I,J)) * 100
     post_chain = sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
-                                         num_warmup=300, samples_n=100,
+                                         num_warmup=100, samples_n=100,
                                          params_type="Centralized", model_type="Quantum", transition_type="TIMESTEP", likelihood_type="SINGLE" 
                             )
     post_samples = post_chain.get_samples()
