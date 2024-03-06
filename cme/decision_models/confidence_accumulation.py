@@ -284,28 +284,29 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
         pyro.factor(f"likelihood", likl)
 
 
-def simulate_RT(RT_max, n_states, start_width, delta, measurement_prob, RA, 
+def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA, 
                      drift_rate, diffusion_rate, phi_0, n_datasets = 10,
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
     
     sim_RT = []
     for mu, sigma in zip(drift_rate, diffusion_rate):
-        for RT in np.arange(delta, RT_max, delta):
-            likl = predictive_model(RT, n_states, start_width, delta, measurement_prob, phi_0, RA, 
-                     npx.asarray([mu]), npx.asarray([sigma]), 
-                     model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
+        #for RT in np.arange(delta, RT_max, delta):
+        for t in RT.flatten():
+            likl = predictive_model(t, n_states, start_width, delta, measurement_prob, phi_0, RA, 
+                    npx.asarray([mu]), npx.asarray([sigma]), 
+                    model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
 
-            sim_RT.append(pd.DataFrame({"RT":[RT], "mu":[mu], "sigma":[sigma], "Likelihood":[likl]}).astype(float))
+            sim_RT.append(pd.DataFrame({"RT":t, "mu":mu, "sigma":sigma, "logp":likl.flatten()}).astype(float))
 
     df_sim_RT = pd.concat(sim_RT)
-    df_sim_RT.loc[:,"Likelihood"] = np.exp( - df_sim_RT.loc[:,"Likelihood"])
+    df_sim_RT.loc[:,"logp"] = - df_sim_RT.loc[:,"logp"] #np.exp( - df_sim_RT.loc[:,"Likelihood"])
 
 
     samples_arr = []
     for i in range(n_datasets):
         for key, df in df_sim_RT.groupby(["mu", "sigma"]):
             samples_arr.append(
-               df.sample(n=df.shape[0], weights=df.Likelihood, replace=True).assign(dataset_number=i)
+               df.sample(n=df.shape[0], weights=df.logp, replace=True).assign(dataset_number=i)
                 #pd.DataFrame({"samples":df.sample(n=df.shape[0], weights=df.Likelihood), "dataset_number":i, "key":key})
                 
                 )
@@ -396,8 +397,8 @@ def predictive_mcmc_fn(n_states, start_width, delta, measurement_prob, X,
 
     return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "predictive_chain":az.from_numpyro(predictive_mcmc)} #predictive_samples
 
-def sample_prior_pred_params(n_states, start_width, delta, measurement_prob, X, 
-                        n_samples=10, RT_max = 10,
+def sample_prior_pred_params(n_states, start_width, delta, measurement_prob, X, RT=None,  
+                        n_samples=10, #RT_max = 10,
                         params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
                         transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN"):
     
@@ -419,7 +420,7 @@ def sample_prior_pred_params(n_states, start_width, delta, measurement_prob, X,
                                     for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
                                     )
     elif sampling_type == "GEN":
-            predictive_samples = parallel(delayed(simulate_RT)(RT_max, n_states, start_width, delta, measurement_prob, X, 
+            predictive_samples = parallel(delayed(simulate_RT)(RT, n_states, start_width, delta, measurement_prob, X, 
                                                 drift_rate, diffusion_rate, phi_0,
                                                 model_type = model_type, transition_type = transition_type, 
                                                 likelihood_type = likelihood_type, n_datasets = n_samples)
@@ -429,9 +430,9 @@ def sample_prior_pred_params(n_states, start_width, delta, measurement_prob, X,
         raise Exception(f"Please select one of {sampling_type}")
     return predictive_samples
 
-def sample_post_pred_params(n_states, start_width, delta, measurement_prob, X, 
-                            drift_rate_samples, diffusion_rate_samples, phi_0_samples,
-                            n_samples=10, RT_max = 10, 
+def sample_post_pred_params(n_states, start_width, delta, measurement_prob, X,
+                            drift_rate_samples, diffusion_rate_samples, phi_0_samples, RT=None,
+                            n_samples=10, 
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
                             transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN"):
     predictive_samples = []
@@ -443,7 +444,7 @@ def sample_post_pred_params(n_states, start_width, delta, measurement_prob, X,
                                     for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
                                     )
     elif sampling_type == "GEN":
-            predictive_samples = parallel(delayed(simulate_RT)(RT_max, n_states, start_width, 0.1, measurement_prob, X, 
+            predictive_samples = parallel(delayed(simulate_RT)(RT, n_states, start_width, 0.1, measurement_prob, X, 
                                                 drift_rate, diffusion_rate, phi_0,
                                                 model_type = model_type, transition_type = transition_type, 
                                                 likelihood_type = likelihood_type, n_datasets = n_samples)
@@ -620,11 +621,12 @@ if __name__ == "__main__":
     log.debug("Constant Drift Rate - Prior 1")
 
     X = stats.bernoulli(0.5).rvs(size=(I,J))
+    RT = stats.lognorm(1,1).rvs(size=(I,J)) * 100
 
     predictive_samples = sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=delta,
-                                                  measurement_prob=measurement_prob, X=X, n_samples=2,
+                                                  measurement_prob=measurement_prob, X=X, RT=RT, n_samples=2,
                                                   params_type="Centralized", model_type="Quantum", transition_type="RT", 
-                                                  likelihood_type="SINGLE", sampling_type="GEN", RT_max=10
+                                                  likelihood_type="SINGLE", sampling_type="GEN", 
                                                  )
     # The predictive_samples contains posterior RT samples for each posterior parameter indexed by [0] below.
     #predictive_samples[0]["predictive_chain"]   
@@ -639,9 +641,10 @@ if __name__ == "__main__":
     log.debug("Constant Drift Rate - Prior 2")
 
     X = stats.bernoulli(0.5).rvs(size=(I,J))
+    RT = stats.lognorm(1,1).rvs(size=(I,J)) * 100
 
     predictive_samples = sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=0.01,
-                                                  measurement_prob=measurement_prob, X=X, n_samples=2,
+                                                  measurement_prob=measurement_prob, X=X, RT=RT, n_samples=2,
                                                   params_type="Centralized", model_type="Quantum", transition_type="RT", 
                                                   likelihood_type="SINGLE", sampling_type="MCMC"
                                                  )
@@ -730,8 +733,9 @@ if __name__ == "__main__":
     post_predictive_samples = sample_post_pred_params(n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
                                                  X=X, 
                                                  drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, phi_0_samples=phi_0_samples,
+                                                 RT=RT,
                                                  params_type="Centralized", model_type="Quantum", transition_type="RT", 
-                                                 likelihood_type="SINGLE", sampling_type="GEN", RT_max=10
+                                                 likelihood_type="SINGLE", sampling_type="GEN"
                                                  )
 
     df_samples = post_predictive_samples[0]["Samples"]
