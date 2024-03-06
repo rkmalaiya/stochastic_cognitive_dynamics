@@ -1,4 +1,5 @@
 from csv import excel_tab
+from tracemalloc import get_traceback_limit
 import jax.numpy as npx
 import jax.scipy as sci
 import numpyro as pyro
@@ -289,16 +290,23 @@ def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA,
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
     
     sim_RT = []
-    for mu, sigma, phi_0 in zip(drift_rate, diffusion_rate,phi_0_s):
-        #for RT in np.arange(delta, RT_max, delta):
-        for t, x in zip(RT.flatten(), RA.flatten()):
-            likl = predictive_model(t, n_states, start_width, delta, measurement_prob, phi_0, x, 
+
+    def get_RT():
+        likl = simulate_model(RT, n_states, start_width, delta, measurement_prob, phi_0, RA, 
                     npx.asarray([mu]), npx.asarray([sigma]), 
                     model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
 
-            sim_RT.append(pd.DataFrame({"RT":t, "mu":mu, "sigma":sigma, "logp":likl.flatten()}).astype(float))
+        return pd.DataFrame({"RT":RT.flatten(), "mu":mu[0], "sigma":sigma[0], "logp":likl.flatten()})
 
-    df_sim_RT = pd.concat(sim_RT)
+    for mu, sigma, phi_0 in zip(drift_rate, diffusion_rate,phi_0_s):
+        #for RT in np.arange(delta, RT_max, delta):
+        #for t, x in zip(RT.flatten(), RA.flatten()):
+        #sim_RT.append(delayed(get_RT))
+        sim_RT.append(get_RT())
+    
+    res_RT = sim_RT #Parallel(n_jobs=50)(fn() for fn in sim_RT)
+
+    df_sim_RT = pd.concat(res_RT).astype(float)
     df_sim_RT.loc[:,"logp"] = - df_sim_RT.loc[:,"logp"] #np.exp( - df_sim_RT.loc[:,"Likelihood"])
 
 
@@ -317,7 +325,29 @@ def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA,
 
     return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "Likelihood":df_sim_RT, "Samples":df_samples}
 
+def simulate_model(RT_pred, n_states, start_width, delta, measurement_prob, phi_0, RA, 
+                     drift_rate, diffusion_rate, 
+                     model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
+    Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, start_width=start_width, prob=measurement_prob, model_type = model_type)
+    
+    if model_type == "Markov":
+        intensity_matrix = dd._buildK(n_states, drift_rate, diffusion_rate)
 
+    elif model_type == "Quantum":
+        intensity_matrix = -1j * qd._buildH(n_states, drift_rate, diffusion_rate)
+    else:
+        raise Exception(f"Please select one of {model_type}")
+    
+    #I, J = RA.shape
+    
+    #with pyro.plate('I', I, dim=-2):
+    #    with pyro.plate('J', J, dim=-1):
+    #        RT_pred = pyro.sample("RT_pred", dist.LogNormal(0, 1.5))
+    
+    likl = transformed_likelihood(intensity_matrix, phi_0, delta, RT_pred, RA, Mc, Mw, Mn, 
+                      transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
+    
+    return likl
 
 def predictive_model(RT_pred, n_states, start_width, delta, measurement_prob, phi_0, RA, 
                      drift_rate, diffusion_rate, 
