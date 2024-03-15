@@ -116,7 +116,12 @@ def _get_initial_state(n_states, start_width, I=1, prob=1):
     p_0 = p_0.at[...,(Mid-start_width-1):(Mid+start_width),:].set(prob) # additional -1 because indexing starts from 0
     #p_0 = p_0.reshape(-1,1)[None,...] # to get column vector
     s_0 = p_0 / npx.sum(p_0, axis=(-2), keepdims=True)
-    return s_0
+
+    with npy.plate('I', I, dim=-3):
+        #with npy.plate('S', n_states, dim=-2):
+        phi_0 = npy.sample("phi_0", dist.Dirichlet(npx.ones(n_states)[:,None])) # Initial State
+
+    return phi_0 #s_0
     
 def sample_states_and_confidence(rt, phi_0, K, Mn, N):
     n_states = K.shape[-1] # picking the last dimension because the dimensions are I,J,K,K

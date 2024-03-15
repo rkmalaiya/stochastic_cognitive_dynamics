@@ -106,11 +106,18 @@ def _get_measurement_matrix(n_states, start_width, prob = 0.5):
 
 def _get_initial_state(n_states, start_width, I = 1, prob=1):
 
-    Mid = int((n_states+1)/2)
-    p_0 = npx.zeros((I,1,n_states,1)) 
-    p_0 = p_0.at[:,0,(Mid-start_width-1):(Mid+start_width),0].set(prob) # additional -1 because indexing starts from 0
+    #Mid = int((n_states+1)/2)
+    #p_0 = npx.zeros((I,1,n_states,1)) 
+    #p_0 = p_0.at[:,0,(Mid-start_width-1):(Mid+start_width),0].set(prob) # additional -1 because indexing starts from 0
     #p_0 = p_0.reshape(-1,1) # to get column vector
-    p_0 = p_0 / npx.sqrt(p_0.transpose(0,1,3,2) @ p_0)
+
+    with npy.plate('I', I, dim=-3):
+    #with npy.plate('S', n_states, dim=-2):
+        p_0 = npy.sample("phi_init", dist.Dirichlet(npx.ones(n_states))) # Initial State
+
+             
+    p_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)**(1/2))
+    #p_0 = p_0 / npx.sqrt(p_0.transpose(0,1,3,2) @ p_0)
     return p_0
 
 
