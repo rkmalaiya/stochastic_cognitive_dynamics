@@ -134,14 +134,20 @@ def _get_measurement_matrix(n_states, start_width, prob=0.5, model_type = "Marko
         raise Exception(f"Please select one of {model_type}")
     return Mc, Mw, Mn
 
-def _get_initial_state(n_states, start_width, I = 1, prob=1, model_type = "Markov|Quantum"):
-    if model_type == "Markov":
-        phi_0 = dd._get_initial_state(n_states, start_width, I, prob)   
-    elif model_type == "Quantum":
-        phi_0 = qd._get_initial_state(n_states, start_width, I, prob)
+def _get_initial_state(n_states, start_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Static|Model"):
+    if prior_type == "Model":
+        if model_type == "Markov":
+            phi_0 = dd._get_initial_state(n_states, start_width, I, prob)   
+        elif model_type == "Quantum":
+            phi_0 = qd._get_initial_state(n_states, start_width, I, prob)
+        else:
+            raise Exception(f"Please select one of {model_type}")
     else:
-        raise Exception(f"Please select one of {model_type}")
-    
+        if model_type == "Markov":
+            phi_0 = npx.tile(stats.dirichlet(npx.ones(n_states)).rvs().T[None, None,...], (I,1,1,1))
+        elif model_type == "Quantum":
+            phi_0 = npx.tile(stats.dirichlet(npx.ones(n_states)).rvs().T[None, None,...], (I,1,1,1))**(1/2)
+
     return phi_0   
 
 def perform_state_transition(intensity_matrix, RT_s, RA_s, Mc, Mw, Mn, phi_0, delta, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
@@ -166,7 +172,8 @@ def perform_state_transition(intensity_matrix, RT_s, RA_s, Mc, Mw, Mn, phi_0, de
     phi_t = T_t @ phi_0
     return phi_t
 
-def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mn, t, x=None, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type = "Markov|Quantum"):
+def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=None, Mn=None, t=None, x=None, 
+                        transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type = "Markov|Quantum", return_type="Probability|MeanConfidence"):
     
     """
     n_states: int
@@ -175,8 +182,19 @@ def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mn, t, x=None,
     phi_0: float[Mx1]
     delta: int
     """
-    phi_t = perform_state_transition(intensity_matrix, RT_s = t, RA_s = x, Mc=None, Mw=None, Mn=Mn, phi_0=phi_0, delta=delta,transition_type=transition_type, likelihood_type=likelihood_type)
+    phi_t = perform_state_transition(intensity_matrix, RT_s = t, RA_s = x, Mc=Mc, Mw=Mw, Mn=Mn, phi_0=phi_0, delta=delta,
+                                     transition_type=transition_type, likelihood_type=likelihood_type)
     #T_t = _get_transition_matrix(intensity_matrix, RT=t, delta=delta, Mn=Mn, transition_type=transition_type)
+
+    if(return_type == "Probability"):
+        phi_t_c = Mc @ phi_t
+        phi_t_w = Mw @ phi_t
+
+        if(likelihood_type == "SINGLE"):
+            phi_t = phi_t_c if x==1 else phi_t_w
+        elif(likelihood_type == "JOINT"):
+            phi_t = phi_t_c if x[1]==1 else phi_t_w
+
 
     if model_type == "Markov":
         P_t = phi_t
@@ -185,9 +203,15 @@ def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mn, t, x=None,
 
     Mid = (n_states+1)//2
     mv = npx.arange(-(Mid-1), (Mid))
-    mean_confidence = mv @ P_t
 
-    return mean_confidence
+    if return_type == "Probability":
+        ret_val = P_t.sum()
+    else: #if return_type == "MeanConfidence":
+        ret_val = mv @ P_t
+    #else:
+    #    raise Exception(f"Please provide one of {return_type}")
+
+    return ret_val
 
 def transformed_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
     #if likelihood_type == "SINGLE":
@@ -276,7 +300,8 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
     else:
         raise Exception(f"Please select one of {model_type}")
 
-    phi_0 = pyro.deterministic("phi_0", _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type))
+    #phi_0 = pyro.deterministic("phi_0", _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type))
+    phi_0 = _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type, prior_type="Model")
     Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, start_width=start_width, prob=measurement_prob, model_type = model_type)
 
     if RT_s is not None:
@@ -286,19 +311,22 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
 
 
 def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA, 
-                     drift_rate, diffusion_rate, phi_0_s, n_datasets = 10,
+                     drift_rate, diffusion_rate, phi_0, n_samples = 1,
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
+    """
+    This function calculates likelihood for one dataset of size I,J
+    """
     
     sim_RT = []
 
     def get_RT():
-        likl = simulate_model(RT, n_states, start_width, delta, measurement_prob, phi_0, RA, 
+        likl = simulate_likelihood(RT, n_states, start_width, delta, measurement_prob, phi_0, RA, 
                     npx.asarray([mu]), npx.asarray([sigma]), 
                     model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
 
         return pd.DataFrame({"RT":RT.flatten(), "mu":mu[0], "sigma":sigma[0], "logp":likl.flatten()})
 
-    for mu, sigma, phi_0 in zip(drift_rate, diffusion_rate,phi_0_s):
+    for mu, sigma, phi_0 in zip(drift_rate, diffusion_rate, phi_0):
         #for RT in np.arange(delta, RT_max, delta):
         #for t, x in zip(RT.flatten(), RA.flatten()):
         #sim_RT.append(delayed(get_RT))
@@ -307,15 +335,15 @@ def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA,
     res_RT = sim_RT #Parallel(n_jobs=50)(fn() for fn in sim_RT)
 
     df_sim_RT = pd.concat(res_RT).astype(float)
-    df_sim_RT.loc[:,"logp"] = - df_sim_RT.loc[:,"logp"] #np.exp( - df_sim_RT.loc[:,"Likelihood"])
+    #df_sim_RT.loc[:,"logp"] = df_sim_RT.loc[:,"logp"]**2 #np.exp( - df_sim_RT.loc[:,"Likelihood"])
 
 
     samples_arr = []
-    for i in range(n_datasets):
-        for key, df in df_sim_RT.groupby(["mu", "sigma"]):
+    for key, df in df_sim_RT.groupby(["mu", "sigma"]):
+        for i in range(n_samples):
             samples_arr.append(
-               df.sample(n=df.shape[0], weights=df.logp, replace=True).assign(dataset_number=i)
-                #pd.DataFrame({"samples":df.sample(n=df.shape[0], weights=df.Likelihood), "dataset_number":i, "key":key})
+               df.sample(frac=1, weights=npx.absolute(df.logp.values), replace=True).assign(weighted_sample=i)
+                #pd.DataFrame({"samples":df.sample(n=df.shape[0], weights=df.Likelihood), "weighted_sample":i, "key":key})
                 
                 )
 
@@ -323,9 +351,9 @@ def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA,
 #                      "sample_number":i}))
     df_samples = pd.concat(samples_arr)
 
-    return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "Likelihood":df_sim_RT, "Samples":df_samples}
+    return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "initial_state":phi_0_s, "Likelihood":df_sim_RT, "Samples":df_samples}
 
-def simulate_model(RT_pred, n_states, start_width, delta, measurement_prob, phi_0, RA, 
+def simulate_likelihood(RT_pred, n_states, start_width, delta, measurement_prob, phi_0, RA, 
                      drift_rate, diffusion_rate, 
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
     Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, start_width=start_width, prob=measurement_prob, model_type = model_type)
@@ -453,7 +481,7 @@ def sample_prior_pred_params(n_states, start_width, delta, measurement_prob, X, 
             predictive_samples = parallel(delayed(simulate_RT)(RT, n_states, start_width, delta, measurement_prob, X, 
                                                 drift_rate, diffusion_rate, phi_0,
                                                 model_type = model_type, transition_type = transition_type, 
-                                                likelihood_type = likelihood_type, n_datasets = n_samples)
+                                                likelihood_type = likelihood_type, n_samples = n_samples)
                                     for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
                                     )
     else:
@@ -462,7 +490,7 @@ def sample_prior_pred_params(n_states, start_width, delta, measurement_prob, X, 
 
 def sample_post_pred_params(n_states, start_width, delta, measurement_prob, X,
                             drift_rate_samples, diffusion_rate_samples, phi_0_samples, RT=None,
-                            n_samples=10, 
+                            n_samples=1, 
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
                             transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN"):
     predictive_samples = []
@@ -477,7 +505,7 @@ def sample_post_pred_params(n_states, start_width, delta, measurement_prob, X,
             predictive_samples = parallel(delayed(simulate_RT)(RT, n_states, start_width, 0.1, measurement_prob, X, 
                                                 drift_rate, diffusion_rate, phi_0,
                                                 model_type = model_type, transition_type = transition_type, 
-                                                likelihood_type = likelihood_type, n_datasets = n_samples)
+                                                likelihood_type = likelihood_type, n_samples = n_samples)
                                     for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
                                     )
     else:
@@ -663,7 +691,7 @@ if __name__ == "__main__":
     #log.debug(az.summary(predictive_samples[0]["predictive_chain"]))
     df_samples = predictive_samples[0]["Samples"]
     sns.kdeplot(df_samples.assign(hue = 
-                                  lambda df: df.mu.astype(str) + df.sigma.astype(str) + df.dataset_number.astype(str)), 
+                                  lambda df: df.mu.astype(str) + df.sigma.astype(str) + df.weighted_sample.astype(str)), 
                 x="RT", hue="hue", legend=False)
     plt.xlim(0,10) # because RT_max is set as 1000
 
@@ -770,9 +798,9 @@ if __name__ == "__main__":
 
     df_samples = post_predictive_samples[0]["Samples"]
     sns.kdeplot(df_samples.assign(hue = 
-                                  lambda df: df.mu.astype(str) + df.sigma.astype(str) + df.dataset_number.astype(str)), 
+                                  lambda df: df.mu.astype(str) + df.sigma.astype(str) + df.weighted_sample.astype(str)), 
                 x="RT", hue="hue", legend=False)
-    plt.xlim(0,10) # because RT_max is set as 1000
+    #plt.xlim(0,10) # because RT_max is set as 1000
 
 
 
