@@ -1,5 +1,3 @@
-from csv import excel_tab
-from tracemalloc import get_traceback_limit
 import jax.numpy as npx
 import jax.scipy as sci
 import numpyro as pyro
@@ -307,7 +305,7 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
     if RT_s is not None:
         likl = estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, 
                           transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-        pyro.factor(f"likelihood", likl)
+        pyro.factor(f"likelihood", likl) #.sum()
 
 
 def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA, 
@@ -316,7 +314,7 @@ def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA,
     """
     This function calculates likelihood for one dataset of size I,J
     """
-    
+
     sim_RT = []
 
     def get_RT():
@@ -326,32 +324,52 @@ def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA,
 
         return pd.DataFrame({"RT":RT.flatten(), "mu":mu[0], "sigma":sigma[0], "logp":likl.flatten()})
 
-    for mu, sigma, phi_0 in zip(drift_rate, diffusion_rate, phi_0):
+    #for mu, sigma, phi_0 in zip(drift_rate, diffusion_rate, phi_0):
         #for RT in np.arange(delta, RT_max, delta):
         #for t, x in zip(RT.flatten(), RA.flatten()):
         #sim_RT.append(delayed(get_RT))
-        sim_RT.append(get_RT())
+    #    sim_RT.append(get_RT())
     
+    likl = simulate_likelihood(RT, n_states, start_width, delta, measurement_prob, phi_0, RA, 
+                    drift_rate, diffusion_rate, 
+                    model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
+
     res_RT = sim_RT #Parallel(n_jobs=50)(fn() for fn in sim_RT)
 
-    df_sim_RT = pd.concat(res_RT).astype(float)
+    df_sim_RT = (pd.DataFrame(RT)
+     .reset_index(names="part_id")
+     .melt(id_vars="part_id", var_name="items", value_name="RT")
+     .set_index(["part_id","items"])
+     .join(pd.DataFrame(likl)
+           .reset_index(names="part_id")
+           .melt(id_vars="part_id", var_name="items", value_name="logp")
+           .set_index(["part_id","items"]))
+     )
+
+    samples_arr = []
+    #logp = np.absolute(df_sim_RT.logp)
+    df_sim_RT = df_sim_RT.assign(logp = lambda df:np.absolute(df.logp))
+    for i in range(n_samples):
+        samples_arr.append(df_sim_RT.sample(frac=1, weights="logp", replace=True).assign(weighted_sample=i))
+
+    #df_sim_RT = pd.concat(res_RT).astype(float)
     #df_sim_RT.loc[:,"logp"] = df_sim_RT.loc[:,"logp"]**2 #np.exp( - df_sim_RT.loc[:,"Likelihood"])
 
 
-    samples_arr = []
-    for key, df in df_sim_RT.groupby(["mu", "sigma"]):
-        for i in range(n_samples):
-            samples_arr.append(
-               df.sample(frac=1, weights=npx.absolute(df.logp.values), replace=True).assign(weighted_sample=i)
+    #samples_arr = []
+    #for key, df in df_sim_RT.groupby(["mu", "sigma"]):
+    #    for i in range(n_samples):
+    #        samples_arr.append(
+    #           df.sample(frac=1, weights=npx.absolute(df.logp.values), replace=True).assign(weighted_sample=i)
                 #pd.DataFrame({"samples":df.sample(n=df.shape[0], weights=df.Likelihood), "weighted_sample":i, "key":key})
                 
-                )
+    #            )
 
         #samples_arr.append(pd.DataFrame({"samples":df_sim_RT.RT.sample(n=df_sim_RT.shape[0], weights = df_sim_RT.Likelihood),
 #                      "sample_number":i}))
     df_samples = pd.concat(samples_arr)
 
-    return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "initial_state":phi_0_s, "Likelihood":df_sim_RT, "Samples":df_samples}
+    return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "initial_state":phi_0, "Likelihood":df_sim_RT, "Samples":df_samples}
 
 def simulate_likelihood(RT_pred, n_states, start_width, delta, measurement_prob, phi_0, RA, 
                      drift_rate, diffusion_rate, 
@@ -494,7 +512,7 @@ def sample_post_pred_params(n_states, start_width, delta, measurement_prob, X,
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
                             transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN"):
     predictive_samples = []
-    parallel = Parallel(n_jobs=drift_rate_samples.shape[0])
+    parallel = Parallel(n_jobs=drift_rate_samples.shape[0] if drift_rate_samples.shape[0] < 60 else 60)
     if sampling_type == "MCMC":
         predictive_samples = parallel(delayed(predictive_mcmc_fn)(n_states, start_width, delta, measurement_prob, X, 
                                                 drift_rate, diffusion_rate, phi_0,
@@ -513,6 +531,8 @@ def sample_post_pred_params(n_states, start_width, delta, measurement_prob, X,
     
     return predictive_samples
 
+def get_arviz_model(mcmc_chain):
+    return az.from_numpyro(mcmc_chain)
 
 if __name__ == "__main__":
 
