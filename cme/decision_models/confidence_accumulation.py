@@ -330,6 +330,8 @@ def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA,
         #sim_RT.append(delayed(get_RT))
     #    sim_RT.append(get_RT())
     
+    #RT = np.random.default_rng().uniform(RT.min(), RT.max(), size=RT.shape)
+
     likl = simulate_likelihood(RT, n_states, start_width, delta, measurement_prob, phi_0, RA, 
                     drift_rate, diffusion_rate, 
                     model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
@@ -350,7 +352,7 @@ def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA,
     #logp = np.absolute(df_sim_RT.logp)
     df_sim_RT = df_sim_RT.assign(logp = lambda df:np.absolute(df.logp))
     for i in range(n_samples):
-        samples_arr.append(df_sim_RT.sample(frac=1, weights="logp", replace=True).assign(weighted_sample=i))
+        samples_arr.append(df_sim_RT.sample(frac=1, weights="logp", replace=True, random_state= np.random.default_rng()).assign(weighted_sample=i))
 
     #df_sim_RT = pd.concat(res_RT).astype(float)
     #df_sim_RT.loc[:,"logp"] = df_sim_RT.loc[:,"logp"]**2 #np.exp( - df_sim_RT.loc[:,"Likelihood"])
@@ -366,7 +368,7 @@ def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA,
     #            )
 
         #samples_arr.append(pd.DataFrame({"samples":df_sim_RT.RT.sample(n=df_sim_RT.shape[0], weights = df_sim_RT.Likelihood),
-#                      "sample_number":i}))
+   #                   "sample_number":i}))
     df_samples = pd.concat(samples_arr)
 
     return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "initial_state":phi_0, "Likelihood":df_sim_RT, "Samples":df_samples}
