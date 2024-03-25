@@ -294,7 +294,7 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
 
     elif model_type == "Quantum":
         sigma = pyro.deterministic("sigma_final",sigma**2) # Sigma cannot be negative
-        intensity_matrix = -1j * qd._buildH(n_states, mu, sigma)
+        intensity_matrix = qd._buildH(n_states, mu, sigma)
     else:
         raise Exception(f"Please select one of {model_type}")
 
@@ -351,8 +351,8 @@ def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA,
     samples_arr = []
     #logp = np.absolute(df_sim_RT.logp)
     df_sim_RT = df_sim_RT.assign(logp = lambda df:np.absolute(df.logp))
-    for i in range(n_samples):
-        samples_arr.append(df_sim_RT.sample(frac=1, weights="logp", replace=True, random_state= np.random.default_rng()).assign(weighted_sample=i))
+    for i in range(n_samples): # weights="logp", 
+        samples_arr.append(df_sim_RT.groupby("part_id").sample(frac=1,replace=True, weights="logp", random_state= np.random.default_rng()).assign(weighted_sample=i))
 
     #df_sim_RT = pd.concat(res_RT).astype(float)
     #df_sim_RT.loc[:,"logp"] = df_sim_RT.loc[:,"logp"]**2 #np.exp( - df_sim_RT.loc[:,"Likelihood"])
@@ -382,7 +382,7 @@ def simulate_likelihood(RT_pred, n_states, start_width, delta, measurement_prob,
         intensity_matrix = dd._buildK(n_states, drift_rate, diffusion_rate)
 
     elif model_type == "Quantum":
-        intensity_matrix = -1j * qd._buildH(n_states, drift_rate, diffusion_rate)
+        intensity_matrix = qd._buildH(n_states, drift_rate, diffusion_rate)
     else:
         raise Exception(f"Please select one of {model_type}")
     
@@ -407,7 +407,7 @@ def predictive_model(RT_pred, n_states, start_width, delta, measurement_prob, ph
         intensity_matrix = dd._buildK(n_states, drift_rate, diffusion_rate)
 
     elif model_type == "Quantum":
-        intensity_matrix = -1j * qd._buildH(n_states, drift_rate, diffusion_rate)
+        intensity_matrix = qd._buildH(n_states, drift_rate, diffusion_rate)
     else:
         raise Exception(f"Please select one of {model_type}")
     
@@ -545,7 +545,7 @@ if __name__ == "__main__":
     log.debug("Constant Drift Rate - Mean Confidence 1")
 
     intensity_matrix_markov = dd._buildK(n_states, mu, sigma)
-    intensity_matrix_quantum = -1j * qd._buildH(n_states, mu, sigma)
+    intensity_matrix_quantum = qd._buildH(n_states, mu, sigma)
 
     phi_0_markov = _get_initial_state(n_states, start_width,model_type="Markov")
     phi_0_quantum = _get_initial_state(n_states, start_width,model_type="Quantum")
@@ -648,7 +648,7 @@ if __name__ == "__main__":
         likl_markov_arr = []
         likl_quantum_arr = []
         intensity_matrix_markov = dd._buildK(n_states, mu, sigma)
-        intensity_matrix_quantum = -1j * qd._buildH(n_states, mu, sigma)
+        intensity_matrix_quantum = qd._buildH(n_states, mu, sigma)
 
         for t in range(1,100):
             likl_markov = likelihood(intensity_matrix=intensity_matrix_markov, phi_0=phi_0_markov, delta=delta,
@@ -675,7 +675,7 @@ if __name__ == "__main__":
         likl_markov_arr = []
         likl_quantum_arr = []
         intensity_matrix_markov = dd._buildK(n_states, mu, sigma)
-        intensity_matrix_quantum = -1j * qd._buildH(n_states, mu, sigma)
+        intensity_matrix_quantum = qd._buildH(n_states, mu, sigma)
 
         for t in range(-10,100):
             likl_markov = likelihood(intensity_matrix=intensity_matrix_markov, phi_0=phi_0_markov, delta=delta,

@@ -76,7 +76,7 @@ def _buildH(n_states, mu, sigma, n_trials = None):
 
     i, params = lax.scan(_create, 0, params)#, unroll=True)
 
-    return params["H"]
+    return -1j * params["H"]
 
 
 def _get_measurement_matrix(n_states, start_width, prob = 0.5):
