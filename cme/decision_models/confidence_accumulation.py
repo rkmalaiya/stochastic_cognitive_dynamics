@@ -1,3 +1,4 @@
+from turtle import width
 import jax.numpy as npx
 import jax.scipy as sci
 import numpyro as pyro
@@ -132,7 +133,7 @@ def _get_measurement_matrix(n_states, start_width, prob=0.5, model_type = "Marko
         raise Exception(f"Please select one of {model_type}")
     return Mc, Mw, Mn
 
-def _get_initial_state(n_states, start_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Static|Model"):
+def _get_initial_state(n_states, start_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Upper|Lower|Mid|Uniform|Model"):
     if prior_type == "Model":
         if model_type == "Markov":
             phi_0 = dd._get_initial_state(n_states, start_width, I, prob)   
@@ -141,10 +142,32 @@ def _get_initial_state(n_states, start_width, I = 1, prob=1, model_type = "Marko
         else:
             raise Exception(f"Please select one of {model_type}")
     else:
+        width = start_width #choose odd number
+        if prior_type == "Upper":
+            pad_width = (n_states-width,0)
+
+        elif prior_type == "Lower":
+            pad_width = (0,n_states-width)
+
+        elif prior_type == "Mid":
+            w_t = int((n_states-width+1)/2)
+            pad_width = (w_t, w_t) # will pad equally on left and right of array
+            
+        elif prior_type == "Uniform":
+            pad_width = (0,0)
+            width = n_states
+            
+            
+        #conc = npx.ones(width)
+        #p_0 = npx.pad(stats.dirichlet(conc).rvs(), ((0,0),pad_width)) # rvs are of shape (1,n_states)
+        conc = npx.ones((1,width))
+        p_0 = npx.pad(conc, ((0,0),pad_width)) 
+        p_0 = p_0 / npx.sum(p_0) # rvs are of shape (1,n_states)
+
         if model_type == "Markov":
-            phi_0 = npx.tile(stats.dirichlet(npx.ones(n_states)).rvs().T[None, None,...], (I,1,1,1))
+            phi_0 = npx.tile(p_0.T[None, None,...], (I,1,1,1))
         elif model_type == "Quantum":
-            phi_0 = npx.tile(stats.dirichlet(npx.ones(n_states)).rvs().T[None, None,...], (I,1,1,1))**(1/2)
+            phi_0 = npx.tile(p_0.T[None, None,...], (I,1,1,1))**(1/2)
 
     return phi_0   
 
