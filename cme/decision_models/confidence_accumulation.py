@@ -1,4 +1,4 @@
-from turtle import width
+#from turtle import width
 import jax.numpy as npx
 import jax.scipy as sci
 import numpyro as pyro
@@ -34,12 +34,12 @@ def centralized_parameters(I):
     
     """
     mu_m =  pyro.sample(f"mu_m", dist.Normal(0,1))
-    mu_s =  pyro.sample(f"mu_s", dist.HalfNormal(2))
+    #mu_s =  pyro.sample(f"mu_s", dist.HalfNormal(2))
     with pyro.plate('I', I, dim=-2):
 
         mu = pyro.sample("mu", dist.Normal(mu_m,mu_s)) # Drift Rate
-        sigma = pyro.sample("sigma", dist.Normal(1,2)) # Diffusion Rate
-        
+        #sigma = pyro.sample("sigma", dist.Normal(1,2)) # Diffusion Rate
+    sigma = pyro.deterministic("sigma", npx.ones((I,1)))    
     return mu, sigma
 
 def non_centralized_parameters(I):
@@ -52,11 +52,12 @@ def non_centralized_parameters(I):
 
     with pyro.plate('I', I, dim=-2):
         mu_r = pyro.sample("mu_r", dist.Normal(2,1)) # Drift Rate
-        sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
+        #sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
 
         mu = pyro.deterministic("mu", m + s * mu_r)
-        sigma = pyro.deterministic("sigma", m + s * sigma_r) 
-
+        #sigma = pyro.deterministic("sigma", m + s * sigma_r) 
+    sigma = pyro.deterministic("sigma", npx.ones((I,1)))
+    
     return mu, sigma
 
 def _timestep_transition_matrix(n, T_delta, Mn):

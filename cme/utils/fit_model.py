@@ -48,7 +48,8 @@ def fit_model(model: ModelDetails):
     
     #file_post = 
     #version = 0.5
-
+    #len(model.file_posts)
+    print(f"Received request for {len(model.file_posts)} files to be executed in parallel for {model.model_type}_{model.version}!!")
     Parallel(n_jobs=len(model.file_posts))(delayed(_run_model)(
                                     
                                     f"{file_loc}{name}_rt.csv", f"{file_loc}{name}_ra.csv", name, model.version, 
@@ -57,7 +58,7 @@ def fit_model(model: ModelDetails):
                                     model.num_warmup, model.samples_n) 
                                                 
                                     for name in model.file_posts)
-    print("All jobs successfully completed!!!!")
+    print(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
 
 
 def _run_model(RT_file, X_file, name, version, 
@@ -112,9 +113,9 @@ def _run_model(RT_file, X_file, name, version,
                                                 likelihood_type=likelihood_type, sampling_type=sampling_type
                                                 )
 
-    with open(f'export/mcmc_samples_{name}_{version}.pkl', 'wb') as outp:
+    with open(f'export/mcmc_samples_{name}_{model_type}_{version}.pkl', 'wb') as outp:
         pickle.dump([post_samples, mean_conf, phi_t, prior_pd_samples, post_pd_samples], outp, pickle.HIGHEST_PROTOCOL)
 
-    df_summary.to_csv(f"export/estimate_summary_{name}_{version}.csv")
-    df_phi.to_csv(f"export/initial_states_{name}_{version}.csv")
-    print(f"Job successfully completed for {name}, {version}")
+    df_summary.to_csv(f"export/estimate_summary_{name}_{model_type}_{version}.csv")
+    df_phi.to_csv(f"export/initial_states_{name}_{model_type}_{version}.csv")
+    print(f"Job successfully completed for {name}_{model_type}, {version}")
