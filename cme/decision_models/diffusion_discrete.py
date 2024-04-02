@@ -15,6 +15,7 @@ from numpyro.infer.util import log_density
 from cme.utils import common_logging as cl
 from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive
 import scipy.stats as stats
+from jax import lax
 
 npy.set_platform("cpu")
 npy.set_host_device_count(64)
@@ -43,28 +44,29 @@ def _buildK(n_states, mu, sigma=1, delta=0.001):
     n_part, n_mu = mu.shape #if len(npx.asarray(mu).shape) > 0 else 1
     K = npx.zeros((n_part, 1, n_states,n_states)) # participants, trials, transition states
 
-    #if n_mu == 1:
-    #    mu=npx.repeat(mu,n_states,axis=1) # keeping mu constant over states
+    if n_mu == 1:
+        mu=npx.repeat(mu,n_states,axis=1) # keeping mu constant over states
 
     b1 = 0.5 * (sigma - mu) #IxJ
     b2 = 0.5 * (sigma + mu) #IxJ
     a = -(b1+b2) #IxJ
 
     #for i in range(n_part):
-    #def _create(j, params):
-    for j in range(1,n_states-1):
+    def _create(static_params, params):
+    #for j in range(1,n_states-1):
         #b1 = 0.5 * (((sigma**2)/delta**2) - mu[i,:]/delta) # 9.765
         #b2 = 0.5 * (((sigma**2)/delta**2) + mu[i,:]/delta) # 10.325 
         #b1 = 0.5 * (sigma[i,:] - mu[i,:])
         #b2 = 0.5 * (sigma[i,:] + mu[i,:])
                 
-        #b1 = params["b1"]
-        #b2 = params["b2"]
-        #a = params["a"]
-    
+        b1 = params["b1"] #scaler
+        b2 = params["b2"] #scaler
+        a = params["a"] #scaler
+        K = static_params["K"] #n_states x n_states
+        j = static_params["j"]
         #for j in range(1,n_states-1):
             #try:
-        K = K.at[:,0,[j-1,j,j+1],j].set(npx.asarray([b1[:,j], a[:,j], b2[:,j]]).T)
+        K = K.at[0,[j-1,j,j+1],j].set([b1, a, b2])
             #except Exception as e:
             #    print(e)
             #    print("mu", mu.shape)
@@ -74,6 +76,23 @@ def _buildK(n_states, mu, sigma=1, delta=0.001):
             #    print(b2.shape)
             #    print(a.shape)
             #K = K.at[i,0,[j-1,j,j+1],j].set([b1, a, b2])
+            #params["K"] = K
+        
+        static_params = {"j":j+1, "K":K}
+        return (static_params,params)
+    
+    def _create_i(i, params):
+        params_j = {"b1":params["b1"], "b2":params["b2"], "a":params["a"]}
+        static_params = {"j":0, "K":params["K"]}
+        
+        static_params, params_j = lax.scan(_create, static_params, params_j)#, unroll=True)
+        params_j["K"] = static_params["K"]
+        return (i, params_j)    
+
+    
+    params = {"b1":b1, "b2":b2, "a":a, "K":K}
+    i, params = lax.scan(_create_i, 0, params)#, unroll=True)
+    K = params["K"]
 
     K = K.at[:,0,[0,1],0].set(npx.asarray([a[:,0], -a[:,0]]).T)
     K = K.at[:,0,[-2,-1],-1].set(npx.asarray([-a[:,-1], a[:,-1]]).T)
@@ -567,13 +586,13 @@ if __name__ == "__main__":
     
     log.debug(_buildK(7, mu=[[1.5]], sigma=sigma))
     
-    log.debug(_buildK(7, mu=[[0.5,1.5]], sigma=sigma)) # this didn't throw out of bounds exception because of JAX's behavior
+    log.debug(_buildK(7, mu=[[0.5,1.5]], sigma=sigma)) # this is test of a bug/feature of JAX; this didn't throw out of bounds exception because of JAX's behavior
     
-    log.debug(_buildK(7, mu=[[1]], sigma=sigma).shape)
+    log.debug(_buildK(7, mu=[[1]], sigma=sigma))
     
-    log.debug(_buildK(7, mu=npx.asarray([[1,2,0.5]]), sigma=npx.asarray([[1]])).shape) # this didn't throw out of bounds exception because of JAX's behavior
+    log.debug(_buildK(7, mu=npx.asarray([[1,2,0.5]]), sigma=npx.asarray([[1]]))) #  this is test of a bug/feature of JAX; this didn't throw out of bounds exception because of JAX's behavior
 
-    
+if False:    
 
     log.debug("Constant Drift Rate - 1")
     # Replicating the plots in Busemeyer 2010
