@@ -35,7 +35,7 @@ npy.set_host_device_count(64)
 _rng_key = random.PRNGKey(0)
 _rng_key, _rng_key_ = random.split(_rng_key)
 
-def _buildK(n_states, mu, sigma=1, delta=0.001): 
+def _buildK(n_states, mu, sigma=1, delta=0.01): 
 # m = number of states  
 # a = off diag left  
 # b = diag  
@@ -49,6 +49,8 @@ def _buildK(n_states, mu, sigma=1, delta=0.001):
 
     b1 = 0.5 * (sigma - mu) #IxJ
     b2 = 0.5 * (sigma + mu) #IxJ
+    #b1 = 0.5 * (((sigma**2)/(delta**2)) - (mu/delta)) # 9.765
+    #b2 = 0.5 * (((sigma**2)/(delta**2)) + (mu/delta)) # 10.325 
     a = -(b1+b2) #IxJ
 
     #for i in range(n_part):
@@ -143,14 +145,14 @@ def _get_initial_state(n_states, start_width, I=1, prob=1):
     #p_0 = p_0.reshape(-1,1)[None,...] # to get column vector
     s_0 = p_0 / npx.sum(p_0, axis=(-2), keepdims=True)
 
-    #with npy.plate('I', I, dim=-3):
-    #    #with npy.plate('S', n_states, dim=-2):
-    #    phi_0 = npy.sample("phi_0", dist.Dirichlet((npx.ones(n_states)[:,None])/n_states)) # Initial State
-
-    with npy.plate('S', n_states):
-        conc = npy.sample("phi_conc", dist.Beta(2,0.5))+0.1
     with npy.plate('I', I, dim=-3):
-        phi_0 = npy.sample("phi_0", dist.Dirichlet(conc[:,None])) # Initial State
+        #with npy.plate('S', n_states, dim=-2):
+        phi_0 = npy.sample("phi_0", dist.Dirichlet((npx.ones(n_states)[:,None])/n_states)) # Initial State
+
+    #with npy.plate('S', n_states):
+    #    conc = npy.sample("phi_conc", dist.Beta(2,0.5))+0.1
+    #with npy.plate('I', I, dim=-3):
+    #    phi_0 = npy.sample("phi_0", dist.Dirichlet(conc[:,None])) # Initial State
 
 
     return phi_0 #s_0

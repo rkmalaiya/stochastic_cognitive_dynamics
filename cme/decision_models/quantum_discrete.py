@@ -30,7 +30,7 @@ npy.set_host_device_count(64)
 _rng_key = random.PRNGKey(0)
 _rng_key, _rng_key_ = random.split(_rng_key)
 
-def _buildH(n_states, mu, sigma, n_trials = None): 
+def _buildH(n_states, mu, sigma, delta=0.001, n_trials = None): 
     # H = buildH(a,b,c)
     # m = number of states  
     # a = off diag left  
@@ -43,7 +43,7 @@ def _buildH(n_states, mu, sigma, n_trials = None):
     # build Hamiltonian  
     Mid = int((n_states+1)/2)
     mv = np.arange(-(Mid-1),(Mid)) #np.arange(0,n_states) #np.arange(-(Mid-1),(Mid))  # Basis vector
-    b = mu[...,None]*mv[None,None,:];  # I,1,n_states
+    b = (mu[...,None])*mv[None,None,:];  # I,1,n_states
     a = sigma#*np.ones((ns,1));  Ix1
     c=a
 
@@ -111,14 +111,14 @@ def _get_initial_state(n_states, start_width, I = 1, prob=1):
     #p_0 = p_0.at[:,0,(Mid-start_width-1):(Mid+start_width),0].set(prob) # additional -1 because indexing starts from 0
     #p_0 = p_0.reshape(-1,1) # to get column vector
 
-    #with npy.plate('I', I, dim=-3):
-    #with npy.plate('S', n_states, dim=-2):
-        #p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State
-    
-    with npy.plate('S', n_states):
-        conc = npy.sample("phi_conc", dist.Beta(2,0.5))+0.1
     with npy.plate('I', I, dim=-3):
-        p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+    #with npy.plate('S', n_states, dim=-2):
+        p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State
+    
+    #with npy.plate('S', n_states):
+    #    conc = npy.sample("phi_conc", dist.Beta(2,0.5))+0.1
+    #with npy.plate('I', I, dim=-3):
+    #    p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
         
 
     #p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State

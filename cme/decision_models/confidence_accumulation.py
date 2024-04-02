@@ -34,7 +34,7 @@ def centralized_parameters(I):
     
     """
     mu_m =  pyro.sample(f"mu_m", dist.Normal(0,1))
-    #mu_s =  pyro.sample(f"mu_s", dist.HalfNormal(2))
+    mu_s =  pyro.sample(f"mu_s", dist.HalfNormal(2))
     with pyro.plate('I', I, dim=-2):
         mu = pyro.sample("mu", dist.Normal(mu_m,mu_s)) # Drift Rate
         #sigma = pyro.sample("sigma", dist.Normal(1,2)) # Diffusion Rate
@@ -59,7 +59,54 @@ def non_centralized_parameters(I):
     
     return mu, sigma
 
-def _timestep_transition_matrix(n, T_delta, Mn):
+
+def _timestep_transition_matrix_t3(n, T_delta, Mn):
+
+    n1 = n
+    i1 = 0
+    j1 = 0
+    Mn1 = Mn
+
+    def _take_step_j(static_params, params):
+        
+        #i, j = static_params["i"], static_params["j"]
+
+        n_i_j = params["n"]
+        #print(i1, j1)
+        T_delta_i_j = static_params["T_delta"][0,...] #Here 0 is the jth dimension. For T_delta we don't need to have a value for each RT because they all will be same
+        def oper(n_i_j, T_delta_i_j):
+            return npx.linalg.matrix_power(Mn1 @ T_delta_i_j, n_i_j.astype(int).item() - 1)
+        
+        T_i_j = jax.pure_callback(oper, jax.ShapeDtypeStruct(T_delta_i_j.shape, T_delta_i_j.dtype), n_i_j, T_delta_i_j)
+
+        params["T_nt"] = T_i_j
+        
+        return (static_params, params)
+
+    def _take_step_i(i, params):
+        #nonlocal i1
+
+        static_params = {"T_delta":params.pop("T_delta")}
+        
+        static_params, params = lax.scan(_take_step_j, static_params, params)
+        params["T_delta"] = static_params["T_delta"]
+        #i1 = i1 + 1
+        #print(i1)
+        return (i+1, params)
+        
+    T_nt = npx.empty(n.shape[:2] + T_delta.shape[-2:])
+    #print(n.shape, T_delta.shape, T_nt.shape)
+    params = {"T_delta":T_delta, "T_nt":T_nt, "n":n}
+
+    i, params = lax.scan(_take_step_i, 0, params)
+    T_nt = params["T_nt"]
+
+    T_t = T_delta @ T_nt
+        
+    return T_t
+
+
+def _timestep_transition_matrix_t1(n, T_delta, Mn):
 
     n1 = n
     i1 = 0
@@ -84,7 +131,7 @@ def _timestep_transition_matrix(n, T_delta, Mn):
         i1 = i1 + 1
         return (i, params)
         
-    T_nt = npx.empty(T_delta.shape)
+    T_nt = npx.empty(n.shape[:2] + T_delta.shape[-2:])
     #print(n.shape, T_delta.shape, T_nt.shape)
     params = {"T_delta":T_delta, "T_nt":T_nt}
 
@@ -96,12 +143,13 @@ def _timestep_transition_matrix(n, T_delta, Mn):
     return T_t
 
 
-def _timestep_transition_matrix_t(n, T_delta, Mn):
+def _timestep_transition_matrix(n, T_delta, Mn):
 
     T_i = []
     for n_i, T_delta_i in zip(n, T_delta):
         T_i_j = []
-        for n_i_j, T_delta_i_j in zip(n_i, T_delta_i):
+        for j, n_i_j in enumerate(n_i):
+            T_delta_i_j = T_delta_i[j,...]
             T_nt = npx.linalg.matrix_power(Mn @ T_delta_i_j, n_i_j.astype(int).item() - 1) # we need to vectorize this function
             T_i_j.append(T_nt)
         
@@ -122,7 +170,7 @@ def _get_transition_matrix(intensity_matrix, RT, delta=None, Mn = None, transiti
     else:
         raise Exception(f"Please select one of {transition_type}")
 
-    return T_t
+    return T_t # I x J x n_state x n_state
 
 def _get_measurement_matrix(n_states, start_width, prob=0.5, model_type = "Markov|Quantum"):
     if model_type == "Markov":
@@ -313,11 +361,11 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
 
     if model_type == "Markov":
         sigma = pyro.deterministic("sigma_final",mu + sigma**2) # Sigma needs to be larger than mu and Sigma cannot be negative
-        intensity_matrix = dd._buildK(n_states, mu, sigma)
+        intensity_matrix = dd._buildK(n_states, mu, sigma, delta)
 
     elif model_type == "Quantum":
         sigma = pyro.deterministic("sigma_final",sigma**2) # Sigma cannot be negative
-        intensity_matrix = qd._buildH(n_states, mu, sigma)
+        intensity_matrix = qd._buildH(n_states, mu, sigma, delta)
     else:
         raise Exception(f"Please select one of {model_type}")
 
@@ -402,10 +450,10 @@ def simulate_likelihood(RT_pred, n_states, start_width, delta, measurement_prob,
     Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, start_width=start_width, prob=measurement_prob, model_type = model_type)
     
     if model_type == "Markov":
-        intensity_matrix = dd._buildK(n_states, drift_rate, diffusion_rate)
+        intensity_matrix = dd._buildK(n_states, drift_rate, diffusion_rate, delta)
 
     elif model_type == "Quantum":
-        intensity_matrix = qd._buildH(n_states, drift_rate, diffusion_rate)
+        intensity_matrix = qd._buildH(n_states, drift_rate, diffusion_rate, delta)
     else:
         raise Exception(f"Please select one of {model_type}")
     

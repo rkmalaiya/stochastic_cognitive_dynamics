@@ -67,7 +67,7 @@ def _run_model(RT_file, X_file, name, version,
             num_warmup, samples_n):
 
     X = pd.read_csv(X_file).values
-    RT = pd.read_csv(RT_file).values
+    RT = pd.read_csv(RT_file).values * 100
 
     q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, start_width, prob=measurement_prob, model_type = model_type)
 
