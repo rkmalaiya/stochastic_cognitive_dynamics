@@ -39,25 +39,32 @@ def _buildK(n_states, mu, sigma=1, delta=0.001):
 # a = off diag left  
 # b = diag  
 # c = off diag right
-    mu = npx.asarray(mu)
+    mu = npx.asarray(mu) #Ix1
     n_part, n_mu = mu.shape #if len(npx.asarray(mu).shape) > 0 else 1
     K = npx.zeros((n_part, 1, n_states,n_states)) # participants, trials, transition states
 
-    if n_mu == 1:
-        mu=npx.repeat(mu,n_states,axis=1) # keeping mu constant over states
+    #if n_mu == 1:
+    #    mu=npx.repeat(mu,n_states,axis=1) # keeping mu constant over states
 
-    
-    for i in range(n_part):
+    b1 = 0.5 * (sigma - mu) #IxJ
+    b2 = 0.5 * (sigma + mu) #IxJ
+    a = -(b1+b2) #IxJ
+
+    #for i in range(n_part):
+    #def _create(j, params):
+    for j in range(1,n_states-1):
         #b1 = 0.5 * (((sigma**2)/delta**2) - mu[i,:]/delta) # 9.765
         #b2 = 0.5 * (((sigma**2)/delta**2) + mu[i,:]/delta) # 10.325 
-        b1 = 0.5 * (sigma[i,:] - mu[i,:])
-        b2 = 0.5 * (sigma[i,:] + mu[i,:])
+        #b1 = 0.5 * (sigma[i,:] - mu[i,:])
+        #b2 = 0.5 * (sigma[i,:] + mu[i,:])
                 
-        a = -(b1+b2)
+        #b1 = params["b1"]
+        #b2 = params["b2"]
+        #a = params["a"]
     
-        for j in range(1,n_states-1):
+        #for j in range(1,n_states-1):
             #try:
-            K = K.at[i,0,[j-1,j,j+1],j].set([b1[j], a[j], b2[j]])
+        K = K.at[:,0,[j-1,j,j+1],j].set(npx.asarray([b1[:,j], a[:,j], b2[:,j]]).T)
             #except Exception as e:
             #    print(e)
             #    print("mu", mu.shape)
@@ -68,8 +75,8 @@ def _buildK(n_states, mu, sigma=1, delta=0.001):
             #    print(a.shape)
             #K = K.at[i,0,[j-1,j,j+1],j].set([b1, a, b2])
 
-        K = K.at[i,0,[0,1],0].set([a[0], -a[0]])
-        K = K.at[i,0,[-2,-1],-1].set([-a[-1], a[-1]])
+    K = K.at[:,0,[0,1],0].set(npx.asarray([a[:,0], -a[:,0]]).T)
+    K = K.at[:,0,[-2,-1],-1].set(npx.asarray([-a[:,-1], a[:,-1]]).T)
 
         #K = K.at[i,0,[0,1],0].set([a, -a])
         #K = K.at[i,0,[-2,-1],-1].set([-a, a])
@@ -550,7 +557,7 @@ if __name__ == "__main__":
     
     mu_arr, sigma = npx.asarray([[0.01,0.01,0.01,0.01, 1,1,1]]), npx.asarray([[10]])
 
-    log.debug(_buildK(7, mu=mu_arr, sigma=sigma))
+    log.debug(_buildK(7, mu=mu_arr, sigma=sigma)) #1x7 1 participant x 7 states
     
     log.debug(_buildK(7, mu=[[1.5]], sigma=sigma))
     
