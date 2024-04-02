@@ -124,9 +124,15 @@ def _get_initial_state(n_states, start_width, I=1, prob=1):
     #p_0 = p_0.reshape(-1,1)[None,...] # to get column vector
     s_0 = p_0 / npx.sum(p_0, axis=(-2), keepdims=True)
 
+    #with npy.plate('I', I, dim=-3):
+    #    #with npy.plate('S', n_states, dim=-2):
+    #    phi_0 = npy.sample("phi_0", dist.Dirichlet((npx.ones(n_states)[:,None])/n_states)) # Initial State
+
+    with npy.plate('S', n_states):
+        conc = npy.sample("phi_conc", dist.Beta(2,0.5))+0.1
     with npy.plate('I', I, dim=-3):
-        #with npy.plate('S', n_states, dim=-2):
-        phi_0 = npy.sample("phi_0", dist.Dirichlet((npx.ones(n_states)[:,None])/n_states)) # Initial State
+        phi_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+
 
     return phi_0 #s_0
     
