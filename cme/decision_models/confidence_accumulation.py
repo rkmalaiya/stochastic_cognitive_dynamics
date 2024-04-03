@@ -60,6 +60,30 @@ def non_centralized_parameters(I):
     return mu, sigma
 
 
+def _timestep_transition_matrix_t6(n, T_delta, Mn):
+
+    T_i = []
+    for n_i, T_delta_i in zip(n, T_delta):
+        T_i_j = []
+        for n_i_j in n_i:
+            #T_delta_i_j = T_delta_i[j,...]
+            T_nt = npx.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1) # we need to vectorize this function
+            T_i_j.append(T_nt)
+        
+        T_i.append(T_i_j)
+    
+    T_t = T_delta @ npx.asarray(T_i)
+        
+    T_i_j = Mn @ T_delta_i[0,...]
+    def oper(i, T_i_j):
+        return T_i_j @ Mn @ T_delta_i[0,...]
+        
+    
+    #jax.lax.fori_loop(0, n.shape[0], lambda i,)
+
+    return T_t
+
+
 def _timestep_transition_matrix_t3(n, T_delta, Mn):
 
     n1 = n
@@ -110,8 +134,46 @@ def _timestep_transition_matrix_t3(n, T_delta, Mn):
         
     return T_t
 
+def _timestep_transition_matrix(n, T_delta, Mn):
 
-def _timestep_transition_matrix_t1(n, T_delta, Mn):
+    n1 = n
+    i1 = 0
+    j1 = 0
+    Mn1 = Mn
+
+    def _take_step_j(static_params, params):
+        nonlocal n1
+        nonlocal j1
+        nonlocal i1
+        n_i_j = n1[i1, j1]
+        T_delta_i_j = static_params["T_delta_i"][0,...]
+        
+        T_i_j = npx.linalg.matrix_power(Mn1 @ T_delta_i_j, n_i_j.astype(int).item() - 1)
+        params["T_nt"] = T_i_j
+        j1 = j1 + 1
+        return (static_params,params)
+
+    def _take_step_i(i, params):
+        nonlocal i1
+        T_delta_i = params.pop("T_delta")
+        static_params = {"T_delta_i": T_delta_i}
+        static_params, params = lax.scan(_take_step_j, static_params, params)
+        i1 = i1 + 1
+        params["T_delta"] = T_delta_i
+        return (i, params)
+        
+    T_nt = npx.empty(n.shape[:2] + T_delta.shape[-2:])
+    #print(n.shape, T_delta.shape, T_nt.shape)
+    params = {"T_delta":T_delta, "T_nt":T_nt}
+
+    i, params = lax.scan(_take_step_i, 0, params)
+    T_nt = params["T_nt"]
+
+    T_t = T_delta @ T_nt
+        
+    return T_t
+
+def _timestep_transition_matrix_t11(n, T_delta, Mn):
 
     n1 = n
     i1 = 0
@@ -148,7 +210,7 @@ def _timestep_transition_matrix_t1(n, T_delta, Mn):
     return T_t
 
 
-def _timestep_transition_matrix(n, T_delta, Mn):
+def _timestep_transition_matrix_t(n, T_delta, Mn):
 
     T_i = []
     for n_i, T_delta_i in zip(n, T_delta):
@@ -674,7 +736,7 @@ if __name__ == "__main__":
     
     print(likl_markov)
     print(likl_quantum)
-
+if False:
     log.debug("Constant Drift Rate - Likelihood 2")
 
     likl_markov_arr = []
@@ -841,19 +903,20 @@ if __name__ == "__main__":
         )
     plt.show()
 
-
+if True:
  
     log.debug("Constant Drift Rate - Posterior Samples 1")
 
     X = stats.bernoulli(0.5).rvs(size=(I,J))
     RT = stats.lognorm(1,1).rvs(size=(I,J)) * 100
     post_chain = sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
-                                         num_warmup=100, samples_n=100,
+                                         num_warmup=10, samples_n=10,
                                          params_type="Centralized", model_type="Quantum", transition_type="TIMESTEP", likelihood_type="SINGLE" 
                             )
     post_samples = post_chain.get_samples()
     #log.debug(az.summary(az.from_numpyro(post_chain)))
 
+if False:
     log.debug("Constant Drift Rate - Post Predictive Samples 1")
     drift_rate_samples = post_samples["mu"][-5:,...]
     diffusion_rate_samples = post_samples["sigma_final"][-5:,...]
@@ -888,7 +951,7 @@ if __name__ == "__main__":
                 hue="posterior"
                 )
     plt.show()
-
+if True:
     log.debug("Constant Drift Rate - Post Predictive Samples 2")
     drift_rate_samples = post_samples["mu"][-5:,...]
     diffusion_rate_samples = post_samples["sigma_final"][-5:,...]
