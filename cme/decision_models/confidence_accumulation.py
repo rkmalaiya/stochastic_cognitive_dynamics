@@ -74,11 +74,14 @@ def _timestep_transition_matrix_t3(n, T_delta, Mn):
         n_i_j = params["n"]
         #print(i1, j1)
         T_delta_i_j = static_params["T_delta"][0,...] #Here 0 is the jth dimension. For T_delta we don't need to have a value for each RT because they all will be same
-        def oper(n_i_j):
-            return n_i_j.astype(int).item() - 1
+        def oper(n_i_j, T_delta_i_j):
+            return npx.linalg.matrix_power(Mn @ T_delta_i_j, n_i_j.astype(int).item() - 1)
         
-        n_int = jax.pure_callback(oper, jax.ShapeDtypeStruct(n_i_j.shape, int), n_i_j)
-        T_i_j = npx.linalg.matrix_power(Mn1 @ T_delta_i_j, n_int)
+        grad_oper = jax.grad(oper)
+        a = jax.pure_callback(grad_oper, jax.ShapeDtypeStruct(T_delta_i_j.shape, T_delta_i_j.dtype), n_i_j, T_delta_i_j)
+
+        T_i_j = jax.pure_callback(oper, jax.ShapeDtypeStruct(T_delta_i_j.shape, T_delta_i_j.dtype), n_i_j, T_delta_i_j)
+         
         
 
         params["T_nt"] = T_i_j
@@ -150,9 +153,9 @@ def _timestep_transition_matrix(n, T_delta, Mn):
     T_i = []
     for n_i, T_delta_i in zip(n, T_delta):
         T_i_j = []
-        for j, n_i_j in enumerate(n_i):
-            T_delta_i_j = T_delta_i[j,...]
-            T_nt = npx.linalg.matrix_power(Mn @ T_delta_i_j, n_i_j.astype(int).item() - 1) # we need to vectorize this function
+        for n_i_j in n_i:
+            #T_delta_i_j = T_delta_i[j,...]
+            T_nt = npx.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1) # we need to vectorize this function
             T_i_j.append(T_nt)
         
         T_i.append(T_i_j)
@@ -660,12 +663,12 @@ if __name__ == "__main__":
     log.debug("Constant Drift Rate - Likelihood 1")
 
     likl_markov = likelihood(intensity_matrix=intensity_matrix_markov, phi_0=phi_0_markov, delta=delta,
-                            RT_s=npx.asarray([[10]]), RA_s=npx.asarray([[1]]),  
+                            RT_s=npx.asarray([[10, 20]]), RA_s=npx.asarray([[1, 0]]),  
                             Mc=m_Mc, Mw=m_Mw, Mn=m_Mn, 
                             transition_type="RT", likelihood_type="SINGLE", model_type="Markov")
     
     likl_quantum = likelihood(intensity_matrix=intensity_matrix_quantum, phi_0=phi_0_quantum, delta=delta,
-                            RT_s=npx.asarray([[10]]), RA_s=npx.asarray([[1]]),  
+                            RT_s=npx.asarray([[10, 30]]), RA_s=npx.asarray([[1, 0]]),  
                             Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, 
                             transition_type="RT", likelihood_type="SINGLE", model_type="Quantum")
     
