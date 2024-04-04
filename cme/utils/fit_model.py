@@ -67,7 +67,7 @@ def _run_model(RT_file, X_file, name, version,
             num_warmup, samples_n):
 
     X = pd.read_csv(X_file).values
-    RT = pd.read_csv(RT_file).values * 100
+    RT = pd.read_csv(RT_file).values
 
     q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, start_width, prob=measurement_prob, model_type = model_type)
 
@@ -82,7 +82,7 @@ def _run_model(RT_file, X_file, name, version,
                                         params_type=params_type, model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type 
                         )
     post_samples = post_chain.get_samples()
-    df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "sigma_final","phi_0"])
+    df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "sigma_final","phi_0", "likl_rt"])
     df_phi = df_summary.filter(like="phi_0",axis=0)[["mean"]].reset_index(names="idx")
     df_t = df_phi.idx.str.split("[", expand=True)[1].str.split(",", expand=True)
     df_phi[["part_id", "phi_0"]] = df_t[[0,2]].astype(int)
@@ -116,6 +116,14 @@ def _run_model(RT_file, X_file, name, version,
     with open(f'export/mcmc_samples_{name}_{model_type}_{version}.pkl', 'wb') as outp:
         pickle.dump([post_samples, mean_conf, phi_t, prior_pd_samples, post_pd_samples], outp, pickle.HIGHEST_PROTOCOL)
 
-    df_summary.to_csv(f"export/estimate_summary_{name}_{model_type}_{version}.csv")
+    
+    df_prior_pred_all = pd.concat([samples["Samples"] for samples in prior_pd_samples])
+    df_prior_pred_all.to_csv(f"export/prior_predictive_{name}_{model_type}_{version}.csv")
+
+    df_post_pred_all = pd.concat([samples["Samples"] for samples in post_pd_samples])
+    df_post_pred_all.to_csv(f"export/posterior_predictive_{name}_{model_type}_{version}.csv")
+
+    df_summary.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}.csv")
     df_phi.to_csv(f"export/initial_states_{name}_{model_type}_{version}.csv")
+    
     print(f"Job successfully completed for {name}_{model_type}, {version}")

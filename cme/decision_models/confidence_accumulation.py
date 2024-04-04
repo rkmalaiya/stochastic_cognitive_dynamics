@@ -17,6 +17,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 from joblib import Parallel, delayed
+from joblib import parallel_config
 
 from cme.utils import common_logging as cl
 log = cl.get_logger("confidence_accumulation")
@@ -60,31 +61,26 @@ def non_centralized_parameters(I):
     return mu, sigma
 
 
-def _timestep_transition_matrix_t6(n, T_delta, Mn):
+def _timestep_transition_matrix_t7(n, T_delta, Mn):
 
     T_i = []
     for n_i, T_delta_i in zip(n, T_delta):
         T_i_j = []
         for n_i_j in n_i:
             #T_delta_i_j = T_delta_i[j,...]
-            T_nt = npx.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1) # we need to vectorize this function
+            T_nt = Mn @ T_delta_i[0,...]
+            for _ in range(n_i_j.astype(int)-2):
+                T_nt = T_nt @ Mn @ T_delta_i[0,...] # we need to vectorize this function
             T_i_j.append(T_nt)
         
         T_i.append(T_i_j)
     
     T_t = T_delta @ npx.asarray(T_i)
         
-    T_i_j = Mn @ T_delta_i[0,...]
-    def oper(i, T_i_j):
-        return T_i_j @ Mn @ T_delta_i[0,...]
-        
-    
-    #jax.lax.fori_loop(0, n.shape[0], lambda i,)
-
     return T_t
 
 
-def _timestep_transition_matrix_t3(n, T_delta, Mn):
+def _timestep_transition_matrix_t5(n, T_delta, Mn):
 
     n1 = n
     i1 = 0
@@ -134,7 +130,7 @@ def _timestep_transition_matrix_t3(n, T_delta, Mn):
         
     return T_t
 
-def _timestep_transition_matrix(n, T_delta, Mn):
+def _timestep_transition_matrix_orig2(n, T_delta, Mn):
 
     n1 = n
     i1 = 0
@@ -209,8 +205,35 @@ def _timestep_transition_matrix_t11(n, T_delta, Mn):
         
     return T_t
 
+def _timestep_transition_matrix_failed(n, T_delta, Mn):
 
-def _timestep_transition_matrix_t(n, T_delta, Mn):
+    def mat_pow(n_i_j, Mn, T_delta_i):
+        T_nt = npx.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1)
+        return T_nt
+    
+    fn_params = []
+
+    
+    for n_i, T_delta_i in zip(n, T_delta):
+        for n_i_j in n_i:
+            fn_params.append(delayed(mat_pow)(n_i_j, Mn, T_delta_i))  
+    with parallel_config(backend='threading', n_jobs=2):
+        T_i = Parallel()(fn for fn in fn_params)
+
+    #T_i = []
+    #for n_i, T_delta_i in zip(n, T_delta):
+    #    T_i_j = []
+    #    for n_i_j in n_i:
+    #        T_nt = mat_pow(n_i_j, Mn, T_delta_i) # we need to vectorize this function
+    #        T_i_j.append(T_nt)
+    #    
+    #    T_i.append(T_i_j)
+    
+    T_t = T_delta @ npx.asarray(T_i).reshape(n.shape[:2] + T_delta.shape[-2:])
+
+    return T_t
+
+def _timestep_transition_matrix(n, T_delta, Mn):
 
     T_i = []
     for n_i, T_delta_i in zip(n, T_delta):
@@ -226,9 +249,50 @@ def _timestep_transition_matrix_t(n, T_delta, Mn):
         
     return T_t
 
+
+def _timestep_transition_matrix_failedd(n, T_delta, Mn):
+    #Mn - n_states x n_states
+    # T_delta - I x 1 x n_states x n_states
+    
+    def stack_i(i, params): 
+        # return 1 x n_j x n_states x n_states
+        T_delta_i = params.pop("T_delta") # Removed from params because it does not have the second J dimension, instead the second dimension is of lenght 1.
+        #static_params = dict(T_delta = T_delta_i)
+
+        T_t_i_0 = Mn @ T_delta_i[0,...] # 1 x 1 x n_states x n_states
+
+        def stack_j(T_t_i_0, params):
+            n_i_j = params["n"] 
+            T_t_n_i_j = npx.tile(T_t_i_0, n_i_j-2) #n_i_j x 1 x 1 x n_states x n_states
+
+            params2 = dict(T_t_n_i_j = T_t_n_i_j)
+            
+            def mat_power(T_t_i_0, params2):
+                T_t_i_j = params2["T_t_n_i_j"]
+                T_t_i_j = T_t_i_j @ T_t_i_0
+                return (T_t_i_j, params2)
+            
+            T_t_i_j, params2 = lax.scan(mat_power, T_t_i_0, params2)
+            params["T_t"] = T_t_i_j
+            return (T_t_i_0, params)
+        
+        T_t_i_0, params = lax.scan(stack_j, T_t_i_0, params)
+        params["T_delta"] = T_delta_i # adding back the removed value so that scan iterates over the first dimension of I length.
+        return (i, params)
+    
+    T_t = npx.empty(n.shape[:2] + T_delta.shape[-2:])
+    params = dict(n=n, T_delta = T_delta, T_t = T_t)
+
+    _, params = lax.scan(stack_i, 0, params)
+    T_t = params["T_t"]
+    T_t = T_delta @ T_t
+
+    return T_t
+
 def _get_transition_matrix(intensity_matrix, RT, delta=None, Mn = None, transition_type="RT|TIMESTEP"):
    
     if transition_type == "RT":
+        #T_t = sci.linalg.expm(intensity_matrix * ((RT[...,None,None]/delta) if not npx.isscalar(RT) else (RT/delta)))
         T_t = sci.linalg.expm(intensity_matrix * ((RT[...,None,None]/delta) if not npx.isscalar(RT) else (RT/delta)))
     elif transition_type == "TIMESTEP":
         ns=np.ceil(RT/delta)
@@ -443,7 +507,8 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
     if RT_s is not None:
         likl = estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, 
                           transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-        pyro.factor(f"likelihood", likl) #.sum()
+        pyro.deterministic("likl_rt", likl)
+        pyro.factor("likelihood", likl) #.sum()
 
 
 def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA, 
@@ -572,7 +637,7 @@ def sample_posterior_params(DT, X, n_states, start_width, delta, measurement_pro
     #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
     #mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
 
-    kernel = NUTS(model)
+    kernel = NUTS(model, forward_mode_differentiation=False)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
     mcmc_chain.run(_rng_key, n_states, start_width,  delta, X, DT, measurement_prob, 
                    params_type = params_type, transition_type=transition_type, 
@@ -694,7 +759,7 @@ if __name__ == "__main__":
     phi_0_quantum = _get_initial_state(n_states, start_width,model_type="Quantum" , prior_type="Upper")
 
     mean_conf_quantum = get_mean_confidence(n_states, intensity_matrix=intensity_matrix_quantum, 
-                                            phi_0=phi_0_quantum, delta=1, Mn=q_Mn, t=np.asarray([[10]]), transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Quantum")
+                                            phi_0=phi_0_quantum, delta=1, Mn=q_Mn, t=npx.asarray([[10]]), transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Quantum")
     
     print(mean_conf_quantum)
     
@@ -736,7 +801,7 @@ if __name__ == "__main__":
     
     print(likl_markov)
     print(likl_quantum)
-if False:
+
     log.debug("Constant Drift Rate - Likelihood 2")
 
     likl_markov_arr = []
@@ -903,12 +968,10 @@ if False:
         )
     plt.show()
 
-if True:
- 
     log.debug("Constant Drift Rate - Posterior Samples 1")
 
     X = stats.bernoulli(0.5).rvs(size=(I,J))
-    RT = stats.lognorm(1,1).rvs(size=(I,J)) * 100
+    RT = stats.lognorm(1,1).rvs(size=(I,J))
     post_chain = sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
                                          num_warmup=10, samples_n=10,
                                          params_type="Centralized", model_type="Quantum", transition_type="TIMESTEP", likelihood_type="SINGLE" 
@@ -916,7 +979,6 @@ if True:
     post_samples = post_chain.get_samples()
     #log.debug(az.summary(az.from_numpyro(post_chain)))
 
-if False:
     log.debug("Constant Drift Rate - Post Predictive Samples 1")
     drift_rate_samples = post_samples["mu"][-5:,...]
     diffusion_rate_samples = post_samples["sigma_final"][-5:,...]
@@ -951,7 +1013,7 @@ if False:
                 hue="posterior"
                 )
     plt.show()
-if True:
+
     log.debug("Constant Drift Rate - Post Predictive Samples 2")
     drift_rate_samples = post_samples["mu"][-5:,...]
     diffusion_rate_samples = post_samples["sigma_final"][-5:,...]
