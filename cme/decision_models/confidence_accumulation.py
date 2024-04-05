@@ -61,7 +61,7 @@ def non_centralized_parameters(I):
     return mu, sigma
 
 
-def _timestep_transition_matrix_t7(n, T_delta, Mn):
+def _timestep_transition_matrix_mat_pow(n, T_delta, Mn):
 
     T_i = []
     for n_i, T_delta_i in zip(n, T_delta):
@@ -80,7 +80,7 @@ def _timestep_transition_matrix_t7(n, T_delta, Mn):
     return T_t
 
 
-def _timestep_transition_matrix_t5(n, T_delta, Mn):
+def _timestep_transition_matrix_callback(n, T_delta, Mn):
 
     n1 = n
     i1 = 0
@@ -130,27 +130,29 @@ def _timestep_transition_matrix_t5(n, T_delta, Mn):
         
     return T_t
 
-def _timestep_transition_matrix_orig2(n, T_delta, Mn):
+def _timestep_transition_matrix(n, T_delta, Mn):
 
     n1 = n
     i1 = 0
-    j1 = 0
     Mn1 = Mn
 
-    def _take_step_j(static_params, params):
-        nonlocal n1
-        nonlocal j1
-        nonlocal i1
-        n_i_j = n1[i1, j1]
-        T_delta_i_j = static_params["T_delta_i"][0,...]
-        
-        T_i_j = npx.linalg.matrix_power(Mn1 @ T_delta_i_j, n_i_j.astype(int).item() - 1)
-        params["T_nt"] = T_i_j
-        j1 = j1 + 1
-        return (static_params,params)
 
     def _take_step_i(i, params):
         nonlocal i1
+        j1 = 0
+        
+        def _take_step_j(static_params, params):
+            nonlocal n1
+            nonlocal j1
+            n_i_j = n1[i1, j1]
+            T_delta_i_j = static_params["T_delta_i"][0,...]
+            
+            T_i_j = npx.linalg.matrix_power(Mn1 @ T_delta_i_j, n_i_j.astype(int).item() - 1)
+            params["T_nt"] = T_i_j
+            j1 = j1 + 1
+            return (static_params,params)
+
+        
         T_delta_i = params.pop("T_delta")
         static_params = {"T_delta_i": T_delta_i}
         static_params, params = lax.scan(_take_step_j, static_params, params)
@@ -169,56 +171,25 @@ def _timestep_transition_matrix_orig2(n, T_delta, Mn):
         
     return T_t
 
-def _timestep_transition_matrix_t11(n, T_delta, Mn):
+def _timestep_transition_matrix_map(n, T_delta, Mn):
 
-    n1 = n
-    i1 = 0
-    j1 = 0
-    Mn1 = Mn
+    #fn_params = []
 
-    def _take_step_j(j, params):
-        nonlocal n1
-        nonlocal j1
-        nonlocal i1
-        n_i_j = n1[i1, j1]
-        T_delta_i_j = params["T_delta"]
+    def take_step_j(T_delta_i, n_i):
+
+        def mat_pow(n_i_j):
+            T_nt = npx.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1)
+            return T_nt
         
-        T_i_j = npx.linalg.matrix_power(Mn1 @ T_delta_i_j, n_i_j.astype(int).item() - 1)
-        params["T_nt"] = T_i_j
-        j1 = j1 + 1
-        return (j,params)
+        return list(map(mat_pow, n_i))
 
-    def _take_step_i(i, params):
-        nonlocal i1
-        i, params = lax.scan(_take_step_j, 0, params)
-        i1 = i1 + 1
-        return (i, params)
-        
-    T_nt = npx.empty(n.shape[:2] + T_delta.shape[-2:])
-    #print(n.shape, T_delta.shape, T_nt.shape)
-    params = {"T_delta":T_delta, "T_nt":T_nt}
-
-    i, params = lax.scan(_take_step_i, 0, params)
-    T_nt = params["T_nt"]
-
-    T_t = T_delta @ T_nt
-        
-    return T_t
-
-def _timestep_transition_matrix_failed(n, T_delta, Mn):
-
-    def mat_pow(n_i_j, Mn, T_delta_i):
-        T_nt = npx.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1)
-        return T_nt
-    
-    fn_params = []
-
-    
-    for n_i, T_delta_i in zip(n, T_delta):
-        for n_i_j in n_i:
-            fn_params.append(delayed(mat_pow)(n_i_j, Mn, T_delta_i))  
-    with parallel_config(backend='threading', n_jobs=2):
-        T_i = Parallel()(fn for fn in fn_params)
+    T_i = list(map(take_step_j, T_delta, n)) 
+   
+   # for n_i, T_delta_i in zip(n, T_delta):
+   #     for n_i_j in n_i:
+    #        fn_params.append(delayed(mat_pow)(n_i_j, T_delta_i))  
+    #with parallel_config(backend='threading', n_jobs=2):
+   #     T_i = Parallel()(fn for fn in fn_params)
 
     #T_i = []
     #for n_i, T_delta_i in zip(n, T_delta):
@@ -229,11 +200,11 @@ def _timestep_transition_matrix_failed(n, T_delta, Mn):
     #    
     #    T_i.append(T_i_j)
     
-    T_t = T_delta @ npx.asarray(T_i).reshape(n.shape[:2] + T_delta.shape[-2:])
+    T_t = T_delta @ npx.asarray(T_i)#.reshape(n.shape[:2] + T_delta.shape[-2:])
 
     return T_t
 
-def _timestep_transition_matrix(n, T_delta, Mn):
+def _timestep_transition_matrix_orig(n, T_delta, Mn):
 
     T_i = []
     for n_i, T_delta_i in zip(n, T_delta):
@@ -801,7 +772,7 @@ if __name__ == "__main__":
     
     print(likl_markov)
     print(likl_quantum)
-
+if False:
     log.debug("Constant Drift Rate - Likelihood 2")
 
     likl_markov_arr = []
@@ -905,11 +876,11 @@ if __name__ == "__main__":
         pd.Series(npx.asarray(likl_quantum_arr), name=f"Quantum:{mu}, {sigma}").plot()
         plt.legend()
         plt.show()
-
+if True:
     log.debug("Constant Drift Rate - Prior 1")
 
     X = stats.bernoulli(0.5).rvs(size=(I,J))
-    RT = stats.lognorm(1,1).rvs(size=(I,J)) * 100
+    RT = stats.lognorm(1,1).rvs(size=(I,J)) 
 
     predictive_samples = sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=delta,
                                                   measurement_prob=measurement_prob, X=X, RT=RT, 
@@ -932,7 +903,7 @@ if __name__ == "__main__":
     log.debug("Constant Drift Rate - Prior 2")
 
     X = stats.bernoulli(0.5).rvs(size=(I,J))
-    RT = stats.lognorm(1,1).rvs(size=(I,J)) * 100
+    RT = stats.lognorm(1,1).rvs(size=(I,J)) 
 
     predictive_samples = sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=0.01,
                                                   measurement_prob=measurement_prob, X=X, RT=RT, n_samples=2,

@@ -88,6 +88,9 @@ def _run_model(RT_file, X_file, name, version,
     df_phi[["part_id", "phi_0"]] = df_t[[0,2]].astype(int)
     df_phi = df_phi.pivot(index="part_id", columns="phi_0", values="mean")
     
+    df_summary.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}.csv")
+    df_phi.to_csv(f"export/initial_states_{name}_{model_type}_{version}.csv")
+
     drift_rate_est = post_samples["mu"].mean(axis=0)
     diffusion_rate_est = post_samples["sigma_final"].mean(axis=0)
     phi_0_est = post_samples["phi_0"].mean(axis=0)
@@ -123,7 +126,6 @@ def _run_model(RT_file, X_file, name, version,
     df_post_pred_all = pd.concat([samples["Samples"] for samples in post_pd_samples])
     df_post_pred_all.to_csv(f"export/posterior_predictive_{name}_{model_type}_{version}.csv")
 
-    df_summary.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}.csv")
-    df_phi.to_csv(f"export/initial_states_{name}_{model_type}_{version}.csv")
+
     
     print(f"Job successfully completed for {name}_{model_type}, {version}")
