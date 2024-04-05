@@ -130,7 +130,7 @@ def _timestep_transition_matrix_callback(n, T_delta, Mn):
         
     return T_t
 
-def _timestep_transition_matrix(n, T_delta, Mn):
+def _timestep_transition_matrix_scan(n, T_delta, Mn):
 
     n1 = n
     i1 = 0
@@ -171,7 +171,7 @@ def _timestep_transition_matrix(n, T_delta, Mn):
         
     return T_t
 
-def _timestep_transition_matrix_map(n, T_delta, Mn):
+def _timestep_transition_matrix(n, T_delta, Mn):
 
     #fn_params = []
 
@@ -631,7 +631,7 @@ def predictive_mcmc_fn(n_states, start_width, delta, measurement_prob, X,
                                                     X, drift_rate, diffusion_rate,
                                                     transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type,))
         pred_shape = 4, *X.shape
-        predictive_mcmc = MCMC(kernel, num_warmup=100, num_samples=100, num_chains=4)
+        predictive_mcmc = MCMC(kernel, num_warmup=10, num_samples=10, num_chains=4)
         predictive_mcmc.run(_rng_key, init_params=stats.lognorm(s=1).rvs((pred_shape)),
                         extra_fields=('potential_energy',)
                         )
@@ -643,7 +643,7 @@ def predictive_mcmc_fn(n_states, start_width, delta, measurement_prob, X,
                                         X, drift_rate, diffusion_rate,
                                         transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type,))
         pred_shape = 4, 2, *X[0].shape
-        predictive_mcmc = MCMC(kernel, num_warmup=300, num_samples=200, num_chains=4)
+        predictive_mcmc = MCMC(kernel, num_warmup=30, num_samples=20, num_chains=4)
         predictive_mcmc.run(_rng_key, init_params=stats.lognorm(s=1).rvs((pred_shape)),
                     extra_fields=('potential_energy',)
                     )
@@ -763,12 +763,12 @@ if __name__ == "__main__":
     likl_markov = likelihood(intensity_matrix=intensity_matrix_markov, phi_0=phi_0_markov, delta=delta,
                             RT_s=npx.asarray([[10, 20]]), RA_s=npx.asarray([[1, 0]]),  
                             Mc=m_Mc, Mw=m_Mw, Mn=m_Mn, 
-                            transition_type="RT", likelihood_type="SINGLE", model_type="Markov")
+                            transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Markov")
     
     likl_quantum = likelihood(intensity_matrix=intensity_matrix_quantum, phi_0=phi_0_quantum, delta=delta,
                             RT_s=npx.asarray([[10, 30]]), RA_s=npx.asarray([[1, 0]]),  
                             Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, 
-                            transition_type="RT", likelihood_type="SINGLE", model_type="Quantum")
+                            transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Quantum")
     
     print(likl_markov)
     print(likl_quantum)
