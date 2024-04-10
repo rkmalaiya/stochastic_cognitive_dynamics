@@ -111,14 +111,14 @@ def _get_initial_state(n_states, start_width, I = 1, prob=1):
     #p_0 = p_0.at[:,0,(Mid-start_width-1):(Mid+start_width),0].set(prob) # additional -1 because indexing starts from 0
     #p_0 = p_0.reshape(-1,1) # to get column vector
 
-    with npy.plate('I', I, dim=-3):
-    #with npy.plate('S', n_states, dim=-2):
-        p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State
-    
-    #with npy.plate('S', n_states):
-    #    conc = npy.sample("phi_conc", dist.Beta(2,0.5))+0.1
     #with npy.plate('I', I, dim=-3):
-    #    p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+    #with npy.plate('S', n_states, dim=-2):
+    #    p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State
+    
+    with npy.plate('S', n_states):
+        conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
+    with npy.plate('I', I, dim=-3):
+        p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
         
 
     #p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State
