@@ -171,7 +171,7 @@ def _timestep_transition_matrix_scan(n, T_delta, Mn):
         
     return T_t
 
-def _timestep_transition_matrix(n, T_delta, Mn):
+def _timestep_transition_matrix_map(n, T_delta, Mn):
 
     #fn_params = []
 
@@ -204,7 +204,7 @@ def _timestep_transition_matrix(n, T_delta, Mn):
 
     return T_t
 
-def _timestep_transition_matrix_orig(n, T_delta, Mn):
+def _timestep_transition_matrix(n, T_delta, Mn):
 
     T_i = []
     for n_i, T_delta_i in zip(n, T_delta):
@@ -717,7 +717,7 @@ def get_arviz_model(mcmc_chain):
 
 if __name__ == "__main__":
 
-    n_states, start_width, delta, measurement_prob, mu, sigma, I, J = 11, 4, 1, 0.3, npx.asarray([[1]]), npx.asarray([[1]]), 3, 2
+    n_states, start_width, delta, measurement_prob, mu, sigma, I, J = 11, 4, 1, 0.3, npx.asarray([[1]]), npx.asarray([[1]]), 100, 50
     m_Mc, m_Mw, m_Mn = _get_measurement_matrix(n_states, 1, prob=measurement_prob, model_type = "Markov")
     q_Mc, q_Mw, q_Mn = _get_measurement_matrix(n_states, 1, prob=measurement_prob, model_type = "Quantum")
     
@@ -772,7 +772,7 @@ if __name__ == "__main__":
     
     print(likl_markov)
     print(likl_quantum)
-if False:
+
     log.debug("Constant Drift Rate - Likelihood 2")
 
     likl_markov_arr = []
@@ -876,7 +876,7 @@ if False:
         pd.Series(npx.asarray(likl_quantum_arr), name=f"Quantum:{mu}, {sigma}").plot()
         plt.legend()
         plt.show()
-if True:
+
     log.debug("Constant Drift Rate - Prior 1")
 
     X = stats.bernoulli(0.5).rvs(size=(I,J))

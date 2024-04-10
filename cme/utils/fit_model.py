@@ -30,11 +30,12 @@ class ModelDetails:
     file_posts:list = []
     version:float = 0.1
     n_states:int = 11
-    start_width:float = 5
+    start_width:int = 5
+    response_width:int = 1
     delta:float = 0.01
     measurement_prob:float = 0.8
-    num_warmup: int = 1000 
-    samples_n: int = 1500
+    num_warmup: int = 1400 
+    samples_n: int = 1700
     params_type:str = "Centralized|NonCentralized"
     model_type:str = "Markov|Quantum"
     transition_type:str = "RT|TIMESTEP"
@@ -49,11 +50,12 @@ def fit_model(model: ModelDetails):
     #file_post = 
     #version = 0.5
     #len(model.file_posts)
-    print(f"Received request for {len(model.file_posts)} files to be executed in parallel for {model.model_type}_{model.version}!!")
-    Parallel(n_jobs=len(model.file_posts))(delayed(_run_model)(
+    n_jobs = min(4, len(model.file_posts))
+    print(f"Received request for {n_jobs} files to be executed in parallel for {model.model_type}_{model.version}!!")
+    Parallel(n_jobs=n_jobs)(delayed(_run_model)(
                                     
                                     f"{file_loc}{name}_rt.csv", f"{file_loc}{name}_ra.csv", name, model.version, 
-                                    model.n_states, model.start_width, model.delta, model.measurement_prob, 
+                                    model.n_states, model.start_width, model.response_width, model.delta, model.measurement_prob, 
                                     model.params_type, model.model_type, model.transition_type, model.likelihood_type, model.sampling_type,
                                     model.num_warmup, model.samples_n) 
                                                 
@@ -62,14 +64,14 @@ def fit_model(model: ModelDetails):
 
 
 def _run_model(RT_file, X_file, name, version, 
-            n_states, start_width, delta, measurement_prob, 
+            n_states, start_width, response_width, delta, measurement_prob, 
             params_type, model_type, transition_type, likelihood_type, sampling_type,
             num_warmup, samples_n):
 
     X = pd.read_csv(X_file).values
     RT = pd.read_csv(RT_file).values
 
-    q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, start_width, prob=measurement_prob, model_type = model_type)
+    q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
 
     prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=delta,
                                                 measurement_prob=measurement_prob, X=X, RT=RT, n_samples=2,
@@ -90,6 +92,11 @@ def _run_model(RT_file, X_file, name, version,
     
     df_summary.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}.csv")
     df_phi.to_csv(f"export/initial_states_{name}_{model_type}_{version}.csv")
+
+    df_init_state_all = pd.concat([pd.DataFrame(i_s.squeeze()).reset_index().rename(columns={"index":"part_id"}).melt(id_vars="part_id", var_name="state", value_name="value").assign(param_id = i)
+            for i, i_s in enumerate(post_samples["phi_0"])
+            ]).astype({"param_id":"category"})
+    df_init_state_all.to_csv(f"export/initial_states_{name}_{model_type}_{version}_all.csv", index=None)
 
     drift_rate_est = post_samples["mu"].mean(axis=0)
     diffusion_rate_est = post_samples["sigma_final"].mean(axis=0)
