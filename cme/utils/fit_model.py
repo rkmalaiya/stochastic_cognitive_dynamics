@@ -71,11 +71,10 @@ def _run_model(RT_file, X_file, name, version,
     Xs = pd.read_csv(X_file).drop("id", axis=1).values[0:10,:]
     RTs = pd.read_csv(RT_file).drop("id", axis=1).values[0:10,:]
 
-    X_split = npx.split(Xs, npx.arange(0, Xs.shape, batch_size))
-    RT_split = npx.split(RTs, npx.arange(0, RTs.shape, batch_size))
+    X_arr = [Xs[:100,:],  Xs[100:200,:], Xs[200:300,:], Xs[300:,:]]
+    RT_arr = [RTs[:100,:],  RTs[100:200,:], RTs[200:300,:], RTs[300:,:]]
 
-
-    for i, (X, RT) in enumerate(zip(X_split, RT_split)):
+    for i, (X, RT) in enumerate(zip(X_arr, RT_arr)):
         q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
 
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=delta,
