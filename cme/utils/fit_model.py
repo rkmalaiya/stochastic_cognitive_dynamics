@@ -66,72 +66,77 @@ def fit_model(model: ModelDetails):
 def _run_model(RT_file, X_file, name, version, 
             n_states, start_width, response_width, delta, measurement_prob, 
             params_type, model_type, transition_type, likelihood_type, sampling_type,
-            num_warmup, samples_n):
+            num_warmup, samples_n, batch_size=3):
 
-    X = pd.read_csv(X_file).values
-    RT = pd.read_csv(RT_file).values
+    Xs = pd.read_csv(X_file).drop("id", axis=1).values[0:10,:]
+    RTs = pd.read_csv(RT_file).drop("id", axis=1).values[0:10,:]
 
-    q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
+    X_split = npx.split(Xs, npx.arange(0, Xs.shape, batch_size))
+    RT_split = npx.split(RTs, npx.arange(0, RTs.shape, batch_size))
 
-    prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=delta,
-                                                measurement_prob=measurement_prob, X=X, RT=RT, n_samples=2,
-                                                params_type=params_type, model_type=model_type, transition_type=transition_type, 
-                                                likelihood_type=likelihood_type, sampling_type=sampling_type, 
-                                                )
-    
-    post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
-                                        num_warmup=num_warmup, samples_n=samples_n,
-                                        params_type=params_type, model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type 
-                        )
-    post_samples = post_chain.get_samples()
-    df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "sigma_final","phi_0", "likl_rt"])
-    df_phi = df_summary.filter(like="phi_0",axis=0)[["mean"]].reset_index(names="idx")
-    df_t = df_phi.idx.str.split("[", expand=True)[1].str.split(",", expand=True)
-    df_phi[["part_id", "phi_0"]] = df_t[[0,2]].astype(int)
-    df_phi = df_phi.pivot(index="part_id", columns="phi_0", values="mean")
-    
-    df_summary.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}.csv")
-    df_phi.to_csv(f"export/initial_states_{name}_{model_type}_{version}.csv")
 
-    df_init_state_all = pd.concat([pd.DataFrame(i_s.squeeze()).reset_index().rename(columns={"index":"part_id"}).melt(id_vars="part_id", var_name="state", value_name="value").assign(param_id = i)
-            for i, i_s in enumerate(post_samples["phi_0"])
-            ]).astype({"param_id":"category"})
-    df_init_state_all.to_csv(f"export/initial_states_{name}_{model_type}_{version}_all.csv", index=None)
+    for i, (X, RT) in enumerate(zip(X_split, RT_split)):
+        q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
 
-    drift_rate_est = post_samples["mu"].mean(axis=0)
-    diffusion_rate_est = post_samples["sigma_final"].mean(axis=0)
-    phi_0_est = post_samples["phi_0"].mean(axis=0)
+        prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=delta,
+                                                    measurement_prob=measurement_prob, X=X, RT=RT, n_samples=2,
+                                                    params_type=params_type, model_type=model_type, transition_type=transition_type, 
+                                                    likelihood_type=likelihood_type, sampling_type=sampling_type, 
+                                                    )
+        
+        post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
+                                            num_warmup=num_warmup, samples_n=samples_n,
+                                            params_type=params_type, model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type 
+                            )
+        post_samples = post_chain.get_samples()
+        df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "sigma_final","phi_0", "likl_rt"])
+        df_phi = df_summary.filter(like="phi_0",axis=0)[["mean"]].reset_index(names="idx")
+        df_t = df_phi.idx.str.split("[", expand=True)[1].str.split(",", expand=True)
+        df_phi[["part_id", "phi_0"]] = df_t[[0,2]].astype(int)
+        df_phi = df_phi.pivot(index="part_id", columns="phi_0", values="mean")
+        
+        df_summary.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}_{i}.csv")
+        df_phi.to_csv(f"export/initial_states_{name}_{model_type}_{version}_{i}.csv")
 
-    intensity_matrix_quantum = qd._buildH(n_states, drift_rate_est, diffusion_rate_est)
+        #df_init_state_all = pd.concat([pd.DataFrame(i_s.squeeze()).reset_index().rename(columns={"index":"part_id"}).melt(id_vars="part_id", var_name="state", value_name="value").assign(param_id = i)
+        #        for i, i_s in enumerate(post_samples["phi_0"])
+        #        ]).astype({"param_id":"category"})
+        #df_init_state_all.to_csv(f"export/initial_states_{name}_{model_type}_{version}_all.csv", index=None)
 
-    mean_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix_quantum,phi_0=phi_0_est,
-                        delta= delta, Mc = q_Mc, Mw=q_Mw, Mn=q_Mn, t=RT,x=X,
-                        model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
-    phi_t = ca.perform_state_transition(intensity_matrix_quantum, RT_s = RT, RA_s = X, Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, phi_0=phi_0_est, delta=delta,
-                                        transition_type=transition_type, likelihood_type=likelihood_type)
+        drift_rate_est = post_samples["mu"].mean(axis=0)
+        diffusion_rate_est = post_samples["sigma_final"].mean(axis=0)
+        phi_0_est = post_samples["phi_0"].mean(axis=0)
 
-    drift_rate_samples = post_samples["mu"]
-    diffusion_rate_samples = post_samples["sigma_final"]
-    phi_0_samples = post_samples["phi_0"]
+        intensity_matrix_quantum = qd._buildH(n_states, drift_rate_est, diffusion_rate_est)
 
-    post_pd_samples = ca.sample_post_pred_params(n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
-                                                X=X, 
-                                                drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, 
-                                                phi_0_samples=phi_0_samples,
-                                                RT=RT,
-                                                params_type=params_type, model_type=model_type, transition_type=transition_type, 
-                                                likelihood_type=likelihood_type, sampling_type=sampling_type
-                                                )
+        mean_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix_quantum,phi_0=phi_0_est,
+                            delta= delta, Mc = q_Mc, Mw=q_Mw, Mn=q_Mn, t=RT,x=X,
+                            model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
+        phi_t = ca.perform_state_transition(intensity_matrix_quantum, RT_s = RT, RA_s = X, Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, phi_0=phi_0_est, delta=delta,
+                                            transition_type=transition_type, likelihood_type=likelihood_type)
 
-    with open(f'export/mcmc_samples_{name}_{model_type}_{version}.pkl', 'wb') as outp:
-        pickle.dump([post_samples, mean_conf, phi_t, prior_pd_samples, post_pd_samples], outp, pickle.HIGHEST_PROTOCOL)
+        drift_rate_samples = post_samples["mu"]
+        diffusion_rate_samples = post_samples["sigma_final"]
+        phi_0_samples = post_samples["phi_0"]
 
-    
-    df_prior_pred_all = pd.concat([samples["Samples"] for samples in prior_pd_samples])
-    df_prior_pred_all.to_csv(f"export/prior_predictive_{name}_{model_type}_{version}.csv")
+        post_pd_samples = ca.sample_post_pred_params(n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
+                                                    X=X, 
+                                                    drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, 
+                                                    phi_0_samples=phi_0_samples,
+                                                    RT=RT,
+                                                    params_type=params_type, model_type=model_type, transition_type=transition_type, 
+                                                    likelihood_type=likelihood_type, sampling_type=sampling_type
+                                                    )
 
-    df_post_pred_all = pd.concat([samples["Samples"] for samples in post_pd_samples])
-    df_post_pred_all.to_csv(f"export/posterior_predictive_{name}_{model_type}_{version}.csv")
+        with open(f'export/mcmc_samples_{name}_{model_type}_{version}_{i}.pkl', 'wb') as outp:
+            pickle.dump([post_samples, mean_conf, phi_t, prior_pd_samples, post_pd_samples], outp, pickle.HIGHEST_PROTOCOL)
+
+        
+        df_prior_pred_all = pd.concat([samples["Samples"] for samples in prior_pd_samples])
+        df_prior_pred_all.to_csv(f"export/prior_predictive_{name}_{model_type}_{version}_{i}.csv")
+
+        df_post_pred_all = pd.concat([samples["Samples"] for samples in post_pd_samples])
+        df_post_pred_all.to_csv(f"export/posterior_predictive_{name}_{model_type}_{version}_{i}.csv")
 
 
     

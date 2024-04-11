@@ -397,8 +397,8 @@ def transformed_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, M
 
 def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
     P_t = likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-    P_t = npx.where(P_t == 0, 0, npx.log(P_t))
-    return P_t#.sum()
+    P_t = npx.where(P_t == 0, 0, P_t)
+    return P_t
 
 def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
 
@@ -478,6 +478,7 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
     if RT_s is not None:
         likl = estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, 
                           transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
+        #likl = npx.log(likl)
         pyro.deterministic("likl_rt", likl)
         pyro.factor("likelihood", likl) #.sum()
 
@@ -526,7 +527,7 @@ def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA,
     #logp = np.absolute(df_sim_RT.logp)
     df_sim_RT = df_sim_RT.assign(logp = lambda df:np.absolute(df.logp), param_sample_id = param_sample_id)
     for i in range(data_samples): # weights="logp", 
-        if df_sim_RT.loc[:,"logp"].sum() > 0:
+        if df_sim_RT.loc[:,"logp"].values.sum() > 0:
             samples_arr.append(df_sim_RT.groupby("part_id").sample(frac=1,replace=True, weights="logp", random_state= np.random.default_rng()).assign(weighted_sample=i))
         else:
             samples_arr.append(df_sim_RT.groupby("part_id").sample(frac=1,replace=True, random_state= np.random.default_rng()).assign(weighted_sample=-i))
