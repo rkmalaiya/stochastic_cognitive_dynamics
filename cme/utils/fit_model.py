@@ -26,7 +26,7 @@ from joblib import Parallel, delayed
 class ModelDetails:
 
     folder:str = "data"
-    file_pre:str = "",
+    file_pre:str = ""
     file_posts:list = []
     version:float = 0.1
     n_states:int = 11
@@ -36,6 +36,8 @@ class ModelDetails:
     measurement_prob:float = 0.8
     num_warmup: int = 1400 
     samples_n: int = 1700
+    predictive_n: int = 100
+    batch_size: int = 100
     params_type:str = "Centralized|NonCentralized"
     model_type:str = "Markov|Quantum"
     transition_type:str = "RT|TIMESTEP"
@@ -57,7 +59,7 @@ def fit_model(model: ModelDetails):
                                     f"{file_loc}{name}_rt.csv", f"{file_loc}{name}_ra.csv", name, model.version, 
                                     model.n_states, model.start_width, model.response_width, model.delta, model.measurement_prob, 
                                     model.params_type, model.model_type, model.transition_type, model.likelihood_type, model.sampling_type,
-                                    model.num_warmup, model.samples_n) 
+                                    model.num_warmup, model.samples_n, model.predictive_n, model.batch_size) 
                                                 
                                     for name in model.file_posts)
     print(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
@@ -66,19 +68,27 @@ def fit_model(model: ModelDetails):
 def _run_model(RT_file, X_file, name, version, 
             n_states, start_width, response_width, delta, measurement_prob, 
             params_type, model_type, transition_type, likelihood_type, sampling_type,
-            num_warmup, samples_n, batch_size=3):
+            num_warmup, samples_n, predictive_n = 100, batch_size=10):
+    
+    df_X = pd.read_csv(X_file)
+    df_RT = pd.read_csv(RT_file)
 
-    Xs = pd.read_csv(X_file).drop("id", axis=1).values
-    RTs = pd.read_csv(RT_file).drop("id", axis=1).values
+    df_X = df_X.drop("id", axis=1) if "id" in df_X.columns else df_X 
+    df_RT = df_RT.drop("id", axis=1) if "id" in df_RT.columns else df_RT 
 
-    X_arr = [Xs[:100,:]]#,  Xs[100:200,:], Xs[200:300,:], Xs[300:,:]]
-    RT_arr = [RTs[:100,:]]#,  RTs[100:200,:], RTs[200:300,:], RTs[300:,:]]
+    Xs = df_X.values
+    RTs = df_RT.values
 
-    for i, (X, RT) in enumerate(zip(X_arr, RT_arr)):
+    X_split = np.split(Xs, npx.arange(batch_size, Xs.shape[0], batch_size), axis=0)
+    RT_split = np.split(RTs, npx.arange(batch_size, RTs.shape[0], batch_size), axis=0)
+
+
+    for i, (X, RT) in enumerate(zip(X_split, RT_split)):
+    #for i in range(1):
         q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
 
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=delta,
-                                                    measurement_prob=measurement_prob, X=X, RT=RT, n_samples=samples_n,
+                                                    measurement_prob=measurement_prob, X=X, RT=RT, n_samples=predictive_n,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                     likelihood_type=likelihood_type, sampling_type=sampling_type, 
                                                     )
