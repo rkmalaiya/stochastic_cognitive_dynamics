@@ -124,10 +124,10 @@ def _run_model(RT_file, X_file, name, version,
         phi_t = ca.perform_state_transition(intensity_matrix_quantum, RT_s = RT, RA_s = X, Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, phi_0=phi_0_est, delta=delta,
                                             transition_type=transition_type, likelihood_type=likelihood_type)
 
-        total_samples = samples_n * 4
-        drift_rate_samples = post_samples["mu"][np.random.default_rng().choice(total_samples, 500),...]
-        diffusion_rate_samples = post_samples["sigma_final"][np.random.default_rng().choice(total_samples, 500),...]
-        phi_0_samples = post_samples["phi_0"][np.random.default_rng().choice(total_samples, 500),...]
+        total_samples = post_samples["mu"].shape[0]
+        drift_rate_samples = post_samples["mu"][np.random.default_rng().choice(total_samples, predictive_n),...]
+        diffusion_rate_samples = post_samples["sigma_final"][np.random.default_rng().choice(total_samples, predictive_n),...]
+        phi_0_samples = post_samples["phi_0"][np.random.default_rng().choice(total_samples, predictive_n),...]
 
         post_pd_samples = ca.sample_post_pred_params(n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
                                                     X=X, 
