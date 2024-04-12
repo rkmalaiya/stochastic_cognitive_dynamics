@@ -10,6 +10,8 @@ import arviz as az
 import numpy as np
 import pickle
 from joblib import Parallel, delayed
+from cme.utils import common_logging as cl
+log = cl.get_logger("fit_model")
 
 #file_loc_X= "data/ad_X_"
 #file_loc_RT= "data/ad_rt_"
@@ -87,17 +89,22 @@ def _run_model(RT_file, X_file, name, version,
     #for i in range(1):
         q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
 
+        log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i}")
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=delta,
                                                     measurement_prob=measurement_prob, X=X, RT=RT, n_samples=predictive_n,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                     likelihood_type=likelihood_type, sampling_type=sampling_type, 
                                                     )
         
+        log.info(f"Starting Posterior Sampling_{name}_{model_type}_{version}_{i}")
         post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
                                             num_warmup=num_warmup, samples_n=samples_n,
                                             params_type=params_type, model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type 
                             )
         post_samples = post_chain.get_samples()
+        total_samples = post_samples["mu"].shape[0]
+        pred_idx = np.random.default_rng().choice(total_samples, predictive_n)
+
         df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "sigma_final","phi_0", "likl_rt"])
         df_phi = df_summary.filter(like="phi_0",axis=0)[["mean"]].reset_index(names="idx")
         df_t = df_phi.idx.str.split("[", expand=True)[1].str.split(",", expand=True)
@@ -108,10 +115,12 @@ def _run_model(RT_file, X_file, name, version,
         df_phi.to_csv(f"export/initial_states_{name}_{model_type}_{version}_{i}.csv")
 
         #df_init_state_all = pd.concat([pd.DataFrame(i_s.squeeze()).reset_index().rename(columns={"index":"part_id"}).melt(id_vars="part_id", var_name="state", value_name="value").assign(param_id = i)
-        #        for i, i_s in enumerate(post_samples["phi_0"])
+        #        for i, i_s in enumerate(post_samples["phi_0"][pred_idx,...])
         #        ]).astype({"param_id":"category"})
         #df_init_state_all.to_csv(f"export/initial_states_{name}_{model_type}_{version}_all.csv", index=None)
 
+
+        log.info(f"Starting Mean Confidence_{name}_{model_type}_{version}_{i}")
         drift_rate_est = post_samples["mu"].mean(axis=0)
         diffusion_rate_est = post_samples["sigma_final"].mean(axis=0)
         phi_0_est = post_samples["phi_0"].mean(axis=0)
@@ -124,11 +133,12 @@ def _run_model(RT_file, X_file, name, version,
         phi_t = ca.perform_state_transition(intensity_matrix_quantum, RT_s = RT, RA_s = X, Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, phi_0=phi_0_est, delta=delta,
                                             transition_type=transition_type, likelihood_type=likelihood_type)
 
-        total_samples = post_samples["mu"].shape[0]
-        drift_rate_samples = post_samples["mu"][np.random.default_rng().choice(total_samples, predictive_n),...]
-        diffusion_rate_samples = post_samples["sigma_final"][np.random.default_rng().choice(total_samples, predictive_n),...]
-        phi_0_samples = post_samples["phi_0"][np.random.default_rng().choice(total_samples, predictive_n),...]
+        
+        drift_rate_samples = post_samples["mu"][pred_idx, ...]
+        diffusion_rate_samples = post_samples["sigma_final"][pred_idx,...]
+        phi_0_samples = post_samples["phi_0"][pred_idx,...]
 
+        log.info(f"Starting Posterior Predictive Sampling_{name}_{model_type}_{version}_{i}")
         post_pd_samples = ca.sample_post_pred_params(n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
                                                     X=X, 
                                                     drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, 
@@ -150,4 +160,4 @@ def _run_model(RT_file, X_file, name, version,
 
 
     
-    print(f"Job successfully completed for {name}_{model_type}, {version}")
+    print(f"Job successfully completed for {name}, {model_type}, {version}")
