@@ -40,6 +40,7 @@ class ModelDetails:
     samples_n: int = 1700
     predictive_n: int = 100
     batch_size: int = 100
+    is_test: str = False
     params_type:str = "Centralized|NonCentralized"
     model_type:str = "Markov|Quantum"
     transition_type:str = "RT|TIMESTEP"
@@ -61,7 +62,7 @@ def fit_model(model: ModelDetails):
                                     f"{file_loc}{name}_rt.csv", f"{file_loc}{name}_ra.csv", name, model.version, 
                                     model.n_states, model.start_width, model.response_width, model.delta, model.measurement_prob, 
                                     model.params_type, model.model_type, model.transition_type, model.likelihood_type, model.sampling_type,
-                                    model.num_warmup, model.samples_n, model.predictive_n, model.batch_size) 
+                                    model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test) 
                                                 
                                     for name in model.file_posts)
     print(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
@@ -70,7 +71,7 @@ def fit_model(model: ModelDetails):
 def _run_model(RT_file, X_file, name, version, 
             n_states, start_width, response_width, delta, measurement_prob, 
             params_type, model_type, transition_type, likelihood_type, sampling_type,
-            num_warmup, samples_n, predictive_n = 100, batch_size=10):
+            num_warmup, samples_n, predictive_n, batch_size, is_test):
     
     df_X = pd.read_csv(X_file)
     df_RT = pd.read_csv(RT_file)
@@ -158,6 +159,8 @@ def _run_model(RT_file, X_file, name, version,
         df_post_pred_all = pd.concat([samples["Samples"] for samples in post_pd_samples])
         df_post_pred_all.to_csv(f"export/posterior_predictive_{name}_{model_type}_{version}_{i}.csv")
 
+        if is_test:
+            break
 
     
     print(f"Job successfully completed for {name}, {model_type}, {version}")
