@@ -68,17 +68,17 @@ def _run_model(RT_file, X_file, name, version,
             params_type, model_type, transition_type, likelihood_type, sampling_type,
             num_warmup, samples_n, batch_size=3):
 
-    Xs = pd.read_csv(X_file).drop("id", axis=1).values[0:10,:]
-    RTs = pd.read_csv(RT_file).drop("id", axis=1).values[0:10,:]
+    Xs = pd.read_csv(X_file).drop("id", axis=1).values
+    RTs = pd.read_csv(RT_file).drop("id", axis=1).values
 
-    X_arr = [Xs[:100,:],  Xs[100:200,:], Xs[200:300,:], Xs[300:,:]]
-    RT_arr = [RTs[:100,:],  RTs[100:200,:], RTs[200:300,:], RTs[300:,:]]
+    X_arr = [Xs[:100,:]]#,  Xs[100:200,:], Xs[200:300,:], Xs[300:,:]]
+    RT_arr = [RTs[:100,:]]#,  RTs[100:200,:], RTs[200:300,:], RTs[300:,:]]
 
     for i, (X, RT) in enumerate(zip(X_arr, RT_arr)):
         q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
 
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=delta,
-                                                    measurement_prob=measurement_prob, X=X, RT=RT, n_samples=2,
+                                                    measurement_prob=measurement_prob, X=X, RT=RT, n_samples=samples_n,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                     likelihood_type=likelihood_type, sampling_type=sampling_type, 
                                                     )
@@ -114,9 +114,10 @@ def _run_model(RT_file, X_file, name, version,
         phi_t = ca.perform_state_transition(intensity_matrix_quantum, RT_s = RT, RA_s = X, Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, phi_0=phi_0_est, delta=delta,
                                             transition_type=transition_type, likelihood_type=likelihood_type)
 
-        drift_rate_samples = post_samples["mu"]
-        diffusion_rate_samples = post_samples["sigma_final"]
-        phi_0_samples = post_samples["phi_0"]
+        total_samples = samples_n * 4
+        drift_rate_samples = post_samples["mu"][np.random.default_rng().choice(total_samples, 500),...]
+        diffusion_rate_samples = post_samples["sigma_final"][np.random.default_rng().choice(total_samples, 500),...]
+        phi_0_samples = post_samples["phi_0"][np.random.default_rng().choice(total_samples, 500),...]
 
         post_pd_samples = ca.sample_post_pred_params(n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
                                                     X=X, 
