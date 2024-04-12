@@ -106,7 +106,7 @@ def _run_model(RT_file, X_file, name, version,
         total_samples = post_samples["mu"].shape[0]
         pred_idx = np.random.default_rng().choice(total_samples, predictive_n)
 
-        df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "sigma_final","phi_0", "likl_rt"])
+        df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "phi_0", "likl_rt"]) #"sigma_final",
         df_phi = df_summary.filter(like="phi_0",axis=0)[["mean"]].reset_index(names="idx")
         df_t = df_phi.idx.str.split("[", expand=True)[1].str.split(",", expand=True)
         df_phi[["part_id", "phi_0"]] = df_t[[0,2]].astype(int)
@@ -150,7 +150,13 @@ def _run_model(RT_file, X_file, name, version,
                                                     )
 
         with open(f'export/mcmc_samples_{name}_{model_type}_{version}_{i}.pkl', 'wb') as outp:
-            pickle.dump([post_samples, mean_conf, phi_t, prior_pd_samples, post_pd_samples], outp, pickle.HIGHEST_PROTOCOL)
+            pickle.dump(dict(post_samples = post_samples, 
+                             mean_conf = mean_conf, 
+                             phi_t = phi_t, 
+                             prior_pd_samples = prior_pd_samples, 
+                             post_pd_samples = post_pd_samples, 
+                             RT = RT, 
+                             X = X), outp, pickle.HIGHEST_PROTOCOL)
 
         
         df_prior_pred_all = pd.concat([samples["Samples"] for samples in prior_pd_samples])
