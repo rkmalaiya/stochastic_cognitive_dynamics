@@ -84,10 +84,8 @@ def _run_model(RT_file, X_file, name, version,
 
     X_split = np.split(Xs, npx.arange(batch_size, Xs.shape[0], batch_size), axis=0)
     RT_split = np.split(RTs, npx.arange(batch_size, RTs.shape[0], batch_size), axis=0)
-
-
-    for i, (X, RT) in enumerate(zip(X_split, RT_split)):
-    #for i in range(1):
+    
+    def run_half_model(i, X, RT):
         q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
 
         log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i}")
@@ -151,12 +149,12 @@ def _run_model(RT_file, X_file, name, version,
 
         with open(f'export/mcmc_samples_{name}_{model_type}_{version}_{i}.pkl', 'wb') as outp:
             pickle.dump(dict(post_samples = post_samples, 
-                             mean_conf = mean_conf, 
-                             phi_t = phi_t, 
-                             prior_pd_samples = prior_pd_samples, 
-                             post_pd_samples = post_pd_samples, 
-                             RT = RT, 
-                             X = X), outp, pickle.HIGHEST_PROTOCOL)
+                            mean_conf = mean_conf, 
+                            phi_t = phi_t, 
+                            prior_pd_samples = prior_pd_samples, 
+                            post_pd_samples = post_pd_samples, 
+                            RT = RT, 
+                            X = X), outp, pickle.HIGHEST_PROTOCOL)
 
         
         df_prior_pred_all = pd.concat([samples["Samples"] for samples in prior_pd_samples])
@@ -165,8 +163,15 @@ def _run_model(RT_file, X_file, name, version,
         df_post_pred_all = pd.concat([samples["Samples"] for samples in post_pd_samples])
         df_post_pred_all.to_csv(f"export/posterior_predictive_{name}_{model_type}_{version}_{i}.csv")
 
+    fn = []
+
+    for i, (X, RT) in enumerate(zip(X_split, RT_split)):
+        fn.append(delayed(run_half_model)(i, X, RT))
+        #run_half_model()
         if is_test:
             break
 
+    Parallel(n_jobs=2, prefer="processes", backend = "loky")(f for f in fn)
+        
     
     print(f"Job successfully completed for {name}, {model_type}, {version}")
