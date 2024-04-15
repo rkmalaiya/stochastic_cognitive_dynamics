@@ -77,7 +77,10 @@ def _run_model(RT_file, X_file, name, version,
     df_RT = pd.read_csv(RT_file)
 
     df_X = df_X.drop("id", axis=1) if "id" in df_X.columns else df_X 
-    df_RT = df_RT.drop("id", axis=1) if "id" in df_RT.columns else df_RT 
+    df_RT = df_RT.drop("id", axis=1) if "id" in df_RT.columns else df_RT
+
+    df_X = df_X.drop("Unnamed: 0", axis=1) if "Unnamed: 0" in df_X.columns else df_X 
+    df_RT = df_RT.drop("Unnamed: 0", axis=1) if "Unnamed: 0" in df_RT.columns else df_RT 
 
     Xs = df_X.values
     RTs = df_RT.values
