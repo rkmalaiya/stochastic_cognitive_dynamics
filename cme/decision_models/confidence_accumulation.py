@@ -718,7 +718,7 @@ def get_arviz_model(mcmc_chain):
 
 if __name__ == "__main__":
 
-    n_states, start_width, delta, measurement_prob, mu, sigma, I, J = 11, 4, 1, 0.3, npx.asarray([[1]]), npx.asarray([[1]]), 100, 50
+    n_states, start_width, delta, measurement_prob, mu, sigma, I, J = 7, 4, 1, 0.8, npx.asarray([[1]]), npx.asarray([[1]]), 100, 50
     m_Mc, m_Mw, m_Mn = _get_measurement_matrix(n_states, 1, prob=measurement_prob, model_type = "Markov")
     q_Mc, q_Mw, q_Mn = _get_measurement_matrix(n_states, 1, prob=measurement_prob, model_type = "Quantum")
     
@@ -744,9 +744,12 @@ if __name__ == "__main__":
     print(mean_conf_quantum)
 
     log.debug("Constant Drift Rate - Mean Confidence 2")
+    #import seaborn as sns
+    #sns.set_context("paper", font_scale=1.5)
     mean_conf_markov_arr = []
     mean_conf_quantum_arr = []
-    for t in range(1, 100):
+    for t in np.arange(1, 15,0.001):
+
         mean_conf_markov = get_mean_confidence(n_states, intensity_matrix=intensity_matrix_markov, 
                                            phi_0=phi_0_markov, delta=delta, Mn=m_Mn, t=t, transition_type="RT", likelihood_type="SINGLE", model_type="Markov")
         mean_conf_markov_arr.append(mean_conf_markov.squeeze())
@@ -756,9 +759,11 @@ if __name__ == "__main__":
 
     pd.Series(npx.asarray(mean_conf_markov_arr), name="Markov").plot()
     pd.Series(npx.asarray(mean_conf_quantum_arr), name="Quantum").plot()
+    plt.xlabel("Response Time (in secs)")
+    plt.ylabel("Evolution of Mean Confidence")
     plt.legend()
     plt.show()
-
+if False:
     log.debug("Constant Drift Rate - Likelihood 1")
 
     likl_markov = likelihood(intensity_matrix=intensity_matrix_markov, phi_0=phi_0_markov, delta=delta,

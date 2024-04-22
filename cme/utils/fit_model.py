@@ -168,13 +168,16 @@ def _run_model(RT_file, X_file, name, version,
 
     fn = []
 
+    batch_n = 0
     for i, (X, RT) in enumerate(zip(X_split, RT_split)):
         fn.append(delayed(run_half_model)(i, X, RT))
+        batch_n = batch_n + 1
         #run_half_model()
         if is_test:
             break
 
-    Parallel(n_jobs=2, prefer="processes", backend = "loky")(f for f in fn)
+    print(f"Starting {batch_n} jobs for sub-batch of participants")
+    Parallel(n_jobs=batch_n, prefer="processes", backend = "loky")(f for f in fn)
         
     
     print(f"Job successfully completed for {name}, {model_type}, {version}")
