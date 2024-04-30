@@ -55,7 +55,7 @@ def fit_model(model: ModelDetails):
     #file_post = 
     #version = 0.5
     #len(model.file_posts)
-    n_jobs = min(4, len(model.file_posts))
+    n_jobs = min(4, len(model.file_posts)) if not model.is_test else 1
     print(f"Received request for {n_jobs} files to be executed in parallel for {model.model_type}_{model.version}!!")
     Parallel(n_jobs=n_jobs)(delayed(_run_model)(
                                     
