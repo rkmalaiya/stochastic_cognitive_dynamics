@@ -149,13 +149,21 @@ def _get_initial_state(n_states, start_width, I=1, prob=1):
     #    #with npy.plate('S', n_states, dim=-2):
     #    phi_0 = npy.sample("phi_0", dist.Dirichlet((npx.ones(n_states)[:,None])/n_states)) # Initial State
 
-    with npy.plate('S', n_states):
-        conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.1
-    with npy.plate('I', I, dim=-3):
-        phi_init = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+    
+    with npy.plate('I', I, dim=-4):
+        with npy.plate('S', n_states, dim=-1):
+            conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
 
-    phi_0 = npy.deterministic("phi_0", phi_init.transpose(0,1,3,2))
-    return phi_0 #s_0
+    with npy.plate('I', I, dim=-3):
+        p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+        
+
+    #p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State
+
+             
+    p_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)
+
+    return p_0 #s_0
     
 def sample_states_and_confidence(rt, phi_0, K, Mn, N):
     n_states = K.shape[-1] # picking the last dimension because the dimensions are I,J,K,K
