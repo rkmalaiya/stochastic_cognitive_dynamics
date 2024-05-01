@@ -301,7 +301,7 @@ def _get_initial_state(n_states, start_width, I = 1, prob=1, model_type = "Marko
 
         elif prior_type == "Centered":
             w_t = int(((n_states-width)/2))
-            pad_width = (w_t, w_t+1) # will pad equally on left and right of array
+            pad_width = (w_t, w_t) # will pad equally on left and right of array
             
         elif prior_type == "Uniform":
             pad_width = (0,0)
