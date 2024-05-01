@@ -462,11 +462,11 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
         raise Exception(f"Please select one of {params_type}")
 
     if model_type == "Markov":
-        sigma = pyro.deterministic("sigma_final",mu + sigma**2) # Sigma needs to be larger than mu and Sigma cannot be negative
+        sigma = pyro.deterministic("sigma_final",mu + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
         intensity_matrix = dd._buildK(n_states, mu, sigma, delta)
 
     elif model_type == "Quantum":
-        sigma = pyro.deterministic("sigma_final",sigma**2) # Sigma cannot be negative
+        sigma = pyro.deterministic("sigma_final",sigma) # Sigma cannot be negative
         intensity_matrix = qd._buildH(n_states, mu, sigma, delta)
     else:
         raise Exception(f"Please select one of {model_type}")
