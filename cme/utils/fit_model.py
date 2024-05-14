@@ -46,6 +46,7 @@ class ModelDetails:
     transition_type:str = "RT|TIMESTEP"
     likelihood_type:str = "SINGLE|JOINT"
     sampling_type:str = "MCMC|GEN"
+    csv_header:str = "infer|None"
 
 #folder, file_pre, file_posts, version, n_states, start_width, delta, measurement_prob, params_type, model_type, transition_type, likelihood_type, sampling_type
 def fit_model(model: ModelDetails):
@@ -62,7 +63,7 @@ def fit_model(model: ModelDetails):
                                     f"{file_loc}{name}_rt.csv", f"{file_loc}{name}_ra.csv", name, model.version, 
                                     model.n_states, model.start_width, model.response_width, model.delta, model.measurement_prob, 
                                     model.params_type, model.model_type, model.transition_type, model.likelihood_type, model.sampling_type,
-                                    model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test) 
+                                    model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, model.csv_header) 
                                                 
                                     for name in model.file_posts)
     print(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
@@ -71,10 +72,10 @@ def fit_model(model: ModelDetails):
 def _run_model(RT_file, X_file, name, version, 
             n_states, start_width, response_width, delta, measurement_prob, 
             params_type, model_type, transition_type, likelihood_type, sampling_type,
-            num_warmup, samples_n, predictive_n, batch_size, is_test):
+            num_warmup, samples_n, predictive_n, batch_size, is_test, csv_header):
     
-    df_X = pd.read_csv(X_file)
-    df_RT = pd.read_csv(RT_file)
+    df_X = pd.read_csv(X_file, header=csv_header)
+    df_RT = pd.read_csv(RT_file, header=csv_header)
 
     df_X = df_X.drop("id", axis=1) if "id" in df_X.columns else df_X 
     df_RT = df_RT.drop("id", axis=1) if "id" in df_RT.columns else df_RT
@@ -141,6 +142,7 @@ def _run_model(RT_file, X_file, name, version,
         phi_0_samples = post_samples["phi_0"][pred_idx,...]
 
         log.info(f"Starting Posterior Predictive Sampling_{name}_{model_type}_{version}_{i}")
+        
         post_pd_samples = ca.sample_post_pred_params(n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
                                                     X=X, 
                                                     drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, 
