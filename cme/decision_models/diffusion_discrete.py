@@ -96,6 +96,9 @@ def _buildK(n_states, mu, sigma=1, delta=0.01):
     i, params = lax.scan(_create_i, 0, params)#, unroll=True)
     K = params["K"]
 
+    K = K.at[:,0,:,0].set(0) # resetting the first and last columns as the correct values will be defined below.
+    K = K.at[:,0,:,-1].set(0)
+
     K = K.at[:,0,[0,1],0].set(npx.asarray([a[:,0], -a[:,0]]).T)
     K = K.at[:,0,[-2,-1],-1].set(npx.asarray([-a[:,-1], a[:,-1]]).T)
 
