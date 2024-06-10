@@ -9,6 +9,7 @@ import scipy.stats as stats
 import arviz as az
 import numpy as np
 import pickle
+import time
 from joblib import Parallel, delayed
 from cme.utils import common_logging as cl
 log = cl.get_logger("fit_model")
@@ -46,7 +47,8 @@ class ModelDetails:
     transition_type:str = "RT|TIMESTEP"
     likelihood_type:str = "SINGLE|JOINT"
     sampling_type:str = "MCMC|GEN"
-    csv_header:str = "infer|None"
+    log_scale: str = False
+    csv_header:str = False
 
 #folder, file_pre, file_posts, version, n_states, start_width, delta, measurement_prob, params_type, model_type, transition_type, likelihood_type, sampling_type
 def fit_model(model: ModelDetails):
@@ -63,7 +65,7 @@ def fit_model(model: ModelDetails):
                                     f"{file_loc}{name}_rt.csv", f"{file_loc}{name}_ra.csv", name, model.version, 
                                     model.n_states, model.start_width, model.response_width, model.delta, model.measurement_prob, 
                                     model.params_type, model.model_type, model.transition_type, model.likelihood_type, model.sampling_type,
-                                    model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, model.csv_header) 
+                                    model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, model.log_scale, model.csv_header) 
                                                 
                                     for name in model.file_posts)
     print(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
@@ -72,16 +74,16 @@ def fit_model(model: ModelDetails):
 def _run_model(RT_file, X_file, name, version, 
             n_states, start_width, response_width, delta, measurement_prob, 
             params_type, model_type, transition_type, likelihood_type, sampling_type,
-            num_warmup, samples_n, predictive_n, batch_size, is_test, csv_header):
+            num_warmup, samples_n, predictive_n, batch_size, is_test, log_scale, csv_header):
     
-    df_X = pd.read_csv(X_file, header=csv_header)
-    df_RT = pd.read_csv(RT_file, header=csv_header)
+    df_X = pd.read_csv(X_file, header="infer" if csv_header else None)
+    df_RT = pd.read_csv(RT_file, header="infer" if csv_header else None)
 
     df_X = df_X.drop("id", axis=1) if "id" in df_X.columns else df_X 
     df_RT = df_RT.drop("id", axis=1) if "id" in df_RT.columns else df_RT
 
-    df_X = df_X.drop("Unnamed: 0", axis=1) if "Unnamed: 0" in df_X.columns else df_X 
-    df_RT = df_RT.drop("Unnamed: 0", axis=1) if "Unnamed: 0" in df_RT.columns else df_RT 
+    df_X = df_X.drop("Unnamed: 0", axis=1).dropna() if "Unnamed: 0" in df_X.columns else df_X 
+    df_RT = df_RT.drop("Unnamed: 0", axis=1).dropna() if "Unnamed: 0" in df_RT.columns else df_RT 
 
     Xs = df_X.values
     RTs = df_RT.values
@@ -90,6 +92,9 @@ def _run_model(RT_file, X_file, name, version,
     RT_split = np.split(RTs, npx.arange(batch_size, RTs.shape[0], batch_size), axis=0)
     
     def run_half_model(i, X, RT):
+        if log_scale:
+            RT = np.log(RT)
+
         q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
 
         log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i}")
@@ -98,12 +103,13 @@ def _run_model(RT_file, X_file, name, version,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                     likelihood_type=likelihood_type, sampling_type=sampling_type, 
                                                     )
-        
-        log.info(f"Starting Posterior Sampling_{name}_{model_type}_{version}_{i}")
+        start_time_sampling = time.perf_counter()
+        log.info(f"Starting Posterior Sampling_{name}_{model_type}_{version}_{i}_{start_time_sampling}")
         post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
                                             num_warmup=num_warmup, samples_n=samples_n,
                                             params_type=params_type, model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type 
                             )
+        log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i}_{(time.perf_counter() - start_time_sampling)/60} mins")
         post_samples = post_chain.get_samples()
         total_samples = post_samples["mu"].shape[0]
         pred_idx = np.random.default_rng().choice(total_samples, predictive_n)
@@ -177,9 +183,9 @@ def _run_model(RT_file, X_file, name, version,
         #run_half_model()
         if is_test:
             break
-
-    print(f"Starting {batch_n} jobs for sub-batch of participants")
-    Parallel(n_jobs=batch_n, prefer="processes", backend = "loky")(f for f in fn)
-        
     
-    print(f"Job successfully completed for {name}, {model_type}, {version}")
+    start_time = time.perf_counter()
+    log.info(f"Starting {batch_n} jobs for sub-batch of participants at time {start_time}")
+    Parallel(n_jobs=batch_n, prefer="processes", backend = "loky")(f for f in fn)
+    
+    log.info(f"Job successfully completed for {name}, {model_type}, {version} after {(time.perf_counter() - start_time)/60} mins")

@@ -102,7 +102,7 @@ def perform_walk(num_states, start_width, mu, sigma=1,rt=200,type="C"):
     b = mu*mv;  
     a = sigma#*np.ones((ns,1));  
     H = _buildH(num_states,a,b,a); # function given below  
-    tv = np.arange(0,rt,0.1) # no of time steps 
+    tv = np.arange(0,rt,1) # no of time steps 
     nt = tv.shape[0]
     # time loop  
     avg_conf = [];  
@@ -190,7 +190,7 @@ if __name__ == "__main__":
     sigma = 1
     num_states = 7 # choose a odd number
     start_width = 3
-    rt=20
+    rt=40
 
     df_st, df_avg_conf, ds_likl = perform_walk(num_states, start_width, mu, sigma,rt=rt)
 

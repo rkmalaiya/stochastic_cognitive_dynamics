@@ -1,92 +1,97 @@
-from numpy import *
-from pandas import *
-from scipy.stats import *
+import numpy as np
+import pandas as pd
+import scipy.stats as stats
 import cme.utils.common_logging as cl
 from joblib import Parallel, delayed
 
 log = cl.get_logger("random-walk")
 
+def _scale_steps_by_boundary(steps, alpha, tau, sigma):
+   return ((np.asarray(steps) - 1)/2) * _get_step_size(alpha, tau, sigma)
+
+def _get_step_size(alpha, tau, sigma):
+   return alpha * sigma * np.sqrt(tau)
 
 def _get_n_states(alpha, theta, tau, sigma):
     sigma = sigma#.squeeze()
-    delta_state = alpha * sigma * sqrt(tau)
-    n_states = round(theta/delta_state) #2 * round(theta/delta_state) + 1 # #
-    return 101#n_states
+    step_size = _get_step_size(alpha, tau, sigma)
+    n_states = 2 * int(theta/step_size) + 1 #np.round(theta/delta_state) #2 * round(theta/delta_state) + 1 # #
+    return n_states
 
 def _create_Wiener_Q(n_states, alpha, tau, sigma, mu):
-    Q = zeros((n_states, n_states))
-    rows_ = arange(1,n_states)
-    cols_ = arange(0,n_states-1)
-    Q[rows_,cols_] = 1/(2*alpha)*(1-mu*sqrt(tau)/sigma**2)
-    Q[cols_, rows_] =  1/(2*alpha)*(1+mu*sqrt(tau)/sigma**2)
-    Q[arange(n_states), arange(n_states)] = 1-(1/alpha)
+    Q = np.zeros((n_states, n_states))
+    rows_ = np.arange(1,n_states)
+    cols_ = np.arange(0,n_states-1)
+    Q[rows_,cols_] = 1/(2*alpha)*(1-mu*np.sqrt(tau)/sigma**2)
+    Q[cols_, rows_] =  1/(2*alpha)*(1+mu*np.sqrt(tau)/sigma**2)
+    Q[np.arange(n_states), np.arange(n_states)] = 1-(1/alpha)
     Q[0,1] = 0
     Q[-1,-2] = 0
     return Q
 
 def _create_pWiener_Q(n_states, alpha, tau, sigma, mu):
     
-    Q = zeros((n_states, n_states))
-    rows_ = arange(1,n_states)
-    cols_ = arange(0,n_states-1)
+    Q = np.zeros((n_states, n_states))
+    rows_ = np.arange(1,n_states)
+    cols_ = np.arange(0,n_states-1)
 
-    mu_t = mu*sqrt(tau)/sigma**2
+    mu_t = mu*np.sqrt(tau)/sigma**2
     Q[rows_,cols_] = 1/(2*alpha)*(1-mu_t)[rows_]
     Q[cols_, rows_] =  1/(2*alpha)*(1+mu_t)[cols_]
-    Q[arange(n_states), arange(n_states)] = 1-(1/alpha)
+    Q[np.arange(n_states), np.arange(n_states)] = 1-(1/alpha)
     Q[0,1] = 0
     Q[-1,-2] = 0
     return Q
 
 def _create_OU_Q(n_states, alpha, tau, sigma, delta, gamma):
     
-    Q = zeros((n_states, n_states))
-    rows_ = arange(1,n_states)
-    cols_ = arange(0,n_states-1)
-    x = arange(n_states)
+    Q = np.zeros((n_states, n_states))
+    rows_ = np.arange(1,n_states)
+    cols_ = np.arange(0,n_states-1)
+    x = np.arange(n_states)
 
-    p1 = 1/(2*alpha) * ( 1 - ( (delta - (gamma * x))  * sqrt(tau)/sigma**2 ))
-    p2 = 1/(2*alpha) * ( 1 + ( (delta - (gamma * x))  * sqrt(tau)/sigma**2 ))
+    p1 = 1/(2*alpha) * ( 1 - ( (delta - (gamma * x))  * np.sqrt(tau)/sigma**2 ))
+    p2 = 1/(2*alpha) * ( 1 + ( (delta - (gamma * x))  * np.sqrt(tau)/sigma**2 ))
     p3 = 1 - (1/alpha)
     
 
     Q[rows_,cols_] = p1[rows_]
     Q[cols_, rows_] = p2[cols_]
-    Q[arange(n_states), arange(n_states)] = p3
+    Q[np.arange(n_states), np.arange(n_states)] = p3
     Q[0,1] = 0
     Q[-1,-2] = 0
 
     return Q
 
 def _get_initial_state(n_states):
-   p_0 = dirichlet(repeat(0.5,n_states-int(n_states/2))).rvs()
-   p_0 = around(p_0.squeeze(), decimals=2) #concatenate(([[0.0]], p_0, [[0.0]]), axis=1) #dirichlet.rvs(repeat(0.5,n_states))
-   z = sum(p_0)
+   p_0 = stats.dirichlet(np.repeat(0.5,n_states-int(n_states/2))).rvs()
+   p_0 = np.around(p_0.squeeze(), decimals=2) #concatenate(([[0.0]], p_0, [[0.0]]), axis=1) #dirichlet.rvs(repeat(0.5,n_states))
+   z = np.sum(p_0)
    while (z>1):
       #print("^^^^^^ ",z)
       p_0 = p_0 / z
-      z = sum(p_0)
+      z = np.sum(p_0)
       #print("**** ",z)
-   s_0 = pad(multinomial.rvs(n=1,p=p_0), int(n_states/4))
+   s_0 = np.pad(stats.multinomial.rvs(n=1,p=p_0), int(n_states/4))
    return s_0, p_0
 
 def _random_walk_next_step(s_t, Q):
-   ind_t = where(s_t)[0][0] #dot(Q, s_t) #select correct row
+   ind_t = np.where(s_t)[0][0] #dot(Q, s_t) #select correct row
    p_t = Q[ind_t,:]
    #p_t = around(p_t.squeeze(),decimals=2)
    z=sum(p_t)
    while(z>1):
       print(f"$$$$$$$$$$$ Floating point error $$$$$$$$$$$$$$$$$$$ {z}")
 
-   s_t_1 = multinomial(n=1, p=p_t).rvs().squeeze() #Not sure about adding squeeze here
+   s_t_1 = stats.multinomial(n=1, p=p_t).rvs().squeeze() #Not sure about adding squeeze here
 
-   ind_t_1 = where(s_t_1)[0][0] 
+   ind_t_1 = np.where(s_t_1)[0][0] 
    #print(ind_t - ind_t_1, end=" ")
    if(ind_t - ind_t_1 < -1):
       return s_t, ind_t, p_t
    return s_t_1, ind_t_1, p_t
 
-def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial="EZ|Any"):
+def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial="EZ|Fixed|Any", bias=None):
    steps = []
    RT = -1
    X = -1
@@ -97,8 +102,11 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
    Q = get_transition_matrix(alpha, tau, sigma, *params, process=process, n_states=n_states)
    
    if(initial == "EZ"):
-      s_t = zeros(n_states)
+      s_t = np.zeros(n_states)
       s_t[int(round(n_states/2))] = 1
+   elif(initial == "Fixed"):
+      s_t = np.zeros(n_states)
+      s_t[int(bias*n_states)] = 1
    else:
       s_t,_ = _get_initial_state(n_states)
    
@@ -134,29 +142,32 @@ def get_transition_matrix(alpha, tau, sigma, *params, process, n_states):
     return Q
 
 
-def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Any", njobs=1):
+def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Fixed|Any", njobs=1,bias=None):
+   # alpha is a constant
+   # theta decides the number of states
    RT_arr = []
    X_arr = []
    steps_arr = []
    max_iter = 5000
 
-   for mi in arange(max_iter):
+   for mi in np.arange(max_iter):
 
       ret_ans = Parallel(n_jobs=njobs)(delayed(_perform_walk)(theta, alpha, tau, sigma,
-                                                                 *params, process=process, initial=initial) 
+                                                                 *params, process=process, initial=initial, bias=bias) 
                                                                  for _ in range(samples))
       for ans in ret_ans:
          steps, RT, X = ans
          if RT > 0: 
             RT_arr.append(RT) 
             X_arr.append(X)
+            steps = _scale_steps_by_boundary(steps, alpha, tau, sigma)
             steps_arr.append(steps)
-            if size(RT_arr) >= samples:
+            if np.size(RT_arr) >= samples:
                break
 
       # We need two breaks in case we need to iterate back and get more samples, 
       # so the internal for loop does not need to execute for full length of samples
-      if (size(RT_arr) >= samples):
+      if (np.size(RT_arr) >= samples):
          break
 
    
@@ -178,16 +189,16 @@ def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", in
    #   if size(RT_arr) >= samples:
    #      break 
 
-   if (size(RT_arr) < samples):
+   if (np.size(RT_arr) < samples):
 
-      raise Exception(f"Could not generate enough RTs: {size(RT_arr)}")
+      raise Exception(f"Could not generate enough RTs: {np.size(RT_arr)}")
    
    return RT_arr, X_arr, steps_arr
 
 def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU|DiffusionIRT", initial="EZ|Any", njobs = 8):
    
-   X = zeros((I,J))
-   RT = zeros((I,J))
+   X = np.zeros((I,J))
+   RT = np.zeros((I,J))
    v_arr = []
    tr_arr = []
 
@@ -197,11 +208,11 @@ def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU|Diff
       #print(f"{i}", end=",")
       if (len(params) == 1):
          v_s, = params   
-         v_s = v_s + random.default_rng().normal(0,0.1**2)
+         v_s = v_s + np.random.default_rng().normal(0,0.1**2)
          params = (v_s,)
       else:
          v_s, oths = params
-         v_s = v_s + random.default_rng().normal(0,0.1**2)
+         v_s = v_s + np.random.default_rng().normal(0,0.1**2)
          params = (v_s, oths)
 
       # To vary for each participant
@@ -240,31 +251,31 @@ def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU|Diff
 def store_randomwalk(RT, X, steps_arr,file_pre_name):
    df = []
    for i, steps in enumerate(steps_arr):
-      df.append(DataFrame({"rw_no":i,"steps":asarray(steps)}))
+      df.append(pd.DataFrame({"rw_no":i,"steps":np.asarray(steps)}))
 
-   concat(df).to_csv(f"{file_pre_name}_steps.csv", index=False)
-   savetxt(f"{file_pre_name}_RT.csv", RT)
-   savetxt(f"{file_pre_name}_X.csv", X)
+   pd.concat(df).to_csv(f"{file_pre_name}_steps.csv", index=False)
+   np.savetxt(f"{file_pre_name}_RT.csv", RT)
+   np.savetxt(f"{file_pre_name}_X.csv", X)
 
 def load_randomwalk(file_pre_name):
-   steps_arr = read_csv(f"{file_pre_name}_steps.csv")
-   RT = loadtxt(f"{file_pre_name}_RT.csv")
-   X = loadtxt(f"{file_pre_name}_X.csv")
+   steps_arr = pd.read_csv(f"{file_pre_name}_steps.csv")
+   RT = np.loadtxt(f"{file_pre_name}_RT.csv")
+   X = np.loadtxt(f"{file_pre_name}_X.csv")
    return RT, X, steps_arr
 
 if __name__ == "__main__":
-    theta, alpha, tau = 100, 1.5, 0.01
+    theta, alpha, tau, njobs = 100, 1.5, 0.01, 1
 
-    mu, sigma = asarray([0.2]), asarray([1])
+    mu, sigma = np.asarray([0.2]), np.asarray([1])
     get_transition_matrix(alpha, tau,sigma, mu, process="Wiener",n_states = theta)
 
-    mu = repeat([0.01,0.02,0.05,0.08], (theta+2)/ 4)[0:theta+10]
+    mu = np.repeat([0.01,0.02,0.05,0.08], (theta+2)/ 4)[0:theta+10]
     get_transition_matrix(alpha, tau,sigma, mu, process="Wiener",n_states = theta)
     log.debug("test successful0")
 
 
 
-    mu=asarray([0.2])
+    mu=np.asarray([0.2])
     RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener",njobs=1)
     assert len(RT_arr) == 10
     assert len(X_arr) == 10
@@ -272,8 +283,8 @@ if __name__ == "__main__":
     log.debug(RT_arr)
     log.debug("test successful1")
 
-    delta, gamma = asarray([3]), asarray([0.01])
-    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, delta, gamma,samples = 10, process="OU",njobs=8)
+    delta, gamma = np.asarray([3]), np.asarray([0.01])
+    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, delta, gamma,samples = 10, process="OU",njobs=njobs)
     assert len(RT_arr) == 10
     assert len(X_arr) == 10
     log.debug(X_arr)
@@ -281,8 +292,8 @@ if __name__ == "__main__":
     log.debug("test successful1-OU")
 
 
-    mu=asarray([-0.2])
-    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener",njobs=8)
+    mu=np.asarray([-0.2])
+    RT_arr, X_arr, steps_arr = gen_rt_x(theta, alpha, tau, sigma, mu,samples = 10, process="Wiener",njobs=njobs)
     assert len(RT_arr) == 10
     assert len(X_arr) == 10
     log.debug(X_arr)
@@ -290,7 +301,7 @@ if __name__ == "__main__":
     log.debug("test successful2")
 
 
-    v_p=asarray([0.2])
+    v_p=np.asarray([0.2])
     RT_mat, X_mat,v_arr,tr_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, I=10, J = 5, process="Wiener")
     log.debug(X_mat.shape)
     log.debug(RT_mat.shape)
@@ -300,25 +311,25 @@ if __name__ == "__main__":
     log.debug("test successful3")
     
 
-    v_p=asarray([0.2])
+    v_p=np.asarray([0.2])
     #v_i=asarray([2,0.5])
-    v_i = asarray([0.5, 0.75, 1, 1.25])
+    v_i = np.asarray([0.5, 0.75, 1, 1.25])
     RT_mat, X_mat,v_arr,tr_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, v_i,I=10, J = 8, process="DiffusionIRT")
     log.debug(X_mat.shape)
     log.debug(RT_mat.shape)
     assert RT_mat.shape == (10,8)
     assert X_mat.shape == (10,8)
-    assert asarray(v_arr).squeeze().shape == (10,4)
+    assert np.asarray(v_arr).squeeze().shape == (10,4)
     log.debug("test successful4")
 
 
-    v_p=repeat([0.01,0.02,0.05,0.08], (theta+2)/ 4)[0:theta+10]
+    v_p=np.repeat([0.01,0.02,0.05,0.08], (theta+2)/ 4)[0:theta+10]
     #v_i=asarray([2,0.5])
-    v_i = asarray([0.5, 0.75, 1, 1.25])
-    RT_mat, X_mat,v_arr,tr_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, v_i,I=10, J = 8, process="DiffusionIRT")
+    v_i = np.asarray([0.5, 0.75, 1, 1.25])
+    RT_mat, X_mat,v_arr,tr_arr = gen_RT_X_mat(theta, alpha, tau, sigma, v_p, v_i,I=10, J = 8, process="DiffusionIRT", njobs=njobs)
     log.debug(X_mat.shape)
     log.debug(RT_mat.shape)
     assert RT_mat.shape == (10,8)
     assert X_mat.shape == (10,8)
-    assert asarray(v_arr).squeeze().shape == (10,4,100)
+    assert np.asarray(v_arr).squeeze().shape == (10,4,100)
     log.debug("test successful5")

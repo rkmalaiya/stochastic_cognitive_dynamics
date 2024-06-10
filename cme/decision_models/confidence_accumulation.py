@@ -763,7 +763,7 @@ if __name__ == "__main__":
     plt.ylabel("Evolution of Mean Confidence")
     plt.legend()
     plt.show()
-if False:
+
     log.debug("Constant Drift Rate - Likelihood 1")
 
     likl_markov = likelihood(intensity_matrix=intensity_matrix_markov, phi_0=phi_0_markov, delta=delta,
@@ -802,6 +802,8 @@ if False:
     pd.Series(npx.asarray(likl_quantum_arr), name="Quantum").plot()
     plt.legend()
     plt.show()
+
+if False:
 
     log.debug("Constant Drift Rate - Likelihood 3")
 
