@@ -47,7 +47,7 @@ class ModelDetails:
     transition_type:str = "RT|TIMESTEP"
     likelihood_type:str = "SINGLE|JOINT"
     sampling_type:str = "MCMC|GEN"
-    log_scale: str = False
+    scale: str = "None|Log|SQRT"
     csv_header:str = False
 
 #folder, file_pre, file_posts, version, n_states, start_width, delta, measurement_prob, params_type, model_type, transition_type, likelihood_type, sampling_type
@@ -65,7 +65,7 @@ def fit_model(model: ModelDetails):
                                     f"{file_loc}{name}_rt.csv", f"{file_loc}{name}_ra.csv", name, model.version, 
                                     model.n_states, model.start_width, model.response_width, model.delta, model.measurement_prob, 
                                     model.params_type, model.model_type, model.transition_type, model.likelihood_type, model.sampling_type,
-                                    model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, model.log_scale, model.csv_header) 
+                                    model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, model.scale, model.csv_header) 
                                                 
                                     for name in model.file_posts)
     print(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
@@ -74,7 +74,7 @@ def fit_model(model: ModelDetails):
 def _run_model(RT_file, X_file, name, version, 
             n_states, start_width, response_width, delta, measurement_prob, 
             params_type, model_type, transition_type, likelihood_type, sampling_type,
-            num_warmup, samples_n, predictive_n, batch_size, is_test, log_scale, csv_header):
+            num_warmup, samples_n, predictive_n, batch_size, is_test, scale, csv_header):
     
     df_X = pd.read_csv(X_file, header="infer" if csv_header else None)
     df_RT = pd.read_csv(RT_file, header="infer" if csv_header else None)
@@ -87,14 +87,17 @@ def _run_model(RT_file, X_file, name, version,
 
     Xs = df_X.values
     RTs = df_RT.values
+    
+    if scale == "Log":
+        RTs = np.log(RTs)
+    elif scale=="SQRT":
+        RTs = np.sqrt(RTs)
 
     X_split = np.split(Xs, npx.arange(batch_size, Xs.shape[0], batch_size), axis=0)
     RT_split = np.split(RTs, npx.arange(batch_size, RTs.shape[0], batch_size), axis=0)
     
     def run_half_model(i, X, RT):
-        if log_scale:
-            RT = np.log(RT)
-
+        
         q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
 
         log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i}")
