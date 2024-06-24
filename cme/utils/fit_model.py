@@ -58,7 +58,7 @@ def fit_model(model: ModelDetails):
     #file_post = 
     #version = 0.5
     #len(model.file_posts)
-    n_jobs = min(4, len(model.file_posts)) if not model.is_test else 1
+    n_jobs = max(4, len(model.file_posts)) if not model.is_test else 1
     print(f"Received request for {n_jobs} files to be executed in parallel for {model.model_type}_{model.version}!!")
     Parallel(n_jobs=n_jobs)(delayed(_run_model)(
                                     
@@ -189,6 +189,6 @@ def _run_model(RT_file, X_file, name, version,
     
     start_time = time.perf_counter()
     log.info(f"Starting {batch_n} jobs for sub-batch of participants at time {start_time}")
-    Parallel(n_jobs=batch_n, prefer="processes", backend = "loky")(f for f in fn)
+    Parallel(n_jobs=max(3,batch_n), prefer="processes", backend = "loky")(f for f in fn)
     
     log.info(f"Job successfully completed for {name}, {model_type}, {version} after {(time.perf_counter() - start_time)/60} mins")
