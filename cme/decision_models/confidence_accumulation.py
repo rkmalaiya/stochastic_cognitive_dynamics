@@ -216,8 +216,8 @@ def _timestep_transition_matrix(n, T_delta, Mn):
         
         T_i.append(T_i_j)
     
-    T_t = T_delta @ npx.asarray(T_i)
-        
+    T_t = T_delta @ npx.asarray(T_i) 
+    #T_t = npx.asarray(T_i) # uncomment to include all response time
     return T_t
 
 
@@ -264,11 +264,22 @@ def _get_transition_matrix(intensity_matrix, RT, delta=None, Mn = None, transiti
    
     if transition_type == "RT":
         #T_t = sci.linalg.expm(intensity_matrix * ((RT[...,None,None]/delta) if not npx.isscalar(RT) else (RT/delta)))
-        T_t = sci.linalg.expm(intensity_matrix * ((RT[...,None,None]/delta) if not npx.isscalar(RT) else (RT/delta)))
+        #T_t = sci.linalg.expm(intensity_matrix * ((RT[...,None,None]/delta) if not npx.isscalar(RT) else (RT/delta)))
+        T_t = sci.linalg.expm(intensity_matrix * ((RT[...,None,None]) if not npx.isscalar(RT) else (RT)))
     elif transition_type == "TIMESTEP":
-        ns=np.ceil(RT/delta)
+        ns=np.ceil(RT/delta) 
+        #ns=np.floor(RT/delta) # uncomment to include all response time
+        RT_remaining = RT - ns*delta
         T_delta = sci.linalg.expm(intensity_matrix * delta)
-        T_t = _timestep_transition_matrix(ns, T_delta, Mn)
+
+        # uncomment to include all response time
+        # T_delta_remaining = sci.linalg.expm(intensity_matrix * ((RT_remaining[...,None,None]) if not npx.isscalar(RT_remaining) else (RT_remaining)))
+        T_t = _timestep_transition_matrix(ns, T_delta, Mn)  #uncomment if fails
+        
+        # uncomment to include all response time
+        #T_t = T_delta_remaining @ _timestep_transition_matrix(ns, T_delta, Mn)
+
+
     else:
         raise Exception(f"Please select one of {transition_type}")
 

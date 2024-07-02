@@ -1,4 +1,5 @@
 from attr import dataclass
+#from dataclasses import dataclass, fields
 import cme.decision_models.confidence_accumulation as ca
 import cme.decision_models.quantum_discrete as qd
 import jax.numpy as npx
@@ -41,14 +42,14 @@ class ModelDetails:
     samples_n: int = 1700
     predictive_n: int = 100
     batch_size: int = 100
-    is_test: str = False
     params_type:str = "Centralized|NonCentralized"
     model_type:str = "Markov|Quantum"
     transition_type:str = "RT|TIMESTEP"
     likelihood_type:str = "SINGLE|JOINT"
     sampling_type:str = "MCMC|GEN"
     scale: str = "None|Log|SQRT"
-    csv_header:str = False
+    csv_header:bool = False
+    is_test:bool = False
 
 #folder, file_pre, file_posts, version, n_states, start_width, delta, measurement_prob, params_type, model_type, transition_type, likelihood_type, sampling_type
 def fit_model(model: ModelDetails):
@@ -118,12 +119,18 @@ def _run_model(RT_file, X_file, name, version,
         pred_idx = np.random.default_rng().choice(total_samples, predictive_n)
 
         df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "phi_0", "likl_rt"]) #"sigma_final",
+        df_summary_csv = (df_summary
+                            .reset_index(names="params")
+                            .assign(param_name = lambda df: df.params.str.split("[",expand=True)[0])
+                            .assign(part_id = lambda df: df.params.str.split("[",expand=True)[1].str.split(",",expand=True)[0])
+                            .assign(dims = lambda df:df.params.str.split("[", expand=True)[1].str.removesuffix("]")) 
+                    )
         df_phi = df_summary.filter(like="phi_0",axis=0)[["mean"]].reset_index(names="idx")
         df_t = df_phi.idx.str.split("[", expand=True)[1].str.split(",", expand=True)
         df_phi[["part_id", "phi_0"]] = df_t[[0,2]].astype(int)
         df_phi = df_phi.pivot(index="part_id", columns="phi_0", values="mean")
         
-        df_summary.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}_{i}.csv")
+        df_summary_csv.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}_{i}.csv")
         df_phi.to_csv(f"export/initial_states_{name}_{model_type}_{version}_{i}.csv")
 
         #df_init_state_all = pd.concat([pd.DataFrame(i_s.squeeze()).reset_index().rename(columns={"index":"part_id"}).melt(id_vars="part_id", var_name="state", value_name="value").assign(param_id = i)
@@ -189,6 +196,6 @@ def _run_model(RT_file, X_file, name, version,
     
     start_time = time.perf_counter()
     log.info(f"Starting {batch_n} jobs for sub-batch of participants at time {start_time}")
-    Parallel(n_jobs=max(3,batch_n), prefer="processes", backend = "loky")(f for f in fn)
+    Parallel(n_jobs=max(3,batch_n) if not is_test else 1, prefer="processes", backend = "loky")(f for f in fn)
     
     log.info(f"Job successfully completed for {name}, {model_type}, {version} after {(time.perf_counter() - start_time)/60} mins")

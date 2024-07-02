@@ -95,9 +95,10 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
    steps = []
    RT = -1
    X = -1
-   max_steps = 10000
+   max_steps = 100000
    
    n_states = _get_n_states(alpha, theta, tau, sigma)
+   #log.debug(f"States: {n_states}")
 
    Q = get_transition_matrix(alpha, tau, sigma, *params, process=process, n_states=n_states)
    
@@ -124,6 +125,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
          RT = i*tau
          X = 0
          break
+   #log.debug(f"*****{i}*****{tau}")
    return(steps, RT, X)
 
 def get_transition_matrix(alpha, tau, sigma, *params, process, n_states):
