@@ -354,6 +354,18 @@ def perform_state_transition(intensity_matrix, RT_s, RA_s, Mc, Mw, Mn, phi_0, de
     phi_t = T_t @ phi_0
     return phi_t
 
+def get_mean_init_confidence(n_states, phi_0, model_type = "Markov|Quantum"):
+    if model_type == "Markov":
+        P_0 = phi_0
+    elif model_type == "Quantum":
+        P_0 = npx.abs(phi_0)**2
+
+    Mid = (n_states+1)//2
+    mv = npx.arange(-(Mid-1), (Mid))
+
+    mean_conf_init = mv @ P_0
+    return mean_conf_init
+
 def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=None, Mn=None, t=None, x=None, 
                         transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type = "Markov|Quantum", return_type="Probability|MeanConfidence"):
     
