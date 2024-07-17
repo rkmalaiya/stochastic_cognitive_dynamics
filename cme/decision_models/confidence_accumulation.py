@@ -739,6 +739,14 @@ def sample_post_pred_params(n_states, start_width, delta, measurement_prob, X,
 def get_arviz_model(mcmc_chain):
     return az.from_numpyro(mcmc_chain)
 
+def get_intensity_matrix(n_states, mu, sigma, model_type="Markov|Quantum"):
+    if model_type == "Markov":
+        return dd._buildK(n_states, mu, sigma)
+    elif model_type == "Quantum":
+        return qd._buildH(n_states, mu, sigma)
+    else:
+        raise Exception(f"Please select one of {model_type}")
+
 if __name__ == "__main__":
 
     n_states, start_width, delta, measurement_prob, mu, sigma, I, J = 7, 4, 1, 0.8, npx.asarray([[1]]), npx.asarray([[1]]), 100, 50
