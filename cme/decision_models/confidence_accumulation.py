@@ -22,7 +22,7 @@ from joblib import parallel_config
 from cme.utils import common_logging as cl
 log = cl.get_logger("confidence_accumulation")
 
-pyro.set_platform("cpu")
+#pyro.set_platform("cpu")
 pyro.set_host_device_count(64)
 pyro.enable_x64()
 
