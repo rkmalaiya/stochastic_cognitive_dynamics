@@ -22,7 +22,7 @@ from jax import lax
 log = cl.get_logger("diffusion_discrete")
 
 import jax
-jax.config.update('jax_platforms', 'cpu')
+#jax.config.update('jax_platforms', 'cpu')
 
 
 

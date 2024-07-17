@@ -14,7 +14,8 @@ import time
 from joblib import Parallel, delayed
 from cme.utils import common_logging as cl
 log = cl.get_logger("fit_model")
-
+import jax
+log.info(f"JAX devices: {jax.default_backend()}")
 #file_loc_X= "data/ad_X_"
 #file_loc_RT= "data/ad_rt_"
 
@@ -59,7 +60,7 @@ def fit_model(model: ModelDetails):
     #file_post = 
     #version = 0.5
     #len(model.file_posts)
-    n_jobs = max(4, len(model.file_posts)) if not model.is_test else 1
+    n_jobs = max(1, len(model.file_posts)) if not model.is_test else 1
     print(f"Received request for {n_jobs} files to be executed in parallel for {model.model_type}_{model.version}!!")
     Parallel(n_jobs=n_jobs)(delayed(_run_model)(
                                     

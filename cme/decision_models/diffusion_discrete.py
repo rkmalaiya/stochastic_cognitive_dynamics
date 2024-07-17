@@ -17,7 +17,7 @@ from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive
 import scipy.stats as stats
 from jax import lax
 
-npy.set_platform("cpu")
+#npy.set_platform("cpu")
 npy.set_host_device_count(64)
 npy.enable_x64()
 
