@@ -394,14 +394,14 @@ def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=No
         P_t = phi_t
     elif model_type == "Quantum":
         P_t = npx.abs(phi_t)**2
-
+    
     Mid = (n_states+1)//2
     mv = npx.arange(-(Mid-1), (Mid))
 
     if return_type == "Probability":
         ret_val = P_t.sum()
     else: #if return_type == "MeanConfidence":
-        ret_val = mv @ P_t
+        ret_val = mv @ (P_t/P_t.sum())
     #else:
     #    raise Exception(f"Please provide one of {return_type}")
 
