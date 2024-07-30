@@ -49,6 +49,7 @@ class ModelDetails:
     likelihood_type:str = "SINGLE|JOINT"
     sampling_type:str = "MCMC|GEN"
     scale: str = "None|Log|SQRT"
+    conf_scale: Tuple(int,int) = "None|(add_scale, mul_scale)"
     csv_header:bool = False
     is_test:bool = False
 
@@ -60,7 +61,7 @@ def fit_model(model: ModelDetails):
     #file_post = 
     #version = 0.5
     #len(model.file_posts)
-    n_jobs = max(4, len(model.file_posts)) if not model.is_test else 1
+    n_jobs = min(4, len(model.file_posts)) if not model.is_test else 1
     log.info(f"Received request for {n_jobs} files to be executed in parallel for {model.model_type}_{model.version}!!")
     log.info(f"Received configuration: {model}")
     Parallel(n_jobs=n_jobs)(delayed(_run_model)(
@@ -68,7 +69,8 @@ def fit_model(model: ModelDetails):
                                     f"{file_loc}{name}_rt.csv", f"{file_loc}{name}_ra.csv", name, model.version, 
                                     model.n_states, model.start_width, model.response_width, model.delta, model.measurement_prob, 
                                     model.params_type, model.model_type, model.transition_type, model.likelihood_type, model.sampling_type,
-                                    model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, model.scale, model.csv_header) 
+                                    model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, 
+                                    model.scale, model.conf_scale, model.csv_header) 
                                                 
                                     for name in model.file_posts)
     log.info(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
@@ -77,7 +79,7 @@ def fit_model(model: ModelDetails):
 def _run_model(RT_file, X_file, name, version, 
             n_states, start_width, response_width, delta, measurement_prob, 
             params_type, model_type, transition_type, likelihood_type, sampling_type,
-            num_warmup, samples_n, predictive_n, batch_size, is_test, scale, csv_header):
+            num_warmup, samples_n, predictive_n, batch_size, is_test, scale, conf_scale, csv_header):
     
     df_X = pd.read_csv(X_file, header="infer" if csv_header else None)
     df_RT = pd.read_csv(RT_file, header="infer" if csv_header else None)
@@ -154,7 +156,7 @@ def _run_model(RT_file, X_file, name, version,
 
         mean_init_conf = ca.get_mean_init_confidence(n_states=n_states, phi_0 = phi_0_est, model_type=model_type)
         mean_final_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix_quantum,phi_0=phi_0_est,
-                            delta= delta, Mc = q_Mc, Mw=q_Mw, Mn=q_Mn, t=RT,x=X,
+                            delta= delta, Mc = q_Mc, Mw=q_Mw, Mn=q_Mn, t=RT,x=X, scale=conf_scale,
                             model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
         phi_t = ca.perform_state_transition(intensity_matrix_quantum, RT_s = RT, RA_s = X, Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, phi_0=phi_0_est, delta=delta,
                                             transition_type=transition_type, likelihood_type=likelihood_type)
@@ -207,7 +209,7 @@ def _run_model(RT_file, X_file, name, version,
             break
     
     start_time = time.perf_counter()
-    log.info(f"Starting {batch_n} jobs for sub-batch of participants at time {start_time}")
-    Parallel(n_jobs=max(3,batch_n) if not is_test else 1, prefer="processes", backend = "loky")(f for f in fn)
+    log.info(f"Starting {min(4,batch_n)} jobs for sub-batch of participants at time {start_time}")
+    Parallel(n_jobs=min(3,batch_n) if not is_test else 1, prefer="processes", backend = "loky")(f for f in fn)
     
     log.info(f"Job successfully completed for {name}, {model_type}, {version} after {(time.perf_counter() - start_time)/60} mins")
