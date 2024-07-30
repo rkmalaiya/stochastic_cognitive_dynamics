@@ -1,6 +1,9 @@
 import logging
 import sys
 
+logging.getLogger('jax').setLevel(logging.ERROR)
+logging.getLogger('matplotlib').setLevel(logging.ERROR)
+
 def get_logger(lib_name = None):
 
     # can get details from https://docs.python.org/3/library/logging.html#logrecord-objects
