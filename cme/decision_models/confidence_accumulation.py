@@ -294,7 +294,7 @@ def _get_measurement_matrix(n_states, start_width, prob=0.5, model_type = "Marko
         raise Exception(f"Please select one of {model_type}")
     return Mc, Mw, Mn
 
-def _get_initial_state(n_states, start_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Upper|Lower|Mid|Uniform|Model"):
+def _get_initial_state(n_states, start_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Upper|Lower|Centered|Uniform|Model"):
     if prior_type == "Model":
         if model_type == "Markov":
             phi_0 = dd._get_initial_state(n_states, start_width, I, prob)   
@@ -312,7 +312,10 @@ def _get_initial_state(n_states, start_width, I = 1, prob=1, model_type = "Marko
 
         elif prior_type == "Centered":
             w_t = int(((n_states-width)/2))
-            pad_width = (w_t, w_t) # will pad equally on left and right of array
+            if(width % 2==0):
+                pad_width = (w_t+1, w_t)
+            else:    
+                pad_width = (w_t, w_t) # will pad equally on left and right of array
             
         elif prior_type == "Uniform":
             pad_width = (0,0)
