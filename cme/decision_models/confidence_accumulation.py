@@ -355,7 +355,8 @@ def perform_state_transition(intensity_matrix, RT_s, RA_s, Mc, Mw, Mn, phi_0, de
         T_t = npx.where(RA_1[..., None, None]==1, phi_t_1_c, phi_t_1_w)
         
     phi_t = T_t @ phi_0
-    phi_t = phi_t / phi_t.sum(axis=-2, keepdims=True)
+    #if transition_type == "TIMESTEP":
+    #    phi_t = phi_t / phi_t.sum(axis=-2, keepdims=True)
     return phi_t
 
 def get_mean_init_confidence(n_states, phi_0, model_type = "Markov|Quantum"):
