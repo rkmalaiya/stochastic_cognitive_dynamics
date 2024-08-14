@@ -109,7 +109,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
       s_t[int(round(n_states/2))] = 1
    elif(initial == "Fixed"):
       s_t = np.zeros(n_states)
-      s_t[int(bias*n_states)] = 1
+      s_t[_get_n_states(alpha, bias, tau, sigma)] = 1
    else:
       s_t,_ = _get_initial_state(n_states)
    
