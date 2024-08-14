@@ -53,6 +53,7 @@ class ModelDetails:
     csv_header:bool = False
     is_test:bool = False
 
+
 #folder, file_pre, file_posts, version, n_states, start_width, delta, measurement_prob, params_type, model_type, transition_type, likelihood_type, sampling_type
 def fit_model(model: ModelDetails):
 

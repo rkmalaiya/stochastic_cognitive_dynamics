@@ -20,14 +20,16 @@ from joblib import Parallel, delayed
 from joblib import parallel_config
 
 from cme.utils import common_logging as cl
+from cme.utils import common_utils as cu
 log = cl.get_logger("confidence_accumulation")
 
 #pyro.set_platform("cpu")
 pyro.set_host_device_count(64)
 pyro.enable_x64()
 
-_rng_key = random.PRNGKey(0)
-_rng_key, _rng_key_ = random.split(_rng_key)
+# To give a random starting seed to Numpyro MCMC. Split gurantees to generate a new random number for the same starting seed.
+#_rng_key = random.key(1)#(0)
+#_rng_key, _rng_key_ = random.split(_rng_key)
 
 def centralized_parameters(I):
     """
@@ -516,6 +518,25 @@ def model(n_states, start_width, delta, RA_s, RT_s, measurement_prob, params_typ
         pyro.deterministic("likl_rt", likl)
         pyro.factor("likelihood", likl) #.sum()
 
+def generate_RT(n_states, threshold, delta, measurement_prob, I, J, 
+                drift_rate, diffusion_rate, phi_0, data_samples = 1, max_RT=40, max_samples=400,
+                model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
+    
+    random_ts = dist.Uniform(delta, max_RT/delta).sample(key=(rng := jax.random.split(rng)[0]), sample_shape=(I,max_samples))
+    intensity_matrix = ca.get_intensity_matrix(n_states, drift_rate, diffusion_rate, model_type=model_type)
+    Mc, Mw, Mn = ca._get_measurement_matrix(n_states, threshold, prob=measurement_prob, model_type = model_type)
+    phi_t = ca.perform_state_transition(intensity_matrix=intensity_matrix, RT_s = random_ts, RA_s = None, delta=delta, 
+                                        Mc = Mc, Mn = Mn, Mw = Mw, phi_0=phi_0, 
+                                        transition_type=transition_type, likelihood_type=likelihood_type)
+    states_t = dist.Multinomial(total_count=1, probs=phi_t[...,0]).sample(key=(rng:=jax.random.split(rng)[0]))
+    state_final = np.argwhere(states_t)
+    RA = np.select([
+            state_final[:,[-1]] < threshold - 1,
+            state_final[:,[-1]] >= n_states - threshold - 1
+        ], [0,1], default = np.nan)#[:,-1]
+    Response = np.hstack((state_final, RA, t_s.flatten()[:,None]*delta))
+    df_res = pd.DataFrame(Response, columns=["I", "J", "state", "RA", "RT"])
+    return df_res
 
 def simulate_RT(RT, n_states, start_width, delta, measurement_prob, RA, 
                      drift_rate, diffusion_rate, phi_0, data_samples = 1, param_sample_id=-1,
@@ -641,11 +662,11 @@ def sample_posterior_params(DT, X, n_states, start_width, delta, measurement_pro
 
     #kernel = HMCECS(NUTS(model), num_blocks=10)
     #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
-    #mcmc_chain.run(_rng_key, n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
+    #mcmc_chain.run(cu.get_rng(), n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
 
     kernel = NUTS(model, forward_mode_differentiation=False)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains, chain_method="vectorized")
-    mcmc_chain.run(_rng_key, n_states, start_width,  delta, X, DT, measurement_prob, 
+    mcmc_chain.run(cu.get_rng(), n_states, start_width,  delta, X, DT, measurement_prob, 
                    params_type = params_type, transition_type=transition_type, 
                    likelihood_type=likelihood_type, model_type=model_type,
                    extra_fields=('potential_energy',))
@@ -667,7 +688,7 @@ def predictive_mcmc_fn(n_states, start_width, delta, measurement_prob, X,
                                                     transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type,))
         pred_shape = 4, *X.shape
         predictive_mcmc = MCMC(kernel, num_warmup=10, num_samples=10, num_chains=4)
-        predictive_mcmc.run(_rng_key, init_params=stats.lognorm(s=1).rvs((pred_shape)),
+        predictive_mcmc.run(cu.get_rng(), init_params=stats.lognorm(s=1).rvs((pred_shape)),
                         extra_fields=('potential_energy',)
                         )
         
@@ -679,7 +700,7 @@ def predictive_mcmc_fn(n_states, start_width, delta, measurement_prob, X,
                                         transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type,))
         pred_shape = 4, 2, *X[0].shape
         predictive_mcmc = MCMC(kernel, num_warmup=30, num_samples=20, num_chains=4)
-        predictive_mcmc.run(_rng_key, init_params=stats.lognorm(s=1).rvs((pred_shape)),
+        predictive_mcmc.run(cu.get_rng(), init_params=stats.lognorm(s=1).rvs((pred_shape)),
                     extra_fields=('potential_energy',)
                     )
     
@@ -693,7 +714,7 @@ def sample_prior_pred_params(n_states, start_width, delta, measurement_prob, X, 
                         transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN"):
     
     prior_predictive = Predictive(model, num_samples=n_samples)    
-    prior_samples = prior_predictive(_rng_key, n_states, start_width,  delta, X, None, measurement_prob,
+    prior_samples = prior_predictive(cu.get_rng(), n_states, start_width,  delta, X, None, measurement_prob,
                                     params_type = params_type, transition_type=transition_type, 
                                     likelihood_type=likelihood_type, model_type=model_type)
     
@@ -845,7 +866,6 @@ if __name__ == "__main__":
     plt.legend()
     plt.show()
 
-if False:
 
     log.debug("Constant Drift Rate - Likelihood 3")
 
@@ -949,6 +969,7 @@ if False:
     sns.histplot(df_prior_all, x="RT", hue="param_sample_id", multiple="dodge",element="bars")
     #plt.xlim(0,10) # because RT_max is set as 1000
 
+if False:
 
     log.debug("Constant Drift Rate - Prior 2")
 
