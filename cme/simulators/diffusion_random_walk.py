@@ -7,7 +7,9 @@ from joblib import Parallel, delayed
 log = cl.get_logger("random-walk")
 
 def _scale_steps_by_boundary(steps, alpha, tau, sigma):
-   return ((np.asarray(steps) - 1)/2) * _get_step_size(alpha, tau, sigma)
+   
+   #not sure about + _get_step_size(alpha, tau, sigma)
+   return (((np.asarray(steps) ) - 1)/2) * _get_step_size(alpha, tau, sigma) + _get_step_size(alpha, tau, sigma)
 
 def _get_step_size(alpha, tau, sigma):
    return alpha * sigma * np.sqrt(tau)
@@ -144,7 +146,7 @@ def get_transition_matrix(alpha, tau, sigma, *params, process, n_states):
     return Q
 
 
-def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Fixed|Any", njobs=1,bias=None):
+def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Fixed|Any", scale_steps = True, njobs=1,bias=None):
    # alpha is a constant
    # theta decides the number of states
    RT_arr = []
@@ -162,7 +164,8 @@ def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", in
          if RT > 0: 
             RT_arr.append(RT) 
             X_arr.append(X)
-            steps = _scale_steps_by_boundary(steps, alpha, tau, sigma)
+            if scale_steps:
+               steps = _scale_steps_by_boundary(steps, alpha, tau, sigma)
             steps_arr.append(steps)
             if np.size(RT_arr) >= samples:
                break
