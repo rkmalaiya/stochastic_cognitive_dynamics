@@ -26,6 +26,8 @@ log = cl.get_logger("confidence_accumulation")
 #pyro.set_platform("cpu")
 pyro.set_host_device_count(64)
 pyro.enable_x64()
+#from jax import config
+#config.update("jax_enable_x64", False)
 
 # To give a random starting seed to Numpyro MCMC. Split gurantees to generate a new random number for the same starting seed.
 #_rng_key = random.key(1)#(0)
