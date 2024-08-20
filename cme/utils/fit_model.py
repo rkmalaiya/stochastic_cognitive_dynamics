@@ -49,7 +49,7 @@ class ModelDetails:
     likelihood_type:str = "SINGLE|JOINT"
     sampling_type:str = "MCMC|GEN"
     scale: str = "None|Log|SQRT"
-    conf_scale: Tuple(int,int) = "None|(add_scale, mul_scale)"
+    conf_scale: str = "None|(add_scale, mul_scale)"
     csv_header:bool = False
     is_test:bool = False
 
@@ -157,7 +157,7 @@ def _run_model(RT_file, X_file, name, version,
 
         mean_init_conf = ca.get_mean_init_confidence(n_states=n_states, phi_0 = phi_0_est, model_type=model_type)
         mean_final_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix_quantum,phi_0=phi_0_est,
-                            delta= delta, Mc = q_Mc, Mw=q_Mw, Mn=q_Mn, t=RT,x=X, scale=conf_scale,
+                            delta= delta, Mc = q_Mc, Mw=q_Mw, Mn=q_Mn, t=RT,x=X, conf_scale=conf_scale,
                             model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
         phi_t = ca.perform_state_transition(intensity_matrix_quantum, RT_s = RT, RA_s = X, Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, phi_0=phi_0_est, delta=delta,
                                             transition_type=transition_type, likelihood_type=likelihood_type)

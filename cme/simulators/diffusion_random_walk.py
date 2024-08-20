@@ -2,9 +2,10 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 import cme.utils.common_logging as cl
+import cme.utils.common_utils as cu
 from joblib import Parallel, delayed
 
-log = cl.get_logger("random-walk")
+log = cl.get_logger("discrete-random-walk")
 
 def _scale_steps_by_boundary(steps, alpha, tau, sigma):
    
@@ -12,15 +13,17 @@ def _scale_steps_by_boundary(steps, alpha, tau, sigma):
    return (((np.asarray(steps) ) - 1)/2) * _get_step_size(alpha, tau, sigma) + _get_step_size(alpha, tau, sigma)
 
 def _get_step_size(alpha, tau, sigma):
-   return alpha * sigma * np.sqrt(tau)
+   return alpha * np.sqrt(sigma) * np.sqrt(tau)
 
 def _get_n_states(alpha, theta, tau, sigma):
-    sigma = sigma#.squeeze()
+    sigma = np.sqrt(sigma)#.squeeze()
     step_size = _get_step_size(alpha, tau, sigma)
     n_states = 2 * int(theta/step_size) + 1 #np.round(theta/delta_state) #2 * round(theta/delta_state) + 1 # #
     return n_states
 
 def _create_Wiener_Q(n_states, alpha, tau, sigma, mu):
+    #if mu > sigma:
+    #   raise Exception("Drift Rate (mu) should be smaller than Diffusion Rate (sigma)")
     Q = np.zeros((n_states, n_states))
     rows_ = np.arange(1,n_states)
     cols_ = np.arange(0,n_states-1)
@@ -93,7 +96,7 @@ def _random_walk_next_step(s_t, Q):
       return s_t, ind_t, p_t
    return s_t_1, ind_t_1, p_t
 
-def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial="EZ|Fixed|Any", bias=None):
+def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial="EZ|Fixed|Any", bias=None, conf_scale_positive_negative = True):
    steps = []
    RT = -1
    X = -1
@@ -108,6 +111,8 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
       s_t = np.zeros(n_states)
       s_t[int(round(n_states/2))] = 1
    elif(initial == "Fixed"):
+      if bias is None:
+         raise Exception("For fixed initial position, bias (initial position) needs to be provided")
       s_t = np.zeros(n_states)
       s_t[_get_n_states(alpha, bias, tau, sigma)] = 1
    else:
@@ -116,7 +121,10 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
    for i in range(max_steps): #n_walk):
       s_t_1, s_ind, p_t = _random_walk_next_step(s_t, Q)
       #print(s_ind)
-      steps.append(s_ind)
+      if conf_scale_positive_negative:
+         steps.append(cu.get_conf_scale(s_ind, add_scale=0, mul_scale=1, n_states=n_states, is_centered=False))
+      else:
+         steps.append(s_ind)
       s_t = s_t_1
       
       if s_ind == n_states-1:#  or :
@@ -146,25 +154,27 @@ def get_transition_matrix(alpha, tau, sigma, *params, process, n_states):
     return Q
 
 
-def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Fixed|Any", scale_steps = True, njobs=1,bias=None):
+def gen_rt_x(theta, alpha, tau, sigma, *params, samples, process="Wiener|OU", initial="EZ|Fixed|Any", scale_steps_to_boundary = True, conf_scale_positive_negative = False, njobs=1,bias=None):
    # alpha is a constant
    # theta decides the number of states
    RT_arr = []
    X_arr = []
    steps_arr = []
    max_iter = 5000
+   conf_scale_positive_negative = not scale_steps_to_boundary
 
    for mi in np.arange(max_iter):
 
       ret_ans = Parallel(n_jobs=njobs)(delayed(_perform_walk)(theta, alpha, tau, sigma,
-                                                                 *params, process=process, initial=initial, bias=bias) 
+                                                                 *params, process=process, initial=initial, bias=bias, 
+                                                                 conf_scale_positive_negative = conf_scale_positive_negative) 
                                                                  for _ in range(samples))
       for ans in ret_ans:
          steps, RT, X = ans
          if RT > 0: 
             RT_arr.append(RT) 
             X_arr.append(X)
-            if scale_steps:
+            if scale_steps_to_boundary:
                steps = _scale_steps_by_boundary(steps, alpha, tau, sigma)
             steps_arr.append(steps)
             if np.size(RT_arr) >= samples:

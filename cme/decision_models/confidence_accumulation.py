@@ -376,8 +376,9 @@ def get_mean_init_confidence(n_states, phi_0, model_type = "Markov|Quantum"):
     return mean_conf_init
 
 def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=None, Mn=None, t=None, x=None, 
-                        scale = None,
-                        transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type = "Markov|Quantum", return_type="Probability|MeanConfidence"):
+                        conf_scale = None,
+                        transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
+                        model_type = "Markov|Quantum", return_type="Probability|MeanConfidence"):
     
     """
     n_states: int
@@ -408,10 +409,9 @@ def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=No
     
     Mid = (n_states+1)//2
     mv = npx.arange(-(Mid-1), (Mid))
-
-    if scale is not None:
-        add_scale, mul_scale = scale
-        mv = (mv + (add_scale * np.sign(mv))) * mul_scale
+    if conf_scale is not None:
+        add_scale, mul_scale = conf_scale
+        mv = cu.get_conf_scale(mv, add_scale, mul_scale)
 
     if return_type == "Probability":
         ret_val = P_t.sum()
@@ -421,6 +421,7 @@ def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=No
     #    raise Exception(f"Please provide one of {return_type}")
 
     return ret_val
+
 
 def transformed_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
     #if likelihood_type == "SINGLE":
@@ -667,7 +668,7 @@ def sample_posterior_params(DT, X, n_states, start_width, delta, measurement_pro
     #mcmc_chain.run(cu.get_rng(), n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
 
     kernel = NUTS(model, forward_mode_differentiation=False)
-    mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains, chain_method="vectorized")
+    mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)#, chain_method="vectorized")
     mcmc_chain.run(cu.get_rng(), n_states, start_width,  delta, X, DT, measurement_prob, 
                    params_type = params_type, transition_type=transition_type, 
                    likelihood_type=likelihood_type, model_type=model_type,

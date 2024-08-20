@@ -35,7 +35,22 @@ def sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, l
         return _sample_posterior_SMC(model, samples_n, chains)
     elif sampler == "VI":
         return _sample_posterior_VI(model, samples_n, kwargs["iter"] if "iter" in kwargs else 10000)
-    
+
+def get_conf_limits(n_states, keep_centered=True):
+    if keep_centered:
+        Mid = (n_states+1)//2
+        mv_arr = np.arange(-(Mid-1), (Mid))
+    else:
+        mv_arr = np.arange(0,n_states)
+    return mv_arr
+
+def get_conf_scale(mv, add_scale, mul_scale, n_states, is_centered=True):
+    if not is_centered:
+        mv_arr = get_conf_limits(n_states)
+        mv = mv_arr[mv]
+    mv = (mv + (add_scale * np.sign(mv))) * mul_scale
+    return mv
+
 def calculate_r_star(df_posterior, group_var, group_std_name, var_name, idx_name):
     
     df_stn  = df_posterior.query(f"{group_var} == {group_std_name} & var_name=='{var_name}'")[[group_var,"mean", idx_name]].pivot(columns=group_var, values="mean", index=idx_name).sort_index()
