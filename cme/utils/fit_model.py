@@ -120,12 +120,12 @@ def _run_model(RT_file, X_file, name, version,
                                                     likelihood_type=likelihood_type, sampling_type=sampling_type, 
                                                     )
         start_time_sampling = time.perf_counter()
-        log.info(f"Starting Posterior Sampling_{name}_{model_type}_{version}_{i}_{start_time_sampling}")
+        log.info(f"Starting Posterior Sampling_{name}_{model_type}_{version}_{i}")
         post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
                                             num_warmup=num_warmup, samples_n=samples_n,
                                             params_type=params_type, model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type 
                             )
-        log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i}_{(time.perf_counter() - start_time_sampling)/60} mins")
+        log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i} after {((time.perf_counter() - start_time_sampling)/60):.2f} mins")
         post_samples = post_chain.get_samples()
         total_samples = post_samples["mu"].shape[0]
         pred_idx = np.random.default_rng().choice(total_samples, predictive_n)
@@ -206,11 +206,11 @@ def _run_model(RT_file, X_file, name, version,
         fn.append(delayed(run_half_model)(i, X, RT, ID))
         batch_n = batch_n + 1
         #run_half_model()
-        if is_test:
-            break
+        #if is_test:
+        #    break
     
     start_time = time.perf_counter()
-    log.info(f"Starting {min(4,batch_n)} jobs for sub-batch of participants at time {start_time}")
+    log.info(f"Starting {min(4,batch_n)} jobs for sub-batch of participants at time")
     Parallel(n_jobs=min(3,batch_n) if not is_test else 1, prefer="processes", backend = "loky")(f for f in fn)
     
-    log.info(f"Job successfully completed for {name}, {model_type}, {version} after {(time.perf_counter() - start_time)/60} mins")
+    log.info(f"Job successfully completed for {name}, {model_type}, {version} after {((time.perf_counter() - start_time)/60):.2f} mins")
