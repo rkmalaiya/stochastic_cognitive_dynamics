@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
+import numpy.linalg as ln
 import cme.utils.common_logging as cl
 import cme.utils.common_utils as cu
 from joblib import Parallel, delayed
@@ -262,7 +263,17 @@ def gen_RT_X_mat(theta, alpha, tau, sigma, *params, I,J, process="Wiener|OU|Diff
    # delayed(par_gen_RT_X_mat)(theta, alpha, tau, sigma, params, J, process, initial, X, RT, v_arr, i) for i in range(I))
      
    return RT, X, v_arr, tr_arr
+def disc_likl(n, n_states, dis_tran, initial_state):
     
+    m = n_states-1
+    R = dis_tran[1:m, [0, -1]]
+    Q = dis_tran[1:n_states-1, 1:n_states-1]
+    #Z = stats.uniform().rvs((1,Q.shape[0]))
+    #Z = Z/Z.sum()
+    num = initial_state @ np.linalg.matrix_power(Q, n) @ R
+    den = initial_state @ np.linalg.matrix_power(np.eye(n_states-2) - Q, -1) @ R
+    return num/den   
+
 def store_randomwalk(RT, X, steps_arr,file_pre_name):
    df = []
    for i, steps in enumerate(steps_arr):
