@@ -42,6 +42,7 @@ a=ap*np.ones((ns,1))
 
 H = _buildH(ns, a,b,a)
 Mc_arr = []
+Mc_arr_ts = []
 Pt_arr = []
 
 for n in range(1, nt):
@@ -55,3 +56,42 @@ for n in range(1, nt):
 
 import pandas as pd
 pd.Series(np.asarray(Mc_arr).flatten()).plot()
+
+# For free time responses
+Mc_arr = []
+Mc_arr_ts = []
+Pt_arr = []
+rw=1
+
+prob=0.25
+Mr = np.zeros(ns)
+Mr[-rw:] = np.sqrt(prob)
+Mr = np.diag(Mr)
+
+Mi = np.zeros(ns)
+Mi[:rw] = np.sqrt(prob)
+Mi = np.diag(Mi)
+
+Mn = np.sqrt(np.eye(ns) - (Mr**2 + Mi**2))
+
+print((Mr.T @ Mr + Mi.T @ Mi + Mn.T @ Mn)) # should be equal to 1
+
+ws = 1
+
+S0 = np.zeros((ns,1))
+S0[Mid-ws-1:Mid+ws] = 1
+S0 = S0/np.sqrt(S0.T @ S0)
+
+
+for n in range(1,nt):
+    #t = tv[n]
+    U = expm(-1j*0.1*H)
+    St = Mr @ U @ np.linalg.matrix_power(Mn @ U, n-1) @ S0
+    Pt = np.abs(St)**2
+    Pt_arr.append(Pt.sum())
+    Mc = mv @ Pt
+    Mc_arr.append(Mc)
+
+import pandas as pd
+pd.Series(np.asarray(Mc_arr).flatten()).plot()
+
