@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.stats import *
 from scipy.linalg import *
+import matplotlib.pyplot as plt
 
 def _buildH(m,a,b,c): 
 # H = buildH(a,b,c)
@@ -55,7 +56,8 @@ for n in range(1, nt):
     Mc_arr.append(Mc)
 
 import pandas as pd
-pd.Series(np.asarray(Mc_arr).flatten()).plot()
+ax = pd.Series(np.asarray(Mc_arr).flatten()).plot()
+plt.show()
 
 # For free time responses
 Mc_arr = []
