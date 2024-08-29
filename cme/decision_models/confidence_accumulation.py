@@ -972,7 +972,6 @@ if __name__ == "__main__":
     sns.histplot(df_prior_all, x="RT", hue="param_sample_id", multiple="dodge",element="bars")
     #plt.xlim(0,10) # because RT_max is set as 1000
 
-if False:
 
     log.debug("Constant Drift Rate - Prior 2")
 
