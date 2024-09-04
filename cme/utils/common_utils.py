@@ -14,12 +14,12 @@ import cme.utils.common_logging as cl
 import jax
 log = cl.get_logger("Common-Utils")
 
-key = jax.random.key(0)
+#key = jax.random.key(0)
 
 def get_rng():
-    global key
-    key, subkey = jax.random.split(key)
-    return subkey
+    key = jax.random.PRNGKey(np.random.randint(0,100))
+    #key, subkey = jax.random.split(key)
+    return key
 
 def sample_posterior(model, samples_n, chains, tune, sampler, acceptance_rate, likelihood=True, **kwargs):
     nuts_sampler = kwargs.get("nuts_sampler")

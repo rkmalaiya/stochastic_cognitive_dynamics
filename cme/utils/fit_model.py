@@ -1,3 +1,4 @@
+from tracemalloc import start
 from attr import dataclass
 #from dataclasses import dataclass, fields
 import cme.decision_models.confidence_accumulation as ca
@@ -35,7 +36,7 @@ class ModelDetails:
     file_posts:list = []
     version:float = 0.1
     n_states:int = 11
-    start_width:int = 5
+    start_width:int = None # None value will be automatically calculated.
     response_width:int = 1
     delta:float = 0.01
     measurement_prob:float = 0.8
@@ -59,6 +60,11 @@ class ModelDetails:
 def fit_model(model: ModelDetails):
 
     file_loc = f"{model.folder}/{model.file_pre}"
+    start_width = (model.n_states-2*model.response_width)
+    if model.start_width == None or model.start_width == 0:
+        model.start_width = start_width
+    elif model.start_width > start_width:
+        raise Warning(f"start_width larger than ideal value of {start_width}. {model.model_type} model may have unexpected results")
     
     #file_post = 
     #version = 0.5
@@ -115,17 +121,20 @@ def _run_model(RT_file, X_file, name, version,
         q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
 
         log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i}")
-        prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width,delta=delta,
-                                                    measurement_prob=measurement_prob, X=X, RT=RT, n_samples=predictive_n,
-                                                    params_type=params_type, model_type=model_type, transition_type=transition_type, 
-                                                    likelihood_type=likelihood_type, sampling_type=sampling_type, 
+        prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
+                                                        delta=delta, data_samples=RT.shape,
+                                                        measurement_prob=measurement_prob, X=X, RT=RT, n_samples=predictive_n,
+                                                        params_type=params_type, model_type=model_type, transition_type=transition_type, 
+                                                        likelihood_type=likelihood_type, sampling_type=sampling_type, 
                                                     )
         start_time_sampling = time.perf_counter()
         log.info(f"Starting Posterior Sampling_{name}_{model_type}_{version}_{i}")
-        post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
-                                            num_warmup=num_warmup, samples_n=samples_n,
-                                            params_type=params_type, model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type 
-                            )
+        post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
+                                                delta=delta,measurement_prob=measurement_prob,
+                                                num_warmup=num_warmup, samples_n=samples_n,
+                                                params_type=params_type, model_type=model_type, transition_type=transition_type, 
+                                                likelihood_type=likelihood_type 
+                                                )
         log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i} after {((time.perf_counter() - start_time_sampling)/60):.2f} mins")
         post_samples = post_chain.get_samples()
         total_samples = post_samples["mu"].shape[0]
@@ -171,7 +180,7 @@ def _run_model(RT_file, X_file, name, version,
         log.info(f"Starting Posterior Predictive Sampling_{name}_{model_type}_{version}_{i}")
         
         post_pd_samples = ca.sample_post_pred_params(n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
-                                                    X=X, 
+                                                    X=X, data_samples=RT.shape,
                                                     drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, 
                                                     phi_0_samples=phi_0_samples,
                                                     RT=RT,
@@ -211,7 +220,8 @@ def _run_model(RT_file, X_file, name, version,
         #    break
     
     start_time = time.perf_counter()
-    log.info(f"Starting {min(4,batch_n)} jobs for sub-batch of participants at time")
-    Parallel(n_jobs=min(3,batch_n) if not is_test and model.is_parallel else 1, prefer="processes", backend = "loky")(f for f in fn)
+    n_jobs1=min(3,batch_n) if not is_test and is_parallel else 1
+    log.info(f"Starting {n_jobs1} jobs for sub-batch of participants at time")
+    Parallel(n_jobs=n_jobs1, prefer="processes", backend = "loky")(f for f in fn)
     
     log.info(f"Job successfully completed for {name}, {model_type}, {version} after {((time.perf_counter() - start_time)/60):.2f} mins")
