@@ -542,7 +542,7 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
 #     Response = np.hstack((state_final, RA, random_ts.flatten()[:,None]*delta))
 #     df_res = pd.DataFrame(Response, columns=["I", "J", "state", "RA", "RT"])
 #     return df_res
-
+import time
 def get_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
                      drift_rate, diffusion_rate, phi_0, data_samples = (1,10), param_sample_id=-1,
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
@@ -612,30 +612,35 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         df_samples = pd.concat(samples_arr)
         return df_samples, df_sim_RT
 
-    def gen_RT(max_RT_sec=50, max_samples=55000, n_counter=3):
+    def gen_RT(max_RT_sec=50, max_samples=10000, n_counter=3):
             
             def get_RT_frame(I, mu, sigma, phi_0):
-        
+                
+                #print(f"{(time.perf_counter()/60):.3f}")
                 random_ts = stats.uniform.rvs(delta, max_RT_sec/delta, (I,max_samples))     #dist.Uniform(delta, max_RT_sec/delta).sample(key=key1, sample_shape=(I,max_samples))
+                
                 intensity_matrix = get_intensity_matrix(n_states, mu, sigma, model_type=model_type)
                 Mc, Mw, Mn = _get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
+                
                 phi_t = perform_state_transition(intensity_matrix=intensity_matrix, RT_s = random_ts, RA_s = None, delta=delta, 
                                                     Mc = Mc, Mn = Mn, Mw = Mw, phi_0=phi_0, 
                                                     transition_type=transition_type, likelihood_type=likelihood_type)
-
+                
                 states_t = dist.Multinomial(total_count=1, probs=phi_t[...,0]).sample(key=key1)
+                
                 state_final = npx.argwhere(states_t, size=I*max_samples) # converts one-hot encoding to categorical values
                 RA = npx.select([
                         state_final[:,[-1]] <= response_width - 1,
                         state_final[:,[-1]] >= n_states - response_width - 1
                     ], [0,1], default = np.nan)#[:,-1]
+                
                 Response = npx.hstack((state_final, RA, random_ts.flatten()[:,None]*delta))
                 return Response
     
             df_sample = []
             df_sim_RT = []
             part_I, part_J = data_samples
-            get_RT_frame_jit = get_RT_frame #jax.jit(get_RT_frame, static_argnames=["I"])
+            get_RT_frame_jit = jax.jit(get_RT_frame, static_argnames=["I"]) #get_RT_frame #
             Response = get_RT_frame_jit(part_I, drift_rate, diffusion_rate, phi_0)
             
             df_res = pd.DataFrame(Response, columns=["part_id", "J", "final_state", "RA", "RT"]).assign(param_sample_id=param_sample_id)
