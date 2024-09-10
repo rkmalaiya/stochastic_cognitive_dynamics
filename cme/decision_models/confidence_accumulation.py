@@ -480,7 +480,7 @@ def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transitio
         raise Exception(f"Please select one of {model_type}")
   
     
-    P_t = npx.where(RT_cond <= 0, 0, np.log(P_t))
+    P_t = npx.where(RT_cond <= 0, 0, npx.log(P_t))
 
     return P_t #npx.log(npx.sum(P_t)) # summing over all participants and trials
 

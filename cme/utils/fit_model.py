@@ -1,4 +1,3 @@
-from tracemalloc import start
 from attr import dataclass
 #from dataclasses import dataclass, fields
 import cme.decision_models.confidence_accumulation as ca
@@ -135,11 +134,12 @@ def _run_model(RT_file, X_file, name, version,
                                                 params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                 likelihood_type=likelihood_type 
                                                 )
-        log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i} after {((time.perf_counter() - start_time_sampling)/60):.2f} mins")
+        
         post_samples = post_chain.get_samples()
         total_samples = post_samples["mu"].shape[0]
         pred_idx = np.random.default_rng().choice(total_samples, predictive_n)
-
+        log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i} after {((time.perf_counter() - start_time_sampling)/60):.2f} mins")
+        
         df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "phi_0", "likl_rt"]) #"sigma_final",
         df_summary_csv = (df_summary
                             .reset_index(names="params")
@@ -221,7 +221,7 @@ def _run_model(RT_file, X_file, name, version,
     
     start_time = time.perf_counter()
     n_jobs1=min(3,batch_n) if not is_test and is_parallel else 1
-    log.info(f"Starting {n_jobs1} jobs for sub-batch of participants at time")
+    log.info(f"Starting {n_jobs1} jobs for sub-batch of participants at {start_time:.2f} mins")
     Parallel(n_jobs=n_jobs1, prefer="processes", backend = "loky")(f for f in fn)
     
     log.info(f"Job successfully completed for {name}, {model_type}, {version} after {((time.perf_counter() - start_time)/60):.2f} mins")
