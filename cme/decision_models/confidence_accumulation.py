@@ -437,7 +437,7 @@ def transformed_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, M
 
 def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
     P_t = likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-    P_t = npx.where(P_t == 0, 0, P_t)
+    P_t = npx.where(P_t == 0, 0, npx.log(P_t))
     return P_t
 
 def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
@@ -480,7 +480,7 @@ def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transitio
         raise Exception(f"Please select one of {model_type}")
   
     
-    P_t = npx.where(RT_cond <= 0, 0, npx.log(P_t))
+    #P_t = npx.where(RT_cond <= 0, 0, npx.log(P_t))
 
     return P_t #npx.log(npx.sum(P_t)) # summing over all participants and trials
 
@@ -831,7 +831,7 @@ def sample_post_pred_params(n_states, response_width, delta, measurement_prob, X
                                                 params_type, model_type, transition_type, likelihood_type)
                                     for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
                                     )
-    elif sampling_type == "GEN":
+    elif sampling_type == "GEN" or sampling_type == "SIM":
             predictive_samples = parallel(delayed(get_RT)(RT, n_states, response_width, delta, measurement_prob, X, 
                                                 drift_rate, diffusion_rate, phi_0, param_sample_id = param_sample_id,
                                                 model_type = model_type, transition_type = transition_type, 

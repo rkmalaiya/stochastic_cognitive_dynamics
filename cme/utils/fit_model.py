@@ -158,6 +158,11 @@ def _run_model(RT_file, X_file, name, version,
         #df_init_state_all.to_csv(f"export/initial_states_{name}_{model_type}_{version}_all.csv", index=None)
 
 
+        df_summary_csv.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}_{i}.csv")
+        df_phi.to_csv(f"export/initial_states_{name}_{model_type}_{version}_{i}.csv")
+        pd.DataFrame(ID).to_csv(f"export/participants_id_{name}_{model_type}_{version}_{i}.csv")
+
+
         log.info(f"Starting Mean Confidence_{name}_{model_type}_{version}_{i}")
         drift_rate_est = post_samples["mu"].mean(axis=0)
         diffusion_rate_est = post_samples["sigma_final"].mean(axis=0)
@@ -179,7 +184,7 @@ def _run_model(RT_file, X_file, name, version,
 
         log.info(f"Starting Posterior Predictive Sampling_{name}_{model_type}_{version}_{i}")
         
-        post_pd_samples = ca.sample_post_pred_params(n_states=n_states, start_width=start_width, delta=delta,measurement_prob=measurement_prob,
+        post_pd_samples = ca.sample_post_pred_params(n_states=n_states, response_width=response_width, delta=delta,measurement_prob=measurement_prob,
                                                     X=X, data_samples=RT.shape,
                                                     drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, 
                                                     phi_0_samples=phi_0_samples,
@@ -199,9 +204,7 @@ def _run_model(RT_file, X_file, name, version,
                             RT = RT, 
                             X = X), outp, pickle.HIGHEST_PROTOCOL)
 
-        df_summary_csv.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}_{i}.csv")
-        df_phi.to_csv(f"export/initial_states_{name}_{model_type}_{version}_{i}.csv")
-        pd.DataFrame(ID).to_csv(f"export/participants_id_{name}_{model_type}_{version}_{i}.csv")
+        
         
         df_prior_pred_all = pd.concat([samples["Samples"] for samples in prior_pd_samples])
         df_prior_pred_all.to_csv(f"export/prior_predictive_{name}_{model_type}_{version}_{i}.csv")
