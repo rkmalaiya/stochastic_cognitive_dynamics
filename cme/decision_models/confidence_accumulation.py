@@ -325,12 +325,22 @@ def _get_initial_state(n_states, start_width, I = 1, prob=1, model_type = "Marko
         elif prior_type == "Uniform":
             pad_width = (0,0)
             width = n_states
+        elif prior_type == "Opposite":
+            pad_width = int((width+1)/2 )
+            width = pad_width
+            
             
             
         #conc = npx.ones(width)
         #p_0 = npx.pad(stats.dirichlet(conc).rvs(), ((0,0),pad_width)) # rvs are of shape (1,n_states)
         conc = npx.ones((1,width))
-        p_0 = npx.pad(conc, ((0,0),pad_width)) 
+        if prior_type is not "Opposite":
+            p_0 = npx.pad(conc, ((0,0),pad_width)) 
+        else:
+            p_0 = npx.zeros((1, n_states))
+            p_0 = p_0.at[:,:pad_width].set(conc)
+            p_0 = p_0.at[:,-pad_width:].set(conc)
+
         p_0 = p_0 / npx.sum(p_0) # rvs are of shape (1,n_states)
 
         if model_type == "Markov":
