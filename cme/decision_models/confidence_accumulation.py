@@ -553,6 +553,7 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
 #     df_res = pd.DataFrame(Response, columns=["I", "J", "state", "RA", "RT"])
 #     return df_res
 import time
+
 def get_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
                      drift_rate, diffusion_rate, phi_0, data_samples = (1,10), param_sample_id=-1,
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
@@ -739,6 +740,13 @@ def predictive_model(RT_pred, n_states, response_width, delta, measurement_prob,
     #pyro.deterministic("likl_prnt", likl)
     #pyro.factor("likelihood", likl)
     return likl.sum()
+
+
+def sample_posterior_params(DT, X, n_states, start_width, response_width, delta, measurement_prob,
+                            num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  
+                            params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
+    guide = AutoDelta(model)
+
 
 def sample_posterior_params(DT, X, n_states, start_width, response_width, delta, measurement_prob,
                             num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  

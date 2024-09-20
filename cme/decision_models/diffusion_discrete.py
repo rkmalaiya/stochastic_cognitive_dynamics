@@ -132,7 +132,7 @@ def _get_measurement_matrix(n_states, start_width, prob = 0.5):
     return Mcorr, Mincorr, Mnoresp
 
 
-def _get_initial_state(n_states, start_width, I=1, prob=1):
+def _get_initial_state(n_states, start_width, I=1, prob=1,sub_sample_size=None):
 
     #st_p = stats.halfnorm().rvs()
     #s_0 = stats.dirichlet(np.repeat(st_p, n_states)).rvs().T[None,...]
@@ -142,22 +142,22 @@ def _get_initial_state(n_states, start_width, I=1, prob=1):
     #s_0 = npx.zeros((n_states,1)) 
     #s_0 = s_0.at[(Mid-Mid_w):(Mid+Mid_w),0].set(npx.asarray(st))
 
-    Mid = int((n_states+1)/2)
-    p_0 = npx.zeros((I,1,n_states,1)) 
-    p_0 = p_0.at[...,(Mid-start_width-1):(Mid+start_width),:].set(prob) # additional -1 because indexing starts from 0
-    #p_0 = p_0.reshape(-1,1)[None,...] # to get column vector
-    s_0 = p_0 / npx.sum(p_0, axis=(-2), keepdims=True)
+    # Mid = int((n_states+1)/2)
+    # p_0 = npx.zeros((I,1,n_states,1)) 
+    # p_0 = p_0.at[...,(Mid-start_width-1):(Mid+start_width),:].set(prob) # additional -1 because indexing starts from 0
+    # #p_0 = p_0.reshape(-1,1)[None,...] # to get column vector
+    # s_0 = p_0 / npx.sum(p_0, axis=(-2), keepdims=True)
 
     #with npy.plate('I', I, dim=-3):
     #    #with npy.plate('S', n_states, dim=-2):
     #    phi_0 = npy.sample("phi_0", dist.Dirichlet((npx.ones(n_states)[:,None])/n_states)) # Initial State
 
     
-    with npy.plate('I', I, dim=-4):
+    with npy.plate('I', I, dim=-4,subsample_size=sub_sample_size):
         with npy.plate('S', n_states, dim=-1):
             conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
 
-    with npy.plate('I', I, dim=-3):
+    with npy.plate('I', I, dim=-3,subsample_size=sub_sample_size):
         p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
         
 
