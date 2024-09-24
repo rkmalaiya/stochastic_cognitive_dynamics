@@ -6,7 +6,9 @@ import cme.decision_models.quantum_discrete as qd
 import cme.decision_models.diffusion_discrete as dd
 import jax
 import numpyro.distributions as dist
-from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive
+from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive, SVI, Trace_ELBO
+import numpyro.infer.autoguide as ag
+from numpyro.optim import Adam
 from jax import random
 from jax import lax
 import arviz as az 
@@ -19,13 +21,16 @@ import scipy.stats as stats
 from joblib import Parallel, delayed
 from joblib import parallel_config
 
+from numpyro import enable_validation
+enable_validation(True)
+
 from cme.utils import common_logging as cl
 from cme.utils import common_utils as cu
 log = cl.get_logger("confidence_accumulation")
 
 #pyro.set_platform("cpu")
 pyro.set_host_device_count(64)
-pyro.enable_x64()
+#pyro.enable_x64()
 #from jax import config
 #config.update("jax_enable_x64", False)
 
@@ -40,7 +45,7 @@ def centralized_parameters(I):
     """
     mu_m =  pyro.sample(f"mu_m", dist.Normal(0,1))
     mu_s =  pyro.sample(f"mu_s", dist.HalfNormal(2))
-    with pyro.plate('I', I, dim=-2):
+    with pyro.plate('I6', I, dim=-2):
         mu = pyro.sample("mu", dist.Normal(mu_m,mu_s)) # Drift Rate
         #sigma = pyro.sample("sigma", dist.Normal(1,2)) # Diffusion Rate
     sigma = pyro.deterministic("sigma", npx.ones((I,1)))    
@@ -54,7 +59,7 @@ def non_centralized_parameters(I):
     m = pyro.sample("m", dist.Normal(0,1))
     s = pyro.sample("s", dist.HalfNormal(1))
 
-    with pyro.plate('I', I, dim=-2):
+    with pyro.plate('I3', I, dim=-2):
         mu_r = pyro.sample("mu_r", dist.Normal(2,1)) # Drift Rate
         #sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
 
@@ -63,6 +68,46 @@ def non_centralized_parameters(I):
     sigma = pyro.deterministic("sigma", npx.ones((I,1)))
     
     return mu, sigma
+
+def non_centralized_parameters_VI(I):
+    """
+    I: Number of participants
+    
+    """
+    m_m = pyro.param("m_m", 0, constraint=constraints.positive)
+    m_s = pyro.param("m_s", 1, constraint=constraints.positive)
+    m = pyro.sample("m", dist.Normal(m_m,m_s))
+    s = pyro.sample("s", dist.HalfNormal(m_s))
+
+    with pyro.plate('I4', I, dim=-2):
+        mu_r_m = pyro.param("m_m", 2, constraint=constraints.positive)
+        mu_r_s = pyro.param("m_m", 1, constraint=constraints.positive)
+        
+        mu_r = pyro.sample("mu_r", dist.Normal(mu_r_m,mu_r_s)) # Drift Rate
+        #sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
+
+        mu = pyro.deterministic("mu", m + s * mu_r)
+        #sigma = pyro.deterministic("sigma", m + s * sigma_r) 
+    sigma = pyro.deterministic("sigma", npx.ones((I,1)))
+    
+    return mu, sigma
+
+def _get_initial_state_VI(n_states, start_width, I=1, prob=1,sub_sample_size=None):
+
+    with npy.plate('I2', I, dim=-4,subsample_size=sub_sample_size):
+        with npy.plate('S', n_states, dim=-1):
+            conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
+
+    with npy.plate('I3', I, dim=-3,subsample_size=sub_sample_size):
+        p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+        
+
+    #p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State
+
+             
+    p_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)
+
+    return p_0 #s_0
 
 
 def _timestep_transition_matrix_mat_pow(n, T_delta, Mn):
@@ -334,7 +379,7 @@ def _get_initial_state(n_states, start_width, I = 1, prob=1, model_type = "Marko
         #conc = npx.ones(width)
         #p_0 = npx.pad(stats.dirichlet(conc).rvs(), ((0,0),pad_width)) # rvs are of shape (1,n_states)
         conc = npx.ones((1,width))
-        if prior_type is not "Opposite":
+        if prior_type != "Opposite":
             p_0 = npx.pad(conc, ((0,0),pad_width)) 
         else:
             p_0 = npx.zeros((1, n_states))
@@ -447,7 +492,7 @@ def transformed_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, M
 
 def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
     P_t = likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-    P_t = npx.where(P_t == 0, 0, npx.log(P_t))
+    P_t = npx.where(P_t <= 0, 0, npx.log(P_t))
     return P_t
 
 def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
@@ -741,11 +786,25 @@ def predictive_model(RT_pred, n_states, response_width, delta, measurement_prob,
     #pyro.factor("likelihood", likl)
     return likl.sum()
 
+def guide(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
+    I, _ = RA_s.shape
+    mu, sigma = non_centralized_parameters_VI(I)
+    intensity_matrix = dd._buildK(n_states, mu, sigma, delta)    
+    phi_0 = _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type, prior_type="Model")
 
-def sample_posterior_params(DT, X, n_states, start_width, response_width, delta, measurement_prob,
+
+def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, delta, measurement_prob,
                             num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
-    guide = AutoDelta(model)
+    guide = ag.AutoNormal(model)
+    #guide = ag.AutoDAIS(model)
+    optimizer = Adam(step_size=0.0005)
+    svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
+    svi_result = svi.run(cu.get_rng(), num_warmup + samples_n, n_states, start_width, response_width, delta, X, DT, measurement_prob, 
+                   params_type = params_type, transition_type=transition_type, 
+                   likelihood_type=likelihood_type, model_type=model_type)
+
+    return svi_result
 
 
 def sample_posterior_params(DT, X, n_states, start_width, response_width, delta, measurement_prob,
@@ -877,10 +936,22 @@ def get_intensity_matrix(n_states, mu, sigma, model_type="Markov|Quantum"):
 
 if __name__ == "__main__":
 
-    n_states, start_width, response_width, delta, measurement_prob, mu, sigma, I, J = 7, 4, 2, 1, 0.8, npx.asarray([[1]]), npx.asarray([[1]]), 100, 50
+    #n_states, start_width, response_width, delta, measurement_prob, mu, sigma, I, J = 7, 4, 2, 1, 0.8, npx.asarray([[1]]), npx.asarray([[1]]), 10, 50
+    n_states, start_width, response_width, delta, measurement_prob, mu, sigma, I, J = 51, None, 5, 1, 0.25, npx.asarray([[1]]), npx.asarray([[1]]), 10, 50
+    start_width = (n_states-2*response_width)
     m_Mc, m_Mw, m_Mn = _get_measurement_matrix(n_states, 1, prob=measurement_prob, model_type = "Markov")
     q_Mc, q_Mw, q_Mn = _get_measurement_matrix(n_states, 1, prob=measurement_prob, model_type = "Quantum")
     
+    X = stats.bernoulli(0.5).rvs(size=(I,J))
+    RT = stats.lognorm(1,1).rvs(size=(I,J))
+    post_chain = sample_posterior_params_VI(RT, X, n_states=n_states, start_width=start_width, response_width=response_width, 
+                                         delta=delta,measurement_prob=measurement_prob,
+                                         num_warmup=1000, samples_n=1000,
+                                         params_type="NonCentralized", model_type="Markov", transition_type="TIMESTEP", likelihood_type="SINGLE" 
+                            )
+
+if False:
+
     log.debug("Constant Drift Rate - Mean Confidence 1")
 
     intensity_matrix_markov = dd._buildK(n_states, mu, sigma)
