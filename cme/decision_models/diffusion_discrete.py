@@ -153,11 +153,11 @@ def _get_initial_state(n_states, start_width, I=1, prob=1,sub_sample_size=None):
     #    phi_0 = npy.sample("phi_0", dist.Dirichlet((npx.ones(n_states)[:,None])/n_states)) # Initial State
 
     
-    with npy.plate('I', I, dim=-4,subsample_size=sub_sample_size):
+    with npy.plate('I1', I, dim=-4,subsample_size=sub_sample_size):
         with npy.plate('S', n_states, dim=-1):
             conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
 
-    with npy.plate('I', I, dim=-3,subsample_size=sub_sample_size):
+    with npy.plate('I2', I, dim=-3,subsample_size=sub_sample_size):
         p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
         
 
