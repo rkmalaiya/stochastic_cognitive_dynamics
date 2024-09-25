@@ -668,8 +668,9 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         df_samples = pd.concat(samples_arr)
         return df_samples, df_sim_RT
 
+
     def gen_RT(max_RT_sec=50, max_samples=10000, n_counter=3):
-            
+            part_I, part_J = data_samples
             def get_RT_frame(I, mu, sigma, phi_0):
                 
                 #print(f"{(time.perf_counter()/60):.3f}")
@@ -682,7 +683,7 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
                                                     Mc = Mc, Mn = Mn, Mw = Mw, phi_0=phi_0, 
                                                     transition_type=transition_type, likelihood_type=likelihood_type)
                 
-                states_t = dist.Multinomial(total_count=1, probs=phi_t[...,0]).sample(key=key1)
+                states_t = dist.Multinomial(total_count=1, probs=phi_t[...,0]).sample(key=key1) # output like one-hot encoding
                 
                 state_final = npx.argwhere(states_t, size=I*max_samples) # converts one-hot encoding to categorical values
                 RA = npx.select([
@@ -695,8 +696,8 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
     
             df_sample = []
             df_sim_RT = []
-            part_I, part_J = data_samples
-            get_RT_frame_jit = jax.jit(get_RT_frame, static_argnames=["I"]) #get_RT_frame #
+            
+            get_RT_frame_jit = get_RT_frame #jax.jit(get_RT_frame, static_argnames=["I"]) #
             Response = get_RT_frame_jit(part_I, drift_rate, diffusion_rate, phi_0)
             
             df_res = pd.DataFrame(Response, columns=["part_id", "J", "final_state", "RA", "RT"]).assign(param_sample_id=param_sample_id)

@@ -3,3 +3,7 @@ __pycache__
 *.npy
 *.csv
 examples
+*.data*
+*.index
+*.pkl
+*checkpoint*
