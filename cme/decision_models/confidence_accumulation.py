@@ -492,7 +492,7 @@ def transformed_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, M
 
 def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
     P_t = likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-    P_t = npx.where(P_t <= 0, 0, npx.log(P_t))
+    P_t = npx.where(P_t <= 0, 0, P_t)
     return P_t
 
 def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
@@ -804,7 +804,10 @@ def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, del
                    params_type = params_type, transition_type=transition_type, 
                    likelihood_type=likelihood_type, model_type=model_type)
 
-    return svi_result
+    predictive = Predictive(guide, params=svi_result.params, num_samples=1000)
+    posterior_samples = predictive(cu.get_rng(), data=None)
+    
+    return posterior_samples
 
 
 def sample_posterior_params(DT, X, n_states, start_width, response_width, delta, measurement_prob,
@@ -946,9 +949,10 @@ if __name__ == "__main__":
     RT = stats.lognorm(1,1).rvs(size=(I,J))
     post_chain = sample_posterior_params_VI(RT, X, n_states=n_states, start_width=start_width, response_width=response_width, 
                                          delta=delta,measurement_prob=measurement_prob,
-                                         num_warmup=1000, samples_n=1000,
+                                         num_warmup=200, samples_n=200,
                                          params_type="NonCentralized", model_type="Markov", transition_type="TIMESTEP", likelihood_type="SINGLE" 
                             )
+    print(post_chain.keys())
 
 if False:
 
