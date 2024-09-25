@@ -61,11 +61,11 @@ def non_centralized_parameters(I):
 
     with pyro.plate('I3', I, dim=-2):
         mu_r = pyro.sample("mu_r", dist.Normal(2,1)) # Drift Rate
-        #sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
+        sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
 
         mu = pyro.deterministic("mu", m + s * mu_r)
-        #sigma = pyro.deterministic("sigma", m + s * sigma_r) 
-    sigma = pyro.deterministic("sigma", npx.ones((I,1)))
+        sigma = pyro.deterministic("sigma", m + s * sigma_r) 
+    #sigma = pyro.deterministic("sigma", npx.ones((I,1)))
     
     return mu, sigma
 
@@ -558,7 +558,7 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
         raise Exception(f"Please select one of {params_type}")
 
     if model_type == "Markov":
-        sigma = pyro.deterministic("sigma_final",mu + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
+        sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
         intensity_matrix = dd._buildK(n_states, mu, sigma, delta)
 
     elif model_type == "Quantum":
@@ -683,7 +683,7 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
                                                     Mc = Mc, Mn = Mn, Mw = Mw, phi_0=phi_0, 
                                                     transition_type=transition_type, likelihood_type=likelihood_type)
                 
-                states_t = dist.Multinomial(total_count=1, probs=phi_t[...,0]).sample(key=key1) # output like one-hot encoding
+                states_t = dist.Multinomial(total_count=1, probs=(phi_t[...,0] / phi_t[...,0].sum(axis=-1, keepdims=True))).sample(key=key1) # output like one-hot encoding
                 
                 state_final = npx.argwhere(states_t, size=I*max_samples) # converts one-hot encoding to categorical values
                 RA = npx.select([
