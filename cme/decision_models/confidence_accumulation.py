@@ -12,6 +12,7 @@ from numpyro.optim import Adam
 from jax import random
 from jax import lax
 import arviz as az 
+from numpyro.distributions import constraints
 
 import numpy as np 
 import pandas as pd
@@ -64,7 +65,7 @@ def non_centralized_parameters(I):
         sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
 
         mu = pyro.deterministic("mu", m + s * mu_r)
-        sigma = pyro.deterministic("sigma", m + s * sigma_r) 
+        sigma = pyro.deterministic("sigma", (m + s * sigma_r)**2) 
     #sigma = pyro.deterministic("sigma", npx.ones((I,1)))
     
     return mu, sigma
@@ -84,11 +85,11 @@ def non_centralized_parameters_VI(I):
         mu_r_s = pyro.param("m_m", 1, constraint=constraints.positive)
         
         mu_r = pyro.sample("mu_r", dist.Normal(mu_r_m,mu_r_s)) # Drift Rate
-        #sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
+        sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
 
         mu = pyro.deterministic("mu", m + s * mu_r)
-        #sigma = pyro.deterministic("sigma", m + s * sigma_r) 
-    sigma = pyro.deterministic("sigma", npx.ones((I,1)))
+        sigma = pyro.deterministic("sigma", m + s * sigma_r) 
+    #sigma = pyro.deterministic("sigma", npx.ones((I,1)))
     
     return mu, sigma
 
@@ -790,14 +791,25 @@ def predictive_model(RT_pred, n_states, response_width, delta, measurement_prob,
 def guide(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
     I, _ = RA_s.shape
     mu, sigma = non_centralized_parameters_VI(I)
-    intensity_matrix = dd._buildK(n_states, mu, sigma, delta)    
+    #intensity_matrix = dd._buildK(n_states, mu, sigma, delta)    
+    if model_type == "Markov":
+        sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
+        intensity_matrix = dd._buildK(n_states, mu, sigma, delta)
+
+    elif model_type == "Quantum":
+        sigma = pyro.deterministic("sigma_final",sigma) # Sigma cannot be negative
+        intensity_matrix = qd._buildH(n_states, mu, sigma, delta)
+    else:
+        raise Exception(f"Please select one of {model_type}")
+
+    #phi_0 = pyro.deterministic("phi_0", _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type))
     phi_0 = _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type, prior_type="Model")
 
 
 def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, delta, measurement_prob,
                             num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
-    guide = ag.AutoNormal(model)
+    #guide = ag.AutoNormal(model)
     #guide = ag.AutoDAIS(model)
     optimizer = Adam(step_size=0.0005)
     svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
@@ -806,7 +818,10 @@ def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, del
                    likelihood_type=likelihood_type, model_type=model_type)
 
     predictive = Predictive(guide, params=svi_result.params, num_samples=1000)
-    posterior_samples = predictive(cu.get_rng(), data=None)
+    #posterior_samples = predictive(cu.get_rng(), data=None)
+    posterior_samples = predictive(cu.get_rng(),n_states, start_width, response_width, delta, X, DT, measurement_prob, 
+                   params_type = params_type, transition_type=transition_type, 
+                   likelihood_type=likelihood_type, model_type=model_type)
     
     return posterior_samples
 

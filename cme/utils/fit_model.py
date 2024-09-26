@@ -11,6 +11,7 @@ import arviz as az
 import numpy as np
 import pickle
 import time
+import itertools as iter
 from joblib import Parallel, delayed
 from cme.utils import common_logging as cl
 log = cl.get_logger("fit_model")
@@ -48,6 +49,7 @@ class ModelDetails:
     transition_type:str = "RT|TIMESTEP"
     likelihood_type:str = "SINGLE|JOINT"
     sampling_type:str = "MCMC|GEN"
+    estimation_type:str = "MCMC|VI"
     scale: str = "None|Log|SQRT"
     conf_scale: str = "None|(add_scale, mul_scale)"
     csv_header:bool = False
@@ -75,7 +77,8 @@ def fit_model(model: ModelDetails):
                                     
                                     f"{file_loc}{name}_rt.csv", f"{file_loc}{name}_ra.csv", name, model.version, 
                                     model.n_states, model.start_width, model.response_width, model.delta, model.measurement_prob, 
-                                    model.params_type, model.model_type, model.transition_type, model.likelihood_type, model.sampling_type,
+                                    model.params_type, model.model_type, model.transition_type, model.likelihood_type, 
+                                    model.sampling_type, model.estimation_type,
                                     model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, 
                                     model.scale, model.conf_scale, model.csv_header, model.is_parallel) 
                                                 
@@ -85,7 +88,7 @@ def fit_model(model: ModelDetails):
 
 def _run_model(RT_file, X_file, name, version, 
             n_states, start_width, response_width, delta, measurement_prob, 
-            params_type, model_type, transition_type, likelihood_type, sampling_type,
+            params_type, model_type, transition_type, likelihood_type, sampling_type, estimation_type,
             num_warmup, samples_n, predictive_n, batch_size, is_test, scale, conf_scale, csv_header, is_parallel):
     
     df_X = pd.read_csv(X_file, header="infer" if csv_header else None)
@@ -128,25 +131,55 @@ def _run_model(RT_file, X_file, name, version,
                                                     )
         start_time_sampling = time.perf_counter()
         log.info(f"Starting Posterior Sampling_{name}_{model_type}_{version}_{i}")
-        post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
-                                                delta=delta,measurement_prob=measurement_prob,
-                                                num_warmup=num_warmup, samples_n=samples_n,
-                                                params_type=params_type, model_type=model_type, transition_type=transition_type, 
-                                                likelihood_type=likelihood_type 
-                                                )
-        
-        post_samples = post_chain.get_samples()
-        total_samples = post_samples["mu"].shape[0]
-        pred_idx = np.random.default_rng().choice(total_samples, predictive_n)
-        log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i} after {((time.perf_counter() - start_time_sampling)/60):.2f} mins")
-        
-        df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "phi_0", "likl_rt"]) #"sigma_final",
+        if sampling_type == "MCMC":
+            post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
+                                                    delta=delta,measurement_prob=measurement_prob,
+                                                    num_warmup=num_warmup, samples_n=samples_n,
+                                                    params_type=params_type, model_type=model_type, transition_type=transition_type, 
+                                                    likelihood_type=likelihood_type 
+                                                    )
+            
+            post_samples = post_chain.get_samples()
+            df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "phi_0", "likl_rt", "sigma_final"]) #"sigma_final",
+            df_summary = az.summary(post_samples, var_names=["mu", "phi_0", "likl_rt", "sigma_final"]) #"sigma_final",
+            #df_summary = (df_summary.reset_index(names="params")
+                            #.assign(param_name = lambda df: df.params.str.split("[",expand=True)[0])
+                            #.assign(part_id = lambda df: df.params.str.split("[",expand=True)[1].str.split(",",expand=True)[0])
+                            #.assign(dims = lambda df:df.params.str.split("[", expand=True)[1].str.removesuffix("]")) 
+            #        )
+            
+        else: 
+            post_samples = ca.sample_posterior_params_VI(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
+                                                    delta=delta,measurement_prob=measurement_prob,
+                                                    num_warmup=num_warmup, samples_n=samples_n,
+                                                    params_type=params_type, model_type=model_type, transition_type=transition_type, 
+                                                    likelihood_type=likelihood_type 
+                                                    )
+            keys = ["mu", "sigma_final", "phi_0"]
+            df_summary = []
+            for k in keys:
+                d = post_samples[k]
+                d = d.mean(axis=0)
+                ranges = [range(s) for s in d.shape]
+                names=[]
+                for r in iter.product(*ranges):
+                    names.append(k + "[" + ",".join(str(n)  for n in r) + "]")
+                df_summary.append(pd.DataFrame(dict(
+                    params = names,
+                    mean = d.flatten()
+                )))
+            df_summary = pd.concat(df_summary).set_index("params")
         df_summary_csv = (df_summary
                             .reset_index(names="params")
                             .assign(param_name = lambda df: df.params.str.split("[",expand=True)[0])
                             .assign(part_id = lambda df: df.params.str.split("[",expand=True)[1].str.split(",",expand=True)[0])
                             .assign(dims = lambda df:df.params.str.split("[", expand=True)[1].str.removesuffix("]")) 
                     )
+        df_summary_csv.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}_{i}.csv")
+        total_samples = post_samples["mu"].shape[0]
+        pred_idx = np.random.default_rng().choice(total_samples, predictive_n)
+        log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i} after {((time.perf_counter() - start_time_sampling)/60):.2f} mins")
+        
         df_phi = df_summary.filter(like="phi_0",axis=0)[["mean"]].reset_index(names="idx")
         df_t = df_phi.idx.str.split("[", expand=True)[1].str.split(",", expand=True)
         df_phi[["part_id", "phi_0"]] = df_t[[0,2]].astype(int)
@@ -157,8 +190,6 @@ def _run_model(RT_file, X_file, name, version,
         #        ]).astype({"param_id":"category"})
         #df_init_state_all.to_csv(f"export/initial_states_{name}_{model_type}_{version}_all.csv", index=None)
 
-
-        df_summary_csv.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}_{i}.csv")
         df_phi.to_csv(f"export/initial_states_{name}_{model_type}_{version}_{i}.csv")
         pd.DataFrame(ID).to_csv(f"export/participants_id_{name}_{model_type}_{version}_{i}.csv")
 
