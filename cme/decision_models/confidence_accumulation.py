@@ -1,4 +1,5 @@
 #from turtle import width
+from turtle import pos
 import jax.numpy as npx
 import jax.scipy as sci
 import numpyro as pyro
@@ -48,8 +49,8 @@ def centralized_parameters(I):
     mu_s =  pyro.sample(f"mu_s", dist.HalfNormal(2))
     with pyro.plate('I6', I, dim=-2):
         mu = pyro.sample("mu", dist.Normal(mu_m,mu_s)) # Drift Rate
-        #sigma = pyro.sample("sigma", dist.Normal(1,2)) # Diffusion Rate
-    sigma = pyro.deterministic("sigma", npx.ones((I,1)))    
+        sigma = pyro.sample("sigma", dist.Normal(1,0.1)) # Diffusion Rate
+    #sigma = pyro.deterministic("sigma", npx.ones((I,1)))    
     return mu, sigma
 
 def non_centralized_parameters(I):
@@ -95,18 +96,18 @@ def non_centralized_parameters_VI(I):
 
 def _get_initial_state_VI(n_states, start_width, I=1, prob=1,sub_sample_size=None):
 
-    with npy.plate('I2', I, dim=-4,subsample_size=sub_sample_size):
-        with npy.plate('S', n_states, dim=-1):
-            conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
+    with pyro.plate('I2', I, dim=-4,subsample_size=sub_sample_size):
+        with pyro.plate('S', n_states, dim=-1):
+            conc = pyro.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
 
-    with npy.plate('I3', I, dim=-3,subsample_size=sub_sample_size):
-        p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+    with pyro.plate('I3', I, dim=-3,subsample_size=sub_sample_size):
+        p_0 = pyro.sample("phi_init", dist.Dirichlet(conc)) # Initial State
         
 
     #p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State
 
              
-    p_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)
+    p_0 = pyro.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)
 
     return p_0 #s_0
 
@@ -559,11 +560,11 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
         raise Exception(f"Please select one of {params_type}")
 
     if model_type == "Markov":
-        sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
+        sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma**2) # Sigma needs to be larger than mu and Sigma cannot be negative
         intensity_matrix = dd._buildK(n_states, mu, sigma, delta)
 
     elif model_type == "Quantum":
-        sigma = pyro.deterministic("sigma_final",sigma) # Sigma cannot be negative
+        sigma = pyro.deterministic("sigma_final",sigma**2) # Sigma cannot be negative
         intensity_matrix = qd._buildH(n_states, mu, sigma, delta)
     else:
         raise Exception(f"Please select one of {model_type}")
@@ -600,14 +601,50 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
 #     return df_res
 import time
 
+def gen_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
+                     drift_rate, diffusion_rate, phi_0, data_samples = (1,10), 
+                     model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
+                     key=None, max_RT_sec=50
+                     ):
+    
+    key1 = cu.get_rng() if key is None else key
+    part_I, part_J = data_samples
+    max_samples = part_J * 50
+    I, mu, sigma = part_I, drift_rate, diffusion_rate
+    
+        
+    #print(f"{(time.perf_counter()/60):.3f}")
+    random_ts = stats.uniform.rvs(delta, max_RT_sec/delta, (I,max_samples))     #dist.Uniform(delta, max_RT_sec/delta).sample(key=key1, sample_shape=(I,max_samples))
+    
+    intensity_matrix = get_intensity_matrix(n_states, mu, sigma, model_type=model_type)
+    Mc, Mw, Mn = _get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
+    
+    phi_t = perform_state_transition(intensity_matrix=intensity_matrix, RT_s = random_ts, RA_s = None, delta=delta, 
+                                        Mc = Mc, Mn = Mn, Mw = Mw, phi_0=phi_0, 
+                                        transition_type=transition_type, likelihood_type=likelihood_type)
+    
+    states_t = dist.Multinomial(total_count=part_J, probs=(phi_t[...,0] / phi_t[...,0].sum(axis=-1, keepdims=True))).sample(key=key1) # output like one-hot encoding
+    states_final = npx.argmax(states_t, axis=-1)
+
+    corr_border_count = states_t[:,:,n_states - response_width:].sum(axis=-1)
+    incorr_border_count = states_t[:,:,:response_width].sum(axis=-1)
+    #RA = npx.tile(npx.nan, random_ts.shape)
+    #RA.at[incorr_border_count > corr_border_count].set(0)
+    #RA.at[incorr_border_count < corr_border_count].set(1)
+
+    RA = npx.where(incorr_border_count > corr_border_count, 0, 
+              npx.where(corr_border_count > incorr_border_count, 1, npx.nan))
+
+    RT = npx.where(npx.isnan(RA), npx.nan, random_ts)
+    
+    return RT, RA, states_final
+
 def get_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
                      drift_rate, diffusion_rate, phi_0, data_samples = (1,10), param_sample_id=-1,
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
                      sampling_type = "GEN|SIM", is_test=False, key=None
                      ):
     
-    key1 = cu.get_rng() if key is None else key
-
     def sim_RT():
         """
             This function calculates likelihood for one dataset of size I,J
@@ -669,71 +706,20 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         df_samples = pd.concat(samples_arr)
         return df_samples, df_sim_RT
 
-
-    def gen_RT(max_RT_sec=50, max_samples=10000, n_counter=3):
-            part_I, part_J = data_samples
-            def get_RT_frame(I, mu, sigma, phi_0):
-                
-                #print(f"{(time.perf_counter()/60):.3f}")
-                random_ts = stats.uniform.rvs(delta, max_RT_sec/delta, (I,max_samples))     #dist.Uniform(delta, max_RT_sec/delta).sample(key=key1, sample_shape=(I,max_samples))
-                
-                intensity_matrix = get_intensity_matrix(n_states, mu, sigma, model_type=model_type)
-                Mc, Mw, Mn = _get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
-                
-                phi_t = perform_state_transition(intensity_matrix=intensity_matrix, RT_s = random_ts, RA_s = None, delta=delta, 
-                                                    Mc = Mc, Mn = Mn, Mw = Mw, phi_0=phi_0, 
-                                                    transition_type=transition_type, likelihood_type=likelihood_type)
-                
-                states_t = dist.Multinomial(total_count=1, probs=(phi_t[...,0] / phi_t[...,0].sum(axis=-1, keepdims=True))).sample(key=key1) # output like one-hot encoding
-                
-                state_final = npx.argwhere(states_t, size=I*max_samples) # converts one-hot encoding to categorical values
-                RA = npx.select([
-                        state_final[:,[-1]] <= response_width - 1,
-                        state_final[:,[-1]] >= n_states - response_width - 1
-                    ], [0,1], default = np.nan)#[:,-1]
-                
-                Response = npx.hstack((state_final, RA, random_ts.flatten()[:,None]*delta))
-                return Response
-    
-            df_sample = []
-            df_sim_RT = []
-            
-            get_RT_frame_jit = get_RT_frame #jax.jit(get_RT_frame, static_argnames=["I"]) #
-            Response = get_RT_frame_jit(part_I, drift_rate, diffusion_rate, phi_0)
-            
-            df_res = pd.DataFrame(Response, columns=["part_id", "J", "final_state", "RA", "RT"]).assign(param_sample_id=param_sample_id)
-            if not is_test:
-                df_res = df_res.dropna()
-            
-            #df_sim_RT = None
-
-            df_sample.append(df_res)
-            get_id = (df_res.groupby(["part_id"]).count() < part_J)[["J"]].query("J == True").index.values.astype(int)
-            counter = 0
-            while get_id.size != 0 and counter < n_counter:
-                I = get_id.size
-                mu, sigma, p_0 = drift_rate[get_id,...], diffusion_rate[get_id,...], phi_0[get_id,...]
-                Response = get_RT_frame_jit(I, mu, sigma, p_0)
-                df_res = pd.DataFrame(Response, columns=["part_id", "J", "final_state", "RA", "RT"]).assign(param_sample_id=param_sample_id)
-                df_sample.append(df_res)
-                #df_sim_RT.append(df_sim_RT_t)
-                counter += 1
-                print(f"Retry: {counter}")
-
-            df_samples = pd.concat(df_sample)
-            if not is_test:
-                df_samples = df_samples.groupby(["part_id"]).nth(slice(None, part_J)).rename(columns={"J":"items"})
-            #df_sim_RT = pd.concat(df_sim_RT).query("part_id isin @df_samples.part_id")
-
-            #if (df_samples.groupby("part_id").count() < part_J).sum().sum() > 0:
-            #    raise Warning(f"Some participants did not reach required {part_J} responses")
-
-            return df_samples, None #df_sim_RT
-
     if sampling_type == "SIM":
         df_samples, df_sim_RT = sim_RT()
     elif sampling_type == "GEN":
-        df_samples, df_sim_RT = gen_RT()
+        RT, RA, states_final = gen_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
+                     drift_rate, diffusion_rate, phi_0, data_samples, param_sample_id,
+                     model_type, transition_type, likelihood_type, 
+                     sampling_type, is_test, key)
+        df_samples = pd.DataFrame(dict(
+            part_id = np.arange(RT.shape[0]),
+            J = np.arange(RT.shape[1]),
+            RT = RT.flatten(),
+            RA = RA.flatten(),
+            final_states = states_final.flatten()
+        ))
 
 
     return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "initial_state":phi_0, "Likelihood":df_sim_RT, "Samples":df_samples}
@@ -805,13 +791,45 @@ def guide(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
     #phi_0 = pyro.deterministic("phi_0", _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type))
     phi_0 = _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type, prior_type="Model")
 
+#def inbuilt_guide():
+    #'m', 'mu_r', 'phi_conc', 'phi_init', 's', 'sigma_r'
+
+def get_original_params(posterior_samples, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum"):
+    if params_type == "Centralized":
+        pass
+    elif params_type == "NonCentralized":
+        m = posterior_samples["m"]
+        s = posterior_samples["s"]
+
+        mu_r = posterior_samples["mu_r"]
+        sigma_r = posterior_samples["sigma_r"]
+
+        posterior_samples["mu"] = m + s * mu_r
+        posterior_samples["sigma"] = (m + s * sigma_r)**2 
+    
+    p_0 = posterior_samples["phi_init"]
+
+    if model_type == "Markov":
+        p_0 = p_0.transpose(0, 1, 2, 4, 3)
+        posterior_samples["sigma_final"] = npx.abs(posterior_samples["mu"]) + posterior_samples["sigma"] 
+
+    elif model_type == "Quantum":
+        p_0 = p_0.transpose(0, 1, 2, 4, 3)**(1/2)
+        posterior_samples["sigma_final"] = posterior_samples["sigma"]
+
+    posterior_samples["phi_0"] = p_0
+
+    return posterior_samples
+
 
 def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, delta, measurement_prob,
                             num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
-    #guide = ag.AutoNormal(model)
+    guide = ag.AutoNormal(model)
+    #guide = ag.AutoMultivariateNormal(model)
     #guide = ag.AutoDAIS(model)
-    optimizer = Adam(step_size=0.0005)
+
+    optimizer = Adam(step_size=0.1)
     svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
     svi_result = svi.run(cu.get_rng(), num_warmup + samples_n, n_states, start_width, response_width, delta, X, DT, measurement_prob, 
                    params_type = params_type, transition_type=transition_type, 
@@ -823,6 +841,7 @@ def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, del
                    params_type = params_type, transition_type=transition_type, 
                    likelihood_type=likelihood_type, model_type=model_type)
     
+    posterior_samples = get_original_params(posterior_samples, params_type, model_type)
     return posterior_samples
 
 

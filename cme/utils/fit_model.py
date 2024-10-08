@@ -131,7 +131,7 @@ def _run_model(RT_file, X_file, name, version,
                                                     )
         start_time_sampling = time.perf_counter()
         log.info(f"Starting Posterior Sampling_{name}_{model_type}_{version}_{i}")
-        if sampling_type == "MCMC":
+        if estimation_type == "MCMC":
             post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
                                                     delta=delta,measurement_prob=measurement_prob,
                                                     num_warmup=num_warmup, samples_n=samples_n,
@@ -148,7 +148,7 @@ def _run_model(RT_file, X_file, name, version,
                             #.assign(dims = lambda df:df.params.str.split("[", expand=True)[1].str.removesuffix("]")) 
             #        )
             
-        else: 
+        elif estimation_type == "VI": 
             post_samples = ca.sample_posterior_params_VI(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
                                                     delta=delta,measurement_prob=measurement_prob,
                                                     num_warmup=num_warmup, samples_n=samples_n,
@@ -169,6 +169,8 @@ def _run_model(RT_file, X_file, name, version,
                     mean = d.flatten()
                 )))
             df_summary = pd.concat(df_summary).set_index("params")
+        else:
+            raise Exception(f"Please select one of {estimation_type}")
         df_summary_csv = (df_summary
                             .reset_index(names="params")
                             .assign(param_name = lambda df: df.params.str.split("[",expand=True)[0])
@@ -255,7 +257,7 @@ def _run_model(RT_file, X_file, name, version,
     
     start_time = time.perf_counter()
     n_jobs1=min(3,batch_n) if not is_test and is_parallel else 1
-    log.info(f"Starting {n_jobs1} jobs for sub-batch of participants at {start_time:.2f} mins")
+    log.info(f"Starting {n_jobs1} jobs for sub-batch of participants")
     Parallel(n_jobs=n_jobs1, prefer="processes", backend = "loky")(f for f in fn)
     
     log.info(f"Job successfully completed for {name}, {model_type}, {version} after {((time.perf_counter() - start_time)/60):.2f} mins")
