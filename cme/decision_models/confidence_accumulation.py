@@ -494,7 +494,7 @@ def transformed_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, M
 
 def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
     P_t = likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-    P_t = npx.where(P_t <= 0, 0, P_t)
+    P_t = npx.where(P_t <= 0, 0.00001, npx.log(P_t))
     return P_t
 
 def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
@@ -606,10 +606,10 @@ def gen_RT(RT, n_states, response_width, delta, measurement_prob, RA,
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
                      key=None, max_RT_sec=50
                      ):
-    
+    threshold = 0.85 # or 85
     key1 = cu.get_rng() if key is None else key
     part_I, part_J = data_samples
-    max_samples = part_J * 50
+    max_samples = part_J * 10
     I, mu, sigma = part_I, drift_rate, diffusion_rate
     
         
@@ -619,30 +619,58 @@ def gen_RT(RT, n_states, response_width, delta, measurement_prob, RA,
     intensity_matrix = get_intensity_matrix(n_states, mu, sigma, model_type=model_type)
     Mc, Mw, Mn = _get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
     
-    phi_t = perform_state_transition(intensity_matrix=intensity_matrix, RT_s = random_ts, RA_s = None, delta=delta, 
-                                        Mc = Mc, Mn = Mn, Mw = Mw, phi_0=phi_0, 
-                                        transition_type=transition_type, likelihood_type=likelihood_type)
+    # phi_t = perform_state_transition(intensity_matrix=intensity_matrix, RT_s = random_ts, RA_s = None, delta=delta, 
+    #                                     Mc = Mc, Mn = Mn, Mw = Mw, phi_0=phi_0, 
+    #                                     transition_type=transition_type, likelihood_type=likelihood_type)
     
-    states_t = dist.Multinomial(total_count=part_J, probs=(phi_t[...,0] / phi_t[...,0].sum(axis=-1, keepdims=True))).sample(key=key1) # output like one-hot encoding
-    states_final = npx.argmax(states_t, axis=-1)
+    # if model_type == "Markov":
+    #     P_t = phi_t[...,0]
+    # elif model_type == "Quantum":
+    #     P_t = (npx.abs(phi_t)**2)[...,0]
 
-    corr_border_count = states_t[:,:,n_states - response_width:].sum(axis=-1)
-    incorr_border_count = states_t[:,:,:response_width].sum(axis=-1)
+
+    #phi_abs = npx.where(P_t <= 0, 0, P_t) # negative probability typically happens when the diffusion rate is too close to drift rate
+    #states_t = dist.Multinomial(total_count=part_J, probs=(phi_abs / phi_abs.sum(axis=-1, keepdims=True))).sample(key=key1) # output like one-hot encoding
+    #states_final = npx.argmax(states_t, axis=-1)
+
+    #states_t = phi_abs / phi_abs.sum(axis=-1, keepdims=True)
+    #states_final = npx.argmax(states_t, axis=-1)
+
+    #corr_border_count = states_t[:,:,n_states - response_width:].sum(axis=-1) # Summing all border states
+    #incorr_border_count = states_t[:,:,:response_width].sum(axis=-1)
     #RA = npx.tile(npx.nan, random_ts.shape)
     #RA.at[incorr_border_count > corr_border_count].set(0)
     #RA.at[incorr_border_count < corr_border_count].set(1)
+    
+    #RA = npx.where((incorr_border_count > threshold) & (incorr_border_count > corr_border_count), 0, 
+    #          npx.where((corr_border_count > threshold) & (corr_border_count > incorr_border_count), 1, npx.nan))
 
-    RA = npx.where(incorr_border_count > corr_border_count, 0, 
-              npx.where(corr_border_count > incorr_border_count, 1, npx.nan))
+    # RA = npx.where(incorr_border_count > threshold, 0, 
+    #           npx.where(corr_border_count > threshold, 1, 
+    #                     #npx.where(incorr_border_count > corr_border_count, 0, 
+    #                     #          npx.where(corr_border_count > incorr_border_count, 1, 
+    #                                         npx.nan#dist.Bernoulli(corr_border_count).sample(key=key1)
+    #           ))#))
 
-    RT = npx.where(npx.isnan(RA), npx.nan, random_ts)
+
+    # idx = ~npx.isnan(RA)
+    # RT = npx.asarray(random_ts)[idx]
+    # RA = RA[idx]
+
+    # if(RA.shape[0] < part_I*part_J):
+    #     raise Exception("Not enough samples")
+
+    # RT = RT[:part_I*part_J].reshape(part_I, part_J)
+    # RA = RA[:part_I*part_J].reshape(part_I, part_J)
+
+    #RT = npx.where(npx.isnan(RA), npx.nan, random_ts)
     
     return RT, RA, states_final
 
 def get_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
                      drift_rate, diffusion_rate, phi_0, data_samples = (1,10), param_sample_id=-1,
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
-                     sampling_type = "GEN|SIM", is_test=False, key=None
+                     sampling_type = "GEN|SIM", is_test=False, key=None, max_RT_sec=50
                      ):
     
     def sim_RT():
@@ -672,6 +700,7 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         df_sim_RT = (pd.DataFrame(RT)
         .reset_index(names="part_id")
         .melt(id_vars="part_id", var_name="items", value_name="RT")
+        .assign(RA = RA.flatten())
         .set_index(["part_id","items"])
         .join(pd.DataFrame(likl)
             .reset_index(names="part_id")
@@ -682,11 +711,11 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         samples_arr = []
         #logp = np.absolute(df_sim_RT.logp)
         df_sim_RT = df_sim_RT.assign(logp = lambda df:np.absolute(df.logp), param_sample_id = param_sample_id)
-        for i in range(RA.shape[0]): # weights="logp", 
-            if df_sim_RT.loc[:,"logp"].values.sum() > 0:
-                samples_arr.append(df_sim_RT.groupby("part_id").sample(frac=1,replace=True, weights="logp", random_state= np.random.default_rng()).assign(weighted_sample=i))
-            else:
-                samples_arr.append(df_sim_RT.groupby("part_id").sample(frac=1,replace=True, random_state= np.random.default_rng()).assign(weighted_sample=-i))
+        #for i in range(RA.shape[0]): # weights="logp", 
+        if df_sim_RT.loc[:,"logp"].values.sum() > 0:
+            samples_arr.append(df_sim_RT.groupby("part_id").sample(frac=1,replace=True, weights="logp", random_state= np.random.default_rng()).assign(weighted_sample=1)) #.assign(weighted_sample=i))
+        else:
+            samples_arr.append(df_sim_RT.groupby("part_id").sample(frac=1,replace=True, random_state= np.random.default_rng()).assign(weighted_sample=-1)) #.assign(weighted_sample=-i))
 
         #df_sim_RT = pd.concat(res_RT).astype(float)
         #df_sim_RT.loc[:,"logp"] = df_sim_RT.loc[:,"logp"]**2 #np.exp( - df_sim_RT.loc[:,"Likelihood"])
@@ -709,17 +738,23 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
     if sampling_type == "SIM":
         df_samples, df_sim_RT = sim_RT()
     elif sampling_type == "GEN":
-        RT, RA, states_final = gen_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
-                     drift_rate, diffusion_rate, phi_0, data_samples, param_sample_id,
-                     model_type, transition_type, likelihood_type, 
-                     sampling_type, is_test, key)
-        df_samples = pd.DataFrame(dict(
-            part_id = np.arange(RT.shape[0]),
-            J = np.arange(RT.shape[1]),
-            RT = RT.flatten(),
-            RA = RA.flatten(),
-            final_states = states_final.flatten()
-        ))
+        part_I, part_J = data_samples
+        RT = np.tile(np.linspace(delta,max_RT_sec/delta, part_J), (part_I,1))
+        
+        RA_prob = stats.beta(1,1).rvs(size = part_J)
+        RA = np.vstack([stats.bernoulli(RA_prob).rvs() for _ in range(part_I)])
+        df_samples, df_sim_RT = sim_RT()
+        # RT, RA, states_final = gen_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
+        #              drift_rate, diffusion_rate, phi_0, data_samples, param_sample_id,
+        #              model_type, transition_type, likelihood_type, 
+        #              sampling_type, is_test, key)
+        # df_samples = pd.DataFrame(dict(
+        #     part_id = np.arange(RT.shape[0]),
+        #     J = np.arange(RT.shape[1]),
+        #     RT = RT.flatten(),
+        #     RA = RA.flatten(),
+        #     final_states = states_final.flatten()
+        # ))
 
 
     return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "initial_state":phi_0, "Likelihood":df_sim_RT, "Samples":df_samples}
@@ -821,21 +856,24 @@ def get_original_params(posterior_samples, params_type = "Centralized|NonCentral
 
     return posterior_samples
 
-
+from optax import adam, chain, clip
 def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, delta, measurement_prob,
                             num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
-    guide = ag.AutoNormal(model)
+    #guide = ag.AutoNormal(model)
+    guide = ag.AutoDiagonalNormal(model)
     #guide = ag.AutoMultivariateNormal(model)
     #guide = ag.AutoDAIS(model)
+    #guide = ag.AutoDelta(model)
 
     optimizer = Adam(step_size=0.1)
     svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
+    #svi = SVI(model, guide, chain(clip(10.0), adam(1e-3)), loss=Trace_ELBO())
     svi_result = svi.run(cu.get_rng(), num_warmup + samples_n, n_states, start_width, response_width, delta, X, DT, measurement_prob, 
                    params_type = params_type, transition_type=transition_type, 
-                   likelihood_type=likelihood_type, model_type=model_type)
+                   likelihood_type=likelihood_type, model_type=model_type, stable_update=True)
 
-    predictive = Predictive(guide, params=svi_result.params, num_samples=1000)
+    predictive = Predictive(guide, params=svi_result.params, num_samples=1000, parallel=True)
     #posterior_samples = predictive(cu.get_rng(), data=None)
     posterior_samples = predictive(cu.get_rng(),n_states, start_width, response_width, delta, X, DT, measurement_prob, 
                    params_type = params_type, transition_type=transition_type, 
@@ -902,7 +940,7 @@ def sample_prior_pred_params(n_states, start_width, response_width, delta, measu
                         params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
                         transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN", n_jobs=1, key=None):
 
-    prior_predictive = Predictive(model, num_samples=n_samples)    
+    prior_predictive = Predictive(model, num_samples=n_samples, parallel=True)    
     prior_samples = prior_predictive(cu.get_rng() if key is None else key, n_states, start_width, response_width, delta, X, None, measurement_prob,
                                     params_type = params_type, transition_type=transition_type, 
                                     likelihood_type=likelihood_type, model_type=model_type)
