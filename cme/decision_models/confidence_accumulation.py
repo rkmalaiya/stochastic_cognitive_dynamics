@@ -346,12 +346,12 @@ def _get_measurement_matrix(n_states, response_width, prob=0.5, model_type = "Ma
         raise Exception(f"Please select one of {model_type}")
     return Mc, Mw, Mn
 
-def _get_initial_state(n_states, start_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Upper|Lower|Centered|Uniform|Model"):
+def _get_initial_state(n_states, start_width, response_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Upper|Lower|Centered|Uniform|Model"):
     if prior_type == "Model":
         if model_type == "Markov":
-            phi_0 = dd._get_initial_state(n_states, start_width, I, prob)   
+            phi_0 = dd._get_initial_state(n_states, response_width, I, prob)   
         elif model_type == "Quantum":
-            phi_0 = qd._get_initial_state(n_states, start_width, I, prob)
+            phi_0 = qd._get_initial_state(n_states, response_width, I, prob)
         else:
             raise Exception(f"Please select one of {model_type}")
     else:
@@ -570,7 +570,7 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
         raise Exception(f"Please select one of {model_type}")
 
     #phi_0 = pyro.deterministic("phi_0", _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type))
-    phi_0 = _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type, prior_type="Model")
+    phi_0 = _get_initial_state(n_states, start_width, response_width, I = I, prob=1, model_type = model_type, prior_type="Model")
     Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, response_width=response_width, prob=measurement_prob, model_type = model_type)
 
     if RT_s is not None:
@@ -712,10 +712,13 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         #logp = np.absolute(df_sim_RT.logp)
         df_sim_RT = df_sim_RT.assign(logp = lambda df:np.absolute(df.logp), param_sample_id = param_sample_id)
         #for i in range(RA.shape[0]): # weights="logp", 
-        if df_sim_RT.loc[:,"logp"].values.sum() > 0:
-            samples_arr.append(df_sim_RT.groupby("part_id").sample(frac=1,replace=True, weights="logp", random_state= np.random.default_rng()).assign(weighted_sample=1)) #.assign(weighted_sample=i))
-        else:
-            samples_arr.append(df_sim_RT.groupby("part_id").sample(frac=1,replace=True, random_state= np.random.default_rng()).assign(weighted_sample=-1)) #.assign(weighted_sample=-i))
+        #if df_sim_RT.loc[:,"logp"].values.sum() > 0:
+        try:
+            df_samples = df_sim_RT.groupby(["part_id"]).sample(n=part_J,replace=True, weights="logp", random_state= np.random.default_rng()).assign(weighted_sample=1) #.assign(weighted_sample=i))
+        except:
+            log.error("************Sampling failed due to sum to zero, sampling without weights***********")
+        #else:
+            df_samples = df_sim_RT.groupby(["part_id"]).sample(n=part_J,replace=True, random_state= np.random.default_rng()).assign(weighted_sample="error") #.assign(weighted_sample=-i))
 
         #df_sim_RT = pd.concat(res_RT).astype(float)
         #df_sim_RT.loc[:,"logp"] = df_sim_RT.loc[:,"logp"]**2 #np.exp( - df_sim_RT.loc[:,"Likelihood"])
@@ -732,17 +735,24 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
 
             #samples_arr.append(pd.DataFrame({"samples":df_sim_RT.RT.sample(n=df_sim_RT.shape[0], weights = df_sim_RT.Likelihood),
         #                   "sample_number":i}))
-        df_samples = pd.concat(samples_arr)
+        #df_samples = pd.concat(samples_arr)
         return df_samples, df_sim_RT
+    
+    part_I, part_J = data_samples
 
     if sampling_type == "SIM":
         df_samples, df_sim_RT = sim_RT()
     elif sampling_type == "GEN":
-        part_I, part_J = data_samples
-        RT = np.tile(np.linspace(delta,max_RT_sec/delta, part_J), (part_I,1))
         
-        RA_prob = stats.beta(1,1).rvs(size = part_J)
-        RA = np.vstack([stats.bernoulli(RA_prob).rvs() for _ in range(part_I)])
+        #RT = np.tile(np.linspace(delta,max_RT_sec/delta, part_J), (part_I,1))
+        if RT is None:
+            rt = np.arange(0,max_RT_sec,delta)
+            RT = np.tile(rt, (part_I,1))
+        max_J = RT.shape[1]
+        
+        if RA is None:
+            RA_prob = stats.beta(1,1).rvs(size = max_J)
+            RA = np.vstack([stats.bernoulli(RA_prob).rvs() for _ in range(part_I)])
         df_samples, df_sim_RT = sim_RT()
         # RT, RA, states_final = gen_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
         #              drift_rate, diffusion_rate, phi_0, data_samples, param_sample_id,
@@ -778,7 +788,10 @@ def simulate_likelihood(RT_pred, n_states, response_width, delta, measurement_pr
     #    with pyro.plate('J', J, dim=-1):
     #        RT_pred = pyro.sample("RT_pred", dist.LogNormal(0, 1.5))
     
-    likl = transformed_likelihood(intensity_matrix, phi_0, delta, RT_pred, RA, Mc, Mw, Mn, 
+    #likl = transformed_likelihood(intensity_matrix, phi_0, delta, RT_pred, RA, Mc, Mw, Mn, 
+    #                  transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
+    
+    likl = likelihood(intensity_matrix, phi_0, delta, RT_pred, RA, Mc, Mw, Mn, 
                       transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
     
     return likl

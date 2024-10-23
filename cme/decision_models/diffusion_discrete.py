@@ -132,7 +132,7 @@ def _get_measurement_matrix(n_states, start_width, prob = 0.5):
     return Mcorr, Mincorr, Mnoresp
 
 
-def _get_initial_state(n_states, start_width, I=1, prob=1,sub_sample_size=None):
+def _get_initial_state(n_states, response_width, I=1, prob=1,sub_sample_size=None):
 
     #st_p = stats.halfnorm().rvs()
     #s_0 = stats.dirichlet(np.repeat(st_p, n_states)).rvs().T[None,...]
@@ -163,7 +163,10 @@ def _get_initial_state(n_states, start_width, I=1, prob=1,sub_sample_size=None):
 
     #p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State
 
-             
+    p_0 = p_0.at[...,:response_width].set(0)
+    p_0 = p_0.at[...,-response_width:].set(0)
+    p_0 = p_0/p_0.sum(axis=3, keepdims=True)
+
     p_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)
 
     return p_0 #s_0
