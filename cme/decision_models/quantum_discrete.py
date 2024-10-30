@@ -126,9 +126,9 @@ def _get_initial_state(n_states, response_width, I = 1, prob=1):
 
     #p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State
 
-    p_0 = p_0.at[...,:response_width].set(0)
-    p_0 = p_0.at[...,-response_width:].set(0)
-    p_0 = p_0/p_0.sum(axis=3, keepdims=True)
+    #p_0 = p_0.at[...,:response_width].set(0)
+    #p_0 = p_0.at[...,-response_width:].set(0)
+    #p_0 = p_0/p_0.sum(axis=3, keepdims=True)
              
     p_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)**(1/2)) #.transpose(0,1,3,2)
     #p_0 = p_0 / npx.sqrt(p_0.transpose(0,1,3,2) @ p_0)
