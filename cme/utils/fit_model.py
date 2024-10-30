@@ -16,7 +16,7 @@ from joblib import Parallel, delayed
 from cme.utils import common_logging as cl
 log = cl.get_logger("fit_model")
 import jax
-log.info(f"JAX devices: {jax.default_backend()}")
+log.info(f"JAX devices: {jax.default_backend()}, {jax.devices()}")
 #file_loc_X= "data/ad_X_"
 #file_loc_RT= "data/ad_rt_"
 
@@ -136,7 +136,7 @@ def _run_model(RT_file, X_file, name, version,
                                                     delta=delta,measurement_prob=measurement_prob,
                                                     num_warmup=num_warmup, samples_n=samples_n,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
-                                                    likelihood_type=likelihood_type 
+                                                    likelihood_type=likelihood_type, num_chains=2 
                                                     )
             
             post_samples = post_chain.get_samples()

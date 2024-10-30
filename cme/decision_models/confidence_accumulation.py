@@ -715,8 +715,9 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         #if df_sim_RT.loc[:,"logp"].values.sum() > 0:
         try:
             df_samples = df_sim_RT.groupby(["part_id"]).sample(n=part_J,replace=True, weights="logp", random_state= np.random.default_rng()).assign(weighted_sample=1) #.assign(weighted_sample=i))
-        except:
-            log.error("************Sampling failed due to sum to zero, sampling without weights***********")
+        except Exception as e:
+            log.error(f"************Sampling failed: {e}, likelihood sum:{df_sim_RT.loc[:,'logp'].values.sum():.2f}. Sampled without weights!***********")
+
         #else:
             df_samples = df_sim_RT.groupby(["part_id"]).sample(n=part_J,replace=True, random_state= np.random.default_rng()).assign(weighted_sample="error") #.assign(weighted_sample=-i))
 
