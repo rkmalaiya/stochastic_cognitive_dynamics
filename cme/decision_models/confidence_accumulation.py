@@ -880,14 +880,16 @@ def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, del
     #guide = ag.AutoDAIS(model)
     #guide = ag.AutoDelta(model)
 
-    optimizer = Adam(step_size=0.1)
-    svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
+    #optimizer = Adam(step_size=0.5)
+    #svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
     #svi = SVI(model, guide, chain(clip(10.0), adam(1e-3)), loss=Trace_ELBO())
-    svi_result = svi.run(cu.get_rng(), num_warmup + samples_n, n_states, start_width, response_width, delta, X, DT, measurement_prob, 
-                   params_type = params_type, transition_type=transition_type, 
-                   likelihood_type=likelihood_type, model_type=model_type, stable_update=True)
+    svi = SVI(model, guide, chain(clip(10.0), adam(1e-1)), loss=Trace_ELBO())
+    svi_result = svi.run(cu.get_rng(), num_warmup + samples_n, n_states, start_width, 
+                        response_width, delta, X, DT, measurement_prob, 
+                        params_type = params_type, transition_type=transition_type, 
+                        likelihood_type=likelihood_type, model_type=model_type, stable_update=True)
 
-    predictive = Predictive(guide, params=svi_result.params, num_samples=1000, parallel=True)
+    predictive = Predictive(guide, params=svi_result.params, num_samples=samples_n, parallel=True)
     #posterior_samples = predictive(cu.get_rng(), data=None)
     posterior_samples = predictive(cu.get_rng(),n_states, start_width, response_width, delta, X, DT, measurement_prob, 
                    params_type = params_type, transition_type=transition_type, 

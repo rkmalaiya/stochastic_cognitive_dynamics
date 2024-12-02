@@ -154,7 +154,7 @@ def _get_initial_state(n_states, response_width, I=1, prob=1,sub_sample_size=Non
 
     
     with npy.plate('I1', I, dim=-4,subsample_size=sub_sample_size):
-        with npy.plate('S', n_states, dim=-1):
+        with npy.plate('S', n_states - 2*response_width, dim=-1):
             conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
 
     with npy.plate('I2', I, dim=-3,subsample_size=sub_sample_size):
@@ -163,9 +163,10 @@ def _get_initial_state(n_states, response_width, I=1, prob=1,sub_sample_size=Non
 
     #p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State
 
-    p_0 = p_0.at[...,:response_width].set(0)
-    p_0 = p_0.at[...,-response_width:].set(0)
-    p_0 = p_0/p_0.sum(axis=3, keepdims=True)
+    p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
+    #p_0 = p_0.at[...,:response_width].set(0)
+    #p_0 = p_0.at[...,-response_width:].set(0)
+    #p_0 = p_0/p_0.sum(axis=3, keepdims=True)
 
     p_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)
 

@@ -16,7 +16,7 @@ def _scale_steps_by_boundary(steps, alpha, tau, sigma):
 def _get_step_size(alpha, tau, sigma):
    return alpha * np.sqrt(sigma) * np.sqrt(tau)
 
-def _get_n_states(alpha, theta, tau, sigma):
+def get_n_states(alpha, theta, tau, sigma):
     sigma = np.sqrt(sigma)#.squeeze()
     step_size = _get_step_size(alpha, tau, sigma)
     n_states = 2 * int(theta/step_size) + 1 #np.round(theta/delta_state) #2 * round(theta/delta_state) + 1 # #
@@ -85,9 +85,9 @@ def _random_walk_next_step(s_t, Q):
    ind_t = np.where(s_t)[0][0] #dot(Q, s_t) #select correct row
    p_t = Q[ind_t,:]
    #p_t = around(p_t.squeeze(),decimals=2)
-   z=sum(p_t)
-   while(z>1):
-      print(f"$$$$$$$$$$$ Floating point error $$$$$$$$$$$$$$$$$$$ {z}")
+   #z=sum(p_t)
+   #while(z>1):
+   #   print(f"$$$$$$$$$$$ Floating point error $$$$$$$$$$$$$$$$$$$ {z}")
 
    s_t_1 = stats.multinomial(n=1, p=p_t).rvs().squeeze() #Not sure about adding squeeze here
 
@@ -103,7 +103,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
    X = -1
    max_steps = 100000
    
-   n_states = _get_n_states(alpha, theta, tau, sigma)
+   n_states = get_n_states(alpha, theta, tau, sigma)
    #log.debug(f"States: {n_states}")
 
    Q = get_transition_matrix(alpha, tau, sigma, *params, process=process, n_states=n_states)
@@ -115,7 +115,7 @@ def _perform_walk(theta, alpha, tau,sigma, *params, process="Wiener|OU", initial
       if bias is None:
          raise Exception("For fixed initial position, bias (initial position) needs to be provided")
       s_t = np.zeros(n_states)
-      s_t[_get_n_states(alpha, bias, tau, sigma)] = 1
+      s_t[get_n_states(alpha, bias, tau, sigma)] = 1
    else:
       s_t,_ = _get_initial_state(n_states)
    

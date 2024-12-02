@@ -1,6 +1,7 @@
 from attr import dataclass
 #from dataclasses import dataclass, fields
 import cme.decision_models.confidence_accumulation as ca
+import cme.decision_models.diffusion_discrete as dd
 import cme.decision_models.quantum_discrete as qd
 import jax.numpy as npx
 import pandas as pd
@@ -16,7 +17,7 @@ from joblib import Parallel, delayed
 from cme.utils import common_logging as cl
 log = cl.get_logger("fit_model")
 import jax
-log.info(f"JAX devices: {jax.default_backend()}, {jax.devices()}")
+
 #file_loc_X= "data/ad_X_"
 #file_loc_RT= "data/ad_rt_"
 
@@ -33,66 +34,78 @@ class ModelDetails:
 
     folder:str = "data"
     file_pre:str = ""
-    file_posts:list = []
+    data:list = [] #list of dataset files or list of (RT, X, name) tuple
     version:float = 0.1
     n_states:int = 11
     start_width:int = None # None value will be automatically calculated.
     response_width:int = 1
-    delta:float = 0.01
-    measurement_prob:float = 0.8
-    num_warmup: int = 1400 
-    samples_n: int = 1700
-    predictive_n: int = 100
-    batch_size: int = 100
+    delta:float = 1
+    measurement_prob:float = 0.2
+    num_warmup: int = 20 
+    samples_n: int = 50
+    predictive_n: int = None
+    batch_size: int = None
     params_type:str = "Centralized|NonCentralized"
-    model_type:str = "Markov|Quantum"
+    model_type:list = ["Markov","Quantum"]
     transition_type:str = "RT|TIMESTEP"
     likelihood_type:str = "SINGLE|JOINT"
     sampling_type:str = "MCMC|GEN"
     estimation_type:str = "MCMC|VI"
-    scale: str = "None|Log|SQRT"
-    conf_scale: str = "None|(add_scale, mul_scale)"
+    scale: str = None, #"None|Log|SQRT"
+    conf_scale: str = None #"None|(add_scale, mul_scale)"
     csv_header:bool = False
     is_test:bool = False
-    is_parallel:bool=True
+    is_parallel:bool=False
 
 
 #folder, file_pre, file_posts, version, n_states, start_width, delta, measurement_prob, params_type, model_type, transition_type, likelihood_type, sampling_type
 def fit_model(model: ModelDetails):
-
+    
+    log.info(f"Compute devices: {jax.default_backend()}, {jax.devices()}")
     file_loc = f"{model.folder}/{model.file_pre}"
-    start_width = (model.n_states-2*model.response_width)
-    if model.start_width == None or model.start_width == 0:
-        model.start_width = start_width
-    elif model.start_width > start_width:
-        raise Warning(f"start_width larger than ideal value of {start_width}. {model.model_type} model may have unexpected results")
     
     #file_post = 
     #version = 0.5
     #len(model.file_posts)
-    n_jobs = min(4, len(model.file_posts)) if not model.is_test and model.is_parallel else 1
-    log.info(f"Received request for {n_jobs} files to be executed in parallel for {model.model_type}_{model.version}!!")
-    log.info(f"Received configuration: {model}")
-    Parallel(n_jobs=n_jobs)(delayed(_run_model)(
+    n_jobs = min(4, len(model.data)) if not model.is_test and model.is_parallel else 1
+    log.info(f"Received request for {n_jobs} files to be executed in parallel for {model.model_type}_version:{model.version}_states:{model.n_states}_resp_width:{model.response_width}!!")
+    #log.info(f"Received configuration: {model}")
+    Parallel(n_jobs=n_jobs, prefer="processes", backend = "loky")(delayed(_run_model)(
                                     
-                                    f"{file_loc}{name}_rt.csv", f"{file_loc}{name}_ra.csv", name, model.version, 
-                                    model.n_states, model.start_width, model.response_width, model.delta, model.measurement_prob, 
-                                    model.params_type, model.model_type, model.transition_type, model.likelihood_type, 
+                                    file_loc, data, model.version, 
+                                    n_states, model.start_width, response_width, model.delta, model.measurement_prob, 
+                                    model.params_type, model_type, model.transition_type, model.likelihood_type, 
                                     model.sampling_type, model.estimation_type,
                                     model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, 
                                     model.scale, model.conf_scale, model.csv_header, model.is_parallel) 
                                                 
-                                    for name in model.file_posts)
+                                    for data, (model_type, n_states, response_width) in iter.product(model.data, zip(model.model_type, model.n_states, model.response_width)))
     log.info(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
 
 
-def _run_model(RT_file, X_file, name, version, 
+def _run_model(file_loc, data, version, 
             n_states, start_width, response_width, delta, measurement_prob, 
             params_type, model_type, transition_type, likelihood_type, sampling_type, estimation_type,
             num_warmup, samples_n, predictive_n, batch_size, is_test, scale, conf_scale, csv_header, is_parallel):
     
-    df_X = pd.read_csv(X_file, header="infer" if csv_header else None)
-    df_RT = pd.read_csv(RT_file, header="infer" if csv_header else None)
+    start_width1 = (n_states-2*response_width)
+    if start_width == None or start_width == 0:
+        start_width = start_width1
+    elif start_width > start_width1:
+        raise Warning(f"start_width larger than ideal value of {start_width}. {model_type} model may have unexpected results")
+    
+
+    if isinstance(data, str):
+        RT_file = f"{file_loc}{data}_rt.csv"
+        X_file = f"{file_loc}{data}_ra.csv"
+
+        df_X = pd.read_csv(X_file, header="infer" if csv_header else None)
+        df_RT = pd.read_csv(RT_file, header="infer" if csv_header else None)
+    else:
+        RT, X, name = data
+        df_X = pd.DataFrame(X)
+        df_RT = pd.DataFrame(RT)
+
 
     if "id" in df_X.columns:
         df_ID = df_X[["id"]]
@@ -114,6 +127,12 @@ def _run_model(RT_file, X_file, name, version,
     elif scale=="SQRT":
         RTs = np.sqrt(RTs)
 
+    if predictive_n is None:
+        predictive_n = RT.shape[0]
+
+    if batch_size is None:
+        batch_size = RT.shape[0]
+
     X_split = np.split(Xs, npx.arange(batch_size, Xs.shape[0], batch_size), axis=0)
     RT_split = np.split(RTs, npx.arange(batch_size, RTs.shape[0], batch_size), axis=0)
     ID_split = np.split(IDs, npx.arange(batch_size, IDs.shape[0], batch_size), axis=0)
@@ -130,18 +149,18 @@ def _run_model(RT_file, X_file, name, version,
                                                         likelihood_type=likelihood_type, sampling_type=sampling_type, 
                                                     )
         start_time_sampling = time.perf_counter()
-        log.info(f"Starting Posterior Sampling_{name}_{model_type}_{version}_{i}")
+        log.info(f"Starting Posterior Sampling_{name}_{model_type}_{version}_{n_states}_{start_width}_{response_width}_{i}")
         if estimation_type == "MCMC":
             post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
                                                     delta=delta,measurement_prob=measurement_prob,
                                                     num_warmup=num_warmup, samples_n=samples_n,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
-                                                    likelihood_type=likelihood_type, num_chains=2 
+                                                    likelihood_type=likelihood_type, num_chains=4 
                                                     )
             
             post_samples = post_chain.get_samples()
-            df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "phi_0", "likl_rt", "sigma_final"]) #"sigma_final",
-            df_summary = az.summary(post_samples, var_names=["mu", "phi_0", "likl_rt", "sigma_final"]) #"sigma_final",
+            df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "phi_0", "sigma_final"]) #"sigma_final", "likl_rt", 
+            
             #df_summary = (df_summary.reset_index(names="params")
                             #.assign(param_name = lambda df: df.params.str.split("[",expand=True)[0])
                             #.assign(part_id = lambda df: df.params.str.split("[",expand=True)[1].str.split(",",expand=True)[0])
@@ -201,13 +220,16 @@ def _run_model(RT_file, X_file, name, version,
         diffusion_rate_est = post_samples["sigma_final"].mean(axis=0)
         phi_0_est = post_samples["phi_0"].mean(axis=0) #posterior mean
 
-        intensity_matrix_quantum = qd._buildH(n_states, drift_rate_est, diffusion_rate_est)
+        if model_type == "Markov":
+            intensity_matrix = dd._buildK(n_states, drift_rate_est, diffusion_rate_est)
+        elif model_type == "Quantum":
+            intensity_matrix = qd._buildH(n_states, drift_rate_est, diffusion_rate_est)
 
         mean_init_conf = ca.get_mean_init_confidence(n_states=n_states, phi_0 = phi_0_est, model_type=model_type)
-        mean_final_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix_quantum,phi_0=phi_0_est,
+        mean_final_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix,phi_0=phi_0_est,
                             delta= delta, Mc = q_Mc, Mw=q_Mw, Mn=q_Mn, t=RT,x=X, conf_scale=conf_scale,
                             model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
-        phi_t = ca.perform_state_transition(intensity_matrix_quantum, RT_s = RT, RA_s = X, Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, phi_0=phi_0_est, delta=delta,
+        phi_t = ca.perform_state_transition(intensity_matrix, RT_s = RT, RA_s = X, Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, phi_0=phi_0_est, delta=delta,
                                             transition_type=transition_type, likelihood_type=likelihood_type)
 
         

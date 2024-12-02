@@ -79,14 +79,14 @@ def _buildH(n_states, mu, sigma, delta=0.001, n_trials = None):
     return -1j * params["H"]
 
 
-def _get_measurement_matrix(n_states, start_width, prob = 0.5):
+def _get_measurement_matrix(n_states, response_width, prob = 0.5):
     
     Mcorr = npx.zeros(n_states)
-    Mcorr = Mcorr.at[-start_width:].set(npx.sqrt(prob))
+    Mcorr = Mcorr.at[-response_width:].set(npx.sqrt(prob))
     Mcorr = npx.diag(Mcorr)
 
     Mincorr = npx.zeros(n_states)
-    Mincorr = Mincorr.at[:start_width].set(npx.sqrt(prob))
+    Mincorr = Mincorr.at[:response_width].set(npx.sqrt(prob))
     Mincorr = npx.diag(Mincorr)
     
     #Mc = npx.zeros((n_states, n_states)) # correct response
@@ -117,13 +117,13 @@ def _get_initial_state(n_states, response_width, I = 1, prob=1):
     
 
     with npy.plate('I1', I, dim=-4):
-        with npy.plate('S', n_states, dim=-1):
+        with npy.plate('S', n_states - 2*response_width, dim=-1):
             conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
 
     with npy.plate('I2', I, dim=-3):
         p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
         
-
+    p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
     #p_0 = npy.sample("phi_init", dist.Dirichlet((npx.ones(n_states))/n_states)) # Initial State
 
     #p_0 = p_0.at[...,:response_width].set(0)
