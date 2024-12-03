@@ -48,8 +48,8 @@ class ModelDetails:
     params_type:str = "Centralized|NonCentralized"
     model_type:list = ["Markov","Quantum"]
     transition_type:str = "RT|TIMESTEP"
-    likelihood_type:str = "SINGLE|JOINT"
-    sampling_type:str = "MCMC|GEN"
+    likelihood_type:str = "SINGLE" #|JOINT
+    sampling_type:str = "GEN"
     estimation_type:str = "MCMC|VI"
     scale: str = None, #"None|Log|SQRT"
     conf_scale: str = None #"None|(add_scale, mul_scale)"
