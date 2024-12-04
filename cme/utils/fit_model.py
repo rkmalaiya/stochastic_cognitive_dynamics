@@ -98,7 +98,8 @@ def _run_model(file_loc, data, version,
     if isinstance(data, str):
         RT_file = f"{file_loc}{data}_rt.csv"
         X_file = f"{file_loc}{data}_ra.csv"
-
+        name = data
+        
         df_X = pd.read_csv(X_file, header="infer" if csv_header else None)
         df_RT = pd.read_csv(RT_file, header="infer" if csv_header else None)
     else:
