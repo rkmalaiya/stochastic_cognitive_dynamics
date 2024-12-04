@@ -384,7 +384,7 @@ def _get_initial_state(n_states, start_width, response_width, I = 1, prob=1, mod
         if prior_type != "Opposite":
             p_0 = npx.pad(conc, ((0,0),pad_width)) 
         else:
-            p_0 = npx.zeros((1, n_states))
+            p_0 = npx.zeros((1, n_states)) + 0.01
             p_0 = p_0.at[:,:pad_width].set(conc)
             p_0 = p_0.at[:,-pad_width:].set(conc)
 
