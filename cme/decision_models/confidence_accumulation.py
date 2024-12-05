@@ -384,7 +384,7 @@ def _get_initial_state(n_states, start_width, response_width, I = 1, prob=1, mod
         if prior_type != "Opposite":
             p_0 = npx.pad(conc, ((0,0),pad_width)) 
         else:
-            p_0 = npx.zeros((1, n_states)) + 0.01
+            p_0 = npx.zeros((1, n_states)) 
             p_0 = p_0.at[:,:pad_width].set(conc)
             p_0 = p_0.at[:,-pad_width:].set(conc)
 
@@ -436,7 +436,7 @@ def get_mean_init_confidence(n_states, phi_0, model_type = "Markov|Quantum"):
 def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=None, Mn=None, t=None, x=None, 
                         conf_scale = None,
                         transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
-                        model_type = "Markov|Quantum", return_type="Probability|MeanConfidence"):
+                        model_type = "Markov|Quantum", return_type="Probability|ResponseConfidence|MeanConfidence"):
     
     """
     n_states: int
@@ -454,11 +454,11 @@ def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=No
         phi_t_c = Mc @ phi_t
         phi_t_w = Mw @ phi_t
 
+        # This is a bug and will not work
         if(likelihood_type == "SINGLE"):
             phi_t = phi_t_c if x==1 else phi_t_w
         elif(likelihood_type == "JOINT"):
-            phi_t = phi_t_c if x[1]==1 else phi_t_w
-
+            phi_t = phi_t_c if x[1]==1 else phi_t_w 
 
     if model_type == "Markov":
         P_t = phi_t
@@ -473,8 +473,24 @@ def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=No
 
     if return_type == "Probability":
         ret_val = P_t.sum()
+
+    elif return_type == "ResponseConfidence":
+        phi_t_c = Mc @ phi_t
+        phi_t_w = Mw @ phi_t
+        if model_type == "Markov":
+            P_t_c = phi_t_c
+            P_t_w = phi_t_w
+        elif model_type == "Quantum":
+            P_t_c = npx.abs(phi_t_c)**2
+            P_t_w = npx.abs(phi_t_w)**2
+
+        #P_t = npx.where(x==1,P_t_c.sum(axis=(-1,-2)),P_t_w.sum(axis=(-1,-2)))
+        ret_val_c = mv[None, None, None,:] @ P_t_c
+        ret_val_w = mv[None, None, None,:] @ P_t_w
+        ret_val = npx.where(x[...,None,None]==1,ret_val_c,ret_val_w)
+
     else: #if return_type == "MeanConfidence":
-        ret_val = mv @ (P_t/P_t.sum())
+        ret_val = mv[None, None, None,:] @ P_t
     #else:
     #    raise Exception(f"Please provide one of {return_type}")
 
@@ -714,12 +730,12 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         #for i in range(RA.shape[0]): # weights="logp", 
         #if df_sim_RT.loc[:,"logp"].values.sum() > 0:
         try:
-            df_samples = df_sim_RT.groupby(["part_id"]).sample(n=part_J,replace=True, weights="logp", random_state= np.random.default_rng()).assign(weighted_sample=1) #.assign(weighted_sample=i))
+            df_samples = df_sim_RT.groupby(["part_id"]).sample(n=part_J,replace=True, weights="logp", random_state= np.random.default_rng()).assign(weighted_sample=True) #.assign(weighted_sample=i))
         except Exception as e:
             log.error(f"************Sampling failed: {e}, likelihood sum:{df_sim_RT.loc[:,'logp'].values.sum():.2f}. Sampled without weights!***********")
 
         #else:
-            df_samples = df_sim_RT.groupby(["part_id"]).sample(n=part_J,replace=True, random_state= np.random.default_rng()).assign(weighted_sample="error") #.assign(weighted_sample=-i))
+            df_samples = df_sim_RT.groupby(["part_id"]).sample(n=part_J,replace=True, random_state= np.random.default_rng()).assign(weighted_sample=False) #.assign(weighted_sample=-i))
 
         #df_sim_RT = pd.concat(res_RT).astype(float)
         #df_sim_RT.loc[:,"logp"] = df_sim_RT.loc[:,"logp"]**2 #np.exp( - df_sim_RT.loc[:,"Likelihood"])
@@ -843,7 +859,7 @@ def guide(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
 #def inbuilt_guide():
     #'m', 'mu_r', 'phi_conc', 'phi_init', 's', 'sigma_r'
 
-def get_original_params(posterior_samples, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum"):
+def get_original_params(posterior_samples, response_width, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum"):
     if params_type == "Centralized":
         pass
     elif params_type == "NonCentralized":
@@ -853,8 +869,8 @@ def get_original_params(posterior_samples, params_type = "Centralized|NonCentral
         mu_r = posterior_samples["mu_r"]
         sigma_r = posterior_samples["sigma_r"]
 
-        posterior_samples["mu"] = m + s * mu_r
-        posterior_samples["sigma"] = (m + s * sigma_r)**2 
+        posterior_samples["mu"] = m[:,None,None] + s[:,None,None] * mu_r
+        posterior_samples["sigma"] = (m[:,None,None] + s[:,None,None] * sigma_r)**2 
     
     p_0 = posterior_samples["phi_init"]
 
@@ -866,7 +882,11 @@ def get_original_params(posterior_samples, params_type = "Centralized|NonCentral
         p_0 = p_0.transpose(0, 1, 2, 4, 3)**(1/2)
         posterior_samples["sigma_final"] = posterior_samples["sigma"]
 
-    posterior_samples["phi_0"] = p_0
+    posterior_samples["phi_0"] = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width),(0,0)))
+
+    posterior_samples["mu"] = posterior_samples["mu"].mean(axis=0, keepdims=True)
+    posterior_samples["sigma_final"] = posterior_samples["sigma_final"].mean(axis=0, keepdims=True)
+    posterior_samples["phi_0"] = posterior_samples["phi_0"].mean(axis=0, keepdims=True)
 
     return posterior_samples
 
@@ -895,7 +915,7 @@ def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, del
                    params_type = params_type, transition_type=transition_type, 
                    likelihood_type=likelihood_type, model_type=model_type)
     
-    posterior_samples = get_original_params(posterior_samples, params_type, model_type)
+    posterior_samples = get_original_params(posterior_samples, response_width, params_type, model_type)
     return posterior_samples
 
 
@@ -908,7 +928,7 @@ def sample_posterior_params(DT, X, n_states, start_width, response_width, delta,
     #mcmc_chain.run(cu.get_rng(), n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
 
     kernel = NUTS(model, forward_mode_differentiation=False)
-    mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)#, chain_method="vectorized")
+    mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains, chain_method="vectorized" if jax.default_backend() == "gpu" else "parallel")
     mcmc_chain.run(cu.get_rng(), n_states, start_width, response_width, delta, X, DT, measurement_prob, 
                    params_type = params_type, transition_type=transition_type, 
                    likelihood_type=likelihood_type, model_type=model_type,
@@ -991,9 +1011,11 @@ def sample_post_pred_params(n_states, response_width, delta, measurement_prob, X
                             drift_rate_samples, diffusion_rate_samples, phi_0_samples, RT=None,
                             data_samples=(1,10), 
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
-                            transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN"):
+                            transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
+                            sampling_type = "MCMC|GEN", is_parallel=True):
     predictive_samples = []
-    parallel = Parallel(n_jobs=drift_rate_samples.shape[0] if drift_rate_samples.shape[0] < 60 else 60)
+    n_jobs = drift_rate_samples.shape[0] if drift_rate_samples.shape[0] < 60 else 60
+    parallel = Parallel(n_jobs=1 if not is_parallel else n_jobs)
     if sampling_type == "MCMC":
         predictive_samples = parallel(delayed(predictive_mcmc_fn)(n_states, response_width, delta, measurement_prob, X, 
                                                 drift_rate, diffusion_rate, phi_0,

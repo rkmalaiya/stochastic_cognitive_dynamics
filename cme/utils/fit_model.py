@@ -1,3 +1,4 @@
+from pyexpat import model
 from attr import dataclass
 #from dataclasses import dataclass, fields
 import cme.decision_models.confidence_accumulation as ca
@@ -34,7 +35,7 @@ class ModelDetails:
 
     folder:str = "data"
     file_pre:str = ""
-    data:list = [] #list of dataset files or list of (RT, X, name) tuple
+    data:dict = {} #key,(RT,X) 
     version:float = 0.1
     n_states:int = 11
     start_width:int = None # None value will be automatically calculated.
@@ -51,11 +52,13 @@ class ModelDetails:
     likelihood_type:str = "SINGLE" #|JOINT
     sampling_type:str = "GEN"
     estimation_type:str = "MCMC|VI"
+    execution_type:str = "Both" #Posterior|Predictive|Both
     scale: str = None, #"None|Log|SQRT"
     conf_scale: str = None #"None|(add_scale, mul_scale)"
     csv_header:bool = False
     is_test:bool = False
     is_parallel:bool=False
+
 
 
 #folder, file_pre, file_posts, version, n_states, start_width, delta, measurement_prob, params_type, model_type, transition_type, likelihood_type, sampling_type
@@ -75,17 +78,17 @@ def fit_model(model: ModelDetails):
                                     file_loc, data, model.version, 
                                     n_states, model.start_width, response_width, model.delta, model.measurement_prob, 
                                     model.params_type, model_type, model.transition_type, model.likelihood_type, 
-                                    model.sampling_type, model.estimation_type,
+                                    model.sampling_type, model.estimation_type, model.execution_type,
                                     model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, 
                                     model.scale, model.conf_scale, model.csv_header, model.is_parallel) 
                                                 
-                                    for data, (model_type, n_states, response_width) in iter.product(model.data, zip(model.model_type, model.n_states, model.response_width)))
+                                    for data, (model_type, n_states, response_width) in iter.product(model.data.items(), zip(model.model_type, model.n_states, model.response_width)))
     log.info(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
 
 
 def _run_model(file_loc, data, version, 
             n_states, start_width, response_width, delta, measurement_prob, 
-            params_type, model_type, transition_type, likelihood_type, sampling_type, estimation_type,
+            params_type, model_type, transition_type, likelihood_type, sampling_type, estimation_type,execution_type,
             num_warmup, samples_n, predictive_n, batch_size, is_test, scale, conf_scale, csv_header, is_parallel):
     
     start_width1 = (n_states-2*response_width)
@@ -94,6 +97,8 @@ def _run_model(file_loc, data, version,
     elif start_width > start_width1:
         raise Warning(f"start_width larger than ideal value of {start_width}. {model_type} model may have unexpected results")
     
+    #if model_type == "Quantum":
+    start_width = start_width//2
 
     if isinstance(data, str):
         RT_file = f"{file_loc}{data}_rt.csv"
@@ -103,7 +108,7 @@ def _run_model(file_loc, data, version,
         df_X = pd.read_csv(X_file, header="infer" if csv_header else None)
         df_RT = pd.read_csv(RT_file, header="infer" if csv_header else None)
     else:
-        RT, X, name = data
+        name, (RT, X) = data
         df_X = pd.DataFrame(X)
         df_RT = pd.DataFrame(RT)
 
@@ -141,7 +146,7 @@ def _run_model(file_loc, data, version,
     def run_half_model(i, X, RT, ID):
         
         q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
-
+        
         log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i}")
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
                                                         delta=delta, data_samples=RT.shape,
@@ -149,8 +154,15 @@ def _run_model(file_loc, data, version,
                                                         params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                         likelihood_type=likelihood_type, sampling_type=sampling_type, 
                                                     )
+        df_prior_pred_all = pd.concat([samples["Samples"] for samples in prior_pd_samples])
+        df_prior_pred_all.to_csv(f"export/prior_predictive_{name}_{model_type}_{version}_{i}.csv")
+
+        if execution_type == "Prior":
+            return None
+
         start_time_sampling = time.perf_counter()
-        log.info(f"Starting Posterior Sampling_{name}_{model_type}_{version}_{n_states}_{start_width}_{response_width}_{i}")
+        log.info(f"Starting Posterior Sampling_{name}_{model_type}_v:{version}_n:{n_states}_s:{start_width}_r:{response_width}_{i}")
+        
         if estimation_type == "MCMC":
             post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
                                                     delta=delta,measurement_prob=measurement_prob,
@@ -230,24 +242,39 @@ def _run_model(file_loc, data, version,
         mean_final_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix,phi_0=phi_0_est,
                             delta= delta, Mc = q_Mc, Mw=q_Mw, Mn=q_Mn, t=RT,x=X, conf_scale=conf_scale,
                             model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
+        mean_resp_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix,phi_0=phi_0_est,
+                            delta= delta, Mc = q_Mc, Mw=q_Mw, Mn=q_Mn, t=RT,x=X, conf_scale=conf_scale,
+                            model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type,
+                            return_type = "ResponseConfidence"
+                            )
         phi_t = ca.perform_state_transition(intensity_matrix, RT_s = RT, RA_s = X, Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, phi_0=phi_0_est, delta=delta,
                                             transition_type=transition_type, likelihood_type=likelihood_type)
 
+        pd.DataFrame(mean_init_conf[...,0]).reset_index(names="part_id").to_csv(f"export/mean_init_conf_{name}_{model_type}_{version}_{i}.csv")
+        pd.DataFrame(mean_final_conf[...,0,0]).reset_index(names="part_id").to_csv(f"export/mean_final_conf_{name}_{model_type}_{version}_{i}.csv")
+        pd.DataFrame(mean_resp_conf[...,0,0]).reset_index(names="part_id").to_csv(f"export/mean_resp_conf_{name}_{model_type}_{version}_{i}.csv")
         
+        if execution_type == "Posterior":
+            return None
+
+        log.info(f"Starting Posterior Predictive Sampling_{name}_{model_type}_{version}_{i}")
+
         drift_rate_samples = post_samples["mu"][pred_idx, ...]
         diffusion_rate_samples = post_samples["sigma_final"][pred_idx,...]
         phi_0_samples = post_samples["phi_0"][pred_idx,...]
 
-        log.info(f"Starting Posterior Predictive Sampling_{name}_{model_type}_{version}_{i}")
-        
         post_pd_samples = ca.sample_post_pred_params(n_states=n_states, response_width=response_width, delta=delta,measurement_prob=measurement_prob,
                                                     X=X, data_samples=RT.shape,
                                                     drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, 
                                                     phi_0_samples=phi_0_samples,
                                                     RT=RT,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
-                                                    likelihood_type=likelihood_type, sampling_type=sampling_type
+                                                    likelihood_type=likelihood_type, sampling_type=sampling_type,
+                                                    is_parallel=False
                                                     )
+        df_post_pred_all = pd.concat([samples["Samples"] for samples in post_pd_samples])
+        df_post_pred_all.to_csv(f"export/posterior_predictive_{name}_{model_type}_{version}_{i}.csv")
+
 
         with open(f'export/mcmc_samples_{name}_{model_type}_{version}_{i}.pkl', 'wb') as outp:
             pickle.dump(dict(post_samples = post_samples, 
@@ -260,13 +287,7 @@ def _run_model(file_loc, data, version,
                             RT = RT, 
                             X = X), outp, pickle.HIGHEST_PROTOCOL)
 
-        
-        
-        df_prior_pred_all = pd.concat([samples["Samples"] for samples in prior_pd_samples])
-        df_prior_pred_all.to_csv(f"export/prior_predictive_{name}_{model_type}_{version}_{i}.csv")
 
-        df_post_pred_all = pd.concat([samples["Samples"] for samples in post_pd_samples])
-        df_post_pred_all.to_csv(f"export/posterior_predictive_{name}_{model_type}_{version}_{i}.csv")
 
     fn = []
 
