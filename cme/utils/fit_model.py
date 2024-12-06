@@ -53,7 +53,7 @@ class ModelDetails:
     sampling_type:str = "GEN"
     estimation_type:str = "MCMC|VI"
     execution_type:str = "Both" #Posterior|Predictive|Both
-    scale: str = None, #"None|Log|SQRT"
+    scale: str = None #"None|Log|SQRT"
     conf_scale: str = None #"None|(add_scale, mul_scale)"
     csv_header:bool = False
     is_test:bool = False
@@ -98,7 +98,7 @@ def _run_model(file_loc, data, version,
         raise Warning(f"start_width larger than ideal value of {start_width}. {model_type} model may have unexpected results")
     
     #if model_type == "Quantum":
-    start_width = start_width//2
+    #start_width = start_width//2
 
     if isinstance(data, str):
         RT_file = f"{file_loc}{data}_rt.csv"
@@ -147,10 +147,10 @@ def _run_model(file_loc, data, version,
         
         q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
         
-        log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i}")
+        log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {RT.mean() + 2*RT.std()} secs")
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
-                                                        delta=delta, data_samples=RT.shape,
-                                                        measurement_prob=measurement_prob, X=X, RT=RT, n_samples=predictive_n,
+                                                        delta=delta, data_samples=RT.shape, max_RT_sec = RT.mean() + 2*RT.std(),
+                                                        measurement_prob=measurement_prob, X=X, RT=None, n_samples=predictive_n,
                                                         params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                         likelihood_type=likelihood_type, sampling_type=sampling_type, 
                                                     )
@@ -257,14 +257,14 @@ def _run_model(file_loc, data, version,
         if execution_type == "Posterior":
             return None
 
-        log.info(f"Starting Posterior Predictive Sampling_{name}_{model_type}_{version}_{i}")
+        log.info(f"Starting Posterior Predictive Sampling_{name}_{model_type}_{version}_{i} for {RT.mean() + 2*RT.std()} secs")
 
         drift_rate_samples = post_samples["mu"][pred_idx, ...]
         diffusion_rate_samples = post_samples["sigma_final"][pred_idx,...]
         phi_0_samples = post_samples["phi_0"][pred_idx,...]
 
         post_pd_samples = ca.sample_post_pred_params(n_states=n_states, response_width=response_width, delta=delta,measurement_prob=measurement_prob,
-                                                    X=X, data_samples=RT.shape,
+                                                    X=X, data_samples=RT.shape,max_RT_sec = RT.mean() + 2*RT.std(),
                                                     drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, 
                                                     phi_0_samples=phi_0_samples,
                                                     RT=RT,
