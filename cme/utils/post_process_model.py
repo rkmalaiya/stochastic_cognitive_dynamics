@@ -8,16 +8,16 @@ import cme.utils.common_logging as cm_log
 log = cm_log.get_logger()
 import itertools as iter
 
-def collect_dataframes(file_pre, file_post, datasets, size=None, model = [], version="", batch_size=0, header=True, is_glob=False):
+def collect_dataframes(file_pre, file_post, data_mod_ver, size=None, batch_size=0, header=True, is_glob=False):
     if not is_glob: 
         df = (pd.concat([pd.read_csv(f"{file_pre}{d}{file_post}",header="infer" if header else header)
                            .assign(dataset=d,size=size)
-                            for d in datasets], axis=0)
+                            for d in data_mod_ver.keys()], axis=0)
                            )
         
         return df
     else:
-        log.info(f"Getting files from {file_pre + '*' + file_post + f'_{model}_{version}_*.csv'}")
+        log.info(f"Getting files from {file_pre + '*' + file_post + f'_*.csv'}")
         return pd.concat(
             [
                 pd.read_csv(f"{f}",header="infer" if header else header)
@@ -27,16 +27,16 @@ def collect_dataframes(file_pre, file_post, datasets, size=None, model = [], ver
                   #.assign(dims = lambda df:df.params.str.split("[", expand=True)[1].str.removesuffix("]")) 
                   #.sort_values(["subfile_id", "part_id", "items"])
                   .assign(part_id = lambda df: df.part_id if "part_id" in df.columns else df.index)
-                  .assign(id = lambda df: df.part_id.astype(int) + (df.subfile_id.astype(int) * (batch_size)))
+                  .assign(id = lambda df: df.part_id.astype(int) + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0))
                   .reset_index(drop=True) 
-                for d in datasets
-                for m in model
+                for d,m_v in data_mod_ver.items()
+                for m,version in m_v#zip(model, versions)
                 for f in gl.glob(file_pre + d + file_post + f"_{m}_{version}_*.csv") 
                 
             ]).reset_index(drop=True)
 
-def collect_response_from_model_output(folder, models, version, datasets, batch_size=0):
-    def make_dataframe(arr, indicator, folder, dataset, model):
+def collect_response_from_model_output(folder, data_mod_ver, batch_size=0):
+    def make_dataframe(arr, indicator, folder, dataset, model, version):
 
         return (pd.DataFrame(arr.squeeze())
                 .assign(dataset = dataset, model = model,
@@ -51,26 +51,27 @@ def collect_response_from_model_output(folder, models, version, datasets, batch_
     keys_process = ["RT", "X", "mean_init_conf", "mean_final_conf"]
     keys_process_dict = {key: [] for key in keys}
     dataset_dict = {}
-    for dataset, model in iter.product(datasets, models):
+    for dataset, m_v in data_mod_ver.items():
+        for model, version in m_v:
 
-        keys_dict = {key: [] for key in keys}
+            keys_dict = {key: [] for key in keys}
 
-        pkl_file = f"{folder}/mcmc_samples_{dataset}_{model}_{version}_*.pkl"
-        pkl_files = gl.glob(pkl_file)
+            pkl_file = f"{folder}/mcmc_samples_{dataset}_{model}_{version}_*.pkl"
+            pkl_files = gl.glob(pkl_file)
 
-        for file in pkl_files: 
-            with open(file, "rb") as pkl:
-                    model_out = pickle.load(pkl)
-                    for key in keys:
-                        if key in keys_process:
-                            keys_process_dict[key].append(make_dataframe(model_out[key], file, folder, dataset, model))
-                        else:
-                            keys_dict[key].append(model_out[key])
-        dataset_dict[model+"_"+dataset] = keys_dict
-    df_observed_rt = pd.concat(keys_process_dict["RT"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + df.subfile_id.astype(int) * batch_size).drop(["part_id", "subfile_id"], axis=1)
-    df_observed_ra = pd.concat(keys_process_dict["X"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + df.subfile_id.astype(int) * batch_size).drop(["part_id", "subfile_id"], axis=1)      
-    df_mean_init_conf = pd.concat(keys_process_dict["mean_init_conf"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + df.subfile_id.astype(int) * batch_size).drop(["part_id", "subfile_id"], axis=1)
-    df_mean_final_conf = pd.concat(keys_process_dict["mean_final_conf"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + df.subfile_id.astype(int) * batch_size).drop(["part_id", "subfile_id"], axis=1)
+            for file in pkl_files: 
+                with open(file, "rb") as pkl:
+                        model_out = pickle.load(pkl)
+                        for key in keys:
+                            if key in keys_process:
+                                keys_process_dict[key].append(make_dataframe(model_out[key], file, folder, dataset, model, version))
+                            else:
+                                keys_dict[key].append(model_out[key])
+            dataset_dict[model+"_"+dataset] = keys_dict
+    df_observed_rt = pd.concat(keys_process_dict["RT"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)
+    df_observed_ra = pd.concat(keys_process_dict["X"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)      
+    df_mean_init_conf = pd.concat(keys_process_dict["mean_init_conf"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)
+    df_mean_final_conf = pd.concat(keys_process_dict["mean_final_conf"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)
     return df_observed_rt, df_observed_ra, df_mean_init_conf, df_mean_final_conf, dataset_dict
 
 
