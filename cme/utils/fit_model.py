@@ -70,7 +70,7 @@ def fit_model(model: ModelDetails):
     #file_post = 
     #version = 0.5
     #len(model.file_posts)
-    n_jobs = min(4, len(model.data)) if not model.is_test and model.is_parallel else 1
+    n_jobs = min(4, len(model.data)) if not model.is_test and model.is_parallel and jax.default_backend() != "gpu" else 1
     log.info(f"Received request for {n_jobs} files to be executed in parallel for {model.model_type}_version:{model.version}_states:{model.n_states}_resp_width:{model.response_width}!!")
     #log.info(f"Received configuration: {model}")
     Parallel(n_jobs=n_jobs, prefer="processes", backend = "loky")(delayed(_run_model)(
@@ -82,7 +82,7 @@ def fit_model(model: ModelDetails):
                                     model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, 
                                     model.scale, model.conf_scale, model.csv_header, model.is_parallel) 
                                                 
-                                    for data, (model_type, n_states, response_width) in iter.product(model.data.items(), zip(model.model_type, model.n_states, model.response_width)))
+                                    for data, (model_type, n_states, response_width) in iter.product(model.data, zip(model.model_type, model.n_states, model.response_width)))
     log.info(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
 
 
@@ -97,8 +97,8 @@ def _run_model(file_loc, data, version,
     elif start_width > start_width1:
         raise Warning(f"start_width larger than ideal value of {start_width}. {model_type} model may have unexpected results")
     
-    #if model_type == "Quantum":
-    #start_width = start_width//2
+    if model_type == "Quantum":
+        start_width = start_width//2
 
     if isinstance(data, str):
         RT_file = f"{file_loc}{data}_rt.csv"
@@ -134,10 +134,10 @@ def _run_model(file_loc, data, version,
         RTs = np.sqrt(RTs)
 
     if predictive_n is None:
-        predictive_n = RT.shape[0]
+        predictive_n = RTs.shape[0]
 
     if batch_size is None:
-        batch_size = RT.shape[0]
+        batch_size = RTs.shape[0]
 
     X_split = np.split(Xs, npx.arange(batch_size, Xs.shape[0], batch_size), axis=0)
     RT_split = np.split(RTs, npx.arange(batch_size, RTs.shape[0], batch_size), axis=0)
@@ -257,7 +257,7 @@ def _run_model(file_loc, data, version,
         if execution_type == "Posterior":
             return None
 
-        log.info(f"Starting Posterior Predictive Sampling_{name}_{model_type}_{version}_{i} for {RT.mean() + 2*RT.std()} secs")
+        log.info(f"Starting Posterior Predictive Sampling_{name}_{model_type}_{version}_{i}")
 
         drift_rate_samples = post_samples["mu"][pred_idx, ...]
         diffusion_rate_samples = post_samples["sigma_final"][pred_idx,...]
@@ -300,7 +300,7 @@ def _run_model(file_loc, data, version,
         #    break
     
     start_time = time.perf_counter()
-    n_jobs1=min(3,batch_n) if not is_test and is_parallel else 1
+    n_jobs1=min(3,batch_n) if not is_test and is_parallel and jax.default_backend() != "gpu"  else 1
     log.info(f"Starting {n_jobs1} jobs for sub-batch of participants")
     Parallel(n_jobs=n_jobs1, prefer="processes", backend = "loky")(f for f in fn)
     
