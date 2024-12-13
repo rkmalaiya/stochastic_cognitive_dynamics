@@ -63,7 +63,11 @@ def non_centralized_parameters(I):
 
     with pyro.plate('I3', I, dim=-2):
         mu_r = pyro.sample("mu_r", dist.Normal(2,1)) # Drift Rate
-        sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
+        #sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
+
+        #mu_r = pyro.sample("mu_r", dist.Normal(2,1)) # Drift Rate
+        #sigma_r = pyro.sample("sigma_r", dist.HalfNormal(1)) # Diffusion Rate
+        sigma_r = pyro.sample("sigma_r", dist.Normal(0,1)) # Diffusion Rate
 
         mu = pyro.deterministic("mu", m + s * mu_r)
         sigma = pyro.deterministic("sigma", (m + s * sigma_r)**2) 
@@ -271,6 +275,85 @@ def _timestep_transition_matrix(n, T_delta, Mn):
     #T_t = npx.asarray(T_i) # uncomment to include all response time
     return T_t
 
+from functools import partial
+from jax import custom_jvp
+def _timestep_transition_matrix_dhoom_once_again(n, T_delta, Mn):
+
+    # T_i = []
+    # for n_i, T_delta_i in zip(n, T_delta):
+    #     T_i_j = []
+    #     for n_i_j in n_i:
+    #         #T_delta_i_j = T_delta_i[j,...]
+    #         T_nt = npx.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1) # we need to vectorize this function
+    #         T_i_j.append(T_nt)
+        
+    #     T_i.append(T_i_j)
+    
+    def get_pow_again(T_delta_i, n_i_j):
+        rez = np.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1)
+        return rez
+
+    @custom_jvp
+    def get_pow(T_delta_i, n_i_j):
+        #T_nt = npx.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1)
+        result_shape = jax.ShapeDtypeStruct((Mn @ T_delta_i[0,...]).shape, T_delta_i.dtype)
+        return jax.pure_callback(get_pow_again, result_shape, T_delta_i, n_i_j)
+    
+    @get_pow.defjvp
+    def _get_pow_jvp(primals, tangents):
+        T_delta_i, n_i_j = primals
+        T_delta_i_dot, n_i_j_dot = tangents
+        
+        primals_out = get_pow(T_delta_i, n_i_j)
+
+        pow_grad = jax.grad(npx.linalg.matrix_power)
+        tangents_out = pow_grad(T_delta_i_dot, n_i_j_dot)
+        
+        return primals_out, tangents_out
+
+
+
+    def pow_opr(T_delta_i, n_i_j):
+        #result_shape = jax.ShapeDtypeStruct(n_i_j.shape, n_i_j.dtype)
+        #get_pow = jax.custom_jvp(get_pow) # need to see how to do this
+        get_pow_par = partial(get_pow)
+        T_nt = get_pow_par(T_delta_i, n_i_j)
+        return T_nt
+
+    def opr(T_delta_i, n_i):
+        return jax.pmap(pow_opr, static_broadcasted_argnums=0)(T_delta_i, n_i)
+
+    T_i = jax.vmap(opr)(T_delta, n)
+
+    T_t = T_delta @ npx.asarray(T_i) 
+    #T_t = npx.asarray(T_i) # uncomment to include all response time
+    return T_t
+
+def _timestep_transition_matrix_dhoom_dhoom_once_again(n, T_delta, Mn):
+    T_i = []
+    for n_i, T_delta_i in zip(n, T_delta):
+        T_i_j = []
+        for n_i_j in n_i:
+            #T_delta_i_j = T_delta_i[j,...]
+            T_nt = npx.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1) # we need to vectorize this function
+            T_i_j.append(T_nt)
+        
+        T_i.append(T_i_j)
+    
+    def iter2(T_delta_i, n_i_j):
+        n_arr = npx.ones_like(n_i_j)
+        X = Mn @ T_delta_i[0,...]
+        def iter3(X, n_arr):
+            return X, X*X
+        cond_fun = lambda n:n<1
+        jax.lax.while_loop(cond_fun, iter3, n_i_j)
+        
+        X_old, T_nt_i_j = pmap(iter3, X_old, n_arr, static_argnums=0)
+        return T_nt_i_j
+
+    T_t = T_delta @ npx.asarray(T_i) 
+    #T_t = npx.asarray(T_i) # uncomment to include all response time
+    return T_t
 
 def _timestep_transition_matrix_failedd(n, T_delta, Mn):
     #Mn - n_states x n_states
@@ -319,16 +402,17 @@ def _get_transition_matrix(intensity_matrix, RT, delta=None, Mn = None, transiti
         T_t = sci.linalg.expm(intensity_matrix * ((RT[...,None,None]) if not npx.isscalar(RT) else (RT)))
     elif transition_type == "TIMESTEP":
         ns=np.ceil(RT/delta) 
-        #ns=np.floor(RT/delta) # uncomment to include all response time
+        ns=np.floor(RT/delta) # uncomment to include all response time
         RT_remaining = RT - ns*delta
         T_delta = sci.linalg.expm(intensity_matrix * delta)
 
         # uncomment to include all response time
-        # T_delta_remaining = sci.linalg.expm(intensity_matrix * ((RT_remaining[...,None,None]) if not npx.isscalar(RT_remaining) else (RT_remaining)))
-        T_t = _timestep_transition_matrix(ns, T_delta, Mn)  #uncomment if fails
-        
+        T_delta_remaining = sci.linalg.expm(intensity_matrix * ((RT_remaining[...,None,None]) if not npx.isscalar(RT_remaining) else (RT_remaining)))
+                
+        #T_t = _timestep_transition_matrix(ns, T_delta, Mn)  #uncomment if fails
+                
         # uncomment to include all response time
-        #T_t = T_delta_remaining @ _timestep_transition_matrix(ns, T_delta, Mn)
+        T_t = T_delta_remaining @ _timestep_transition_matrix(ns, T_delta, Mn)
 
 
     else:
@@ -511,7 +595,9 @@ def transformed_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, M
 def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
     P_t = likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
     #P_t = npx.where(P_t <= 0, 0.00001, npx.log(P_t))
-    P_t = npx.where(P_t <= 0, 0.00001, P_t)
+    P_t = npx.where(P_t <= 0, 0, P_t)
+    P_t = npx.where(npx.isnan(P_t), 0, P_t)
+    
     return P_t
 
 def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
@@ -724,7 +810,7 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
             .melt(id_vars="part_id", var_name="items", value_name="logp")
             .set_index(["part_id","items"]))
         )
-
+        df_sim_RT = df_sim_RT.where(lambda df:~np.isnan(df),0)
         samples_arr = []
         #logp = np.absolute(df_sim_RT.logp)
         df_sim_RT = df_sim_RT.assign(logp = lambda df:np.absolute(df.logp), param_sample_id = param_sample_id)
@@ -755,11 +841,11 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         return df_samples, df_sim_RT
     
     part_I, part_J = data_samples
-
+    max_J = part_J if part_J > 100 else part_J if RA is not None else 100
     if sampling_type == "SIM":
         if RT is None:
             #rt = np.arange(0,max_RT_sec,delta)
-            rt = np.linspace(0, max_RT_sec, part_J)
+            rt = np.linspace(0, max_RT_sec, max_J)
             RT = np.tile(rt, (part_I,1))
         df_samples, df_sim_RT = sim_RT()
     elif sampling_type == "GEN":
@@ -768,9 +854,9 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         #if RT is None:
         if RT is None:
             #rt = np.arange(delta,max_RT_sec,delta)
-            rt = np.linspace(delta, max_RT_sec, part_J)
+            rt = np.linspace(delta, max_RT_sec, max_J)
             RT = np.tile(rt, (part_I,1))
-        max_J = RT.shape[1]
+        
         
         if RA is None:
             RA_prob = stats.beta(1,1).rvs(size = max_J)
@@ -907,8 +993,8 @@ def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, del
 
     #optimizer = Adam(step_size=0.5)
     #svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
-    #svi = SVI(model, guide, chain(clip(10.0), adam(1e-3)), loss=Trace_ELBO())
-    svi = SVI(model, guide, chain(clip(10.0), adam(1e-1)), loss=Trace_ELBO())
+    svi = SVI(model, guide, chain(clip(10.0), adam(1e-3)), loss=Trace_ELBO())
+    #svi = SVI(model, guide, chain(clip(10.0), adam(1e-1)), loss=Trace_ELBO())
     svi_result = svi.run(cu.get_rng(), num_warmup + samples_n, n_states, start_width, 
                         response_width, delta, X, DT, measurement_prob, 
                         params_type = params_type, transition_type=transition_type, 
@@ -982,6 +1068,8 @@ def sample_prior_pred_params(n_states, start_width, response_width, delta, measu
                         transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN", n_jobs=1, key=None):
 
     prior_predictive = Predictive(model, num_samples=n_samples, parallel=True)    
+    if X is None:
+        X = np.ones(data_samples)
     prior_samples = prior_predictive(cu.get_rng() if key is None else key, n_states, start_width, response_width, delta, X, None, measurement_prob,
                                     params_type = params_type, transition_type=transition_type, 
                                     likelihood_type=likelihood_type, model_type=model_type)
