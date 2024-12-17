@@ -1,4 +1,4 @@
-from pyexpat import model
+#from pyexpat import model
 from attr import dataclass
 #from dataclasses import dataclass, fields
 import cme.decision_models.confidence_accumulation as ca
@@ -70,9 +70,9 @@ def fit_model(model: ModelDetails):
     #file_post = 
     #version = 0.5
     #len(model.file_posts)
-    n_jobs = min(4, len(model.data)) if not model.is_test and model.is_parallel and jax.default_backend() != "gpu" else 1
+    n_jobs = min(3, len(model.data) + len(model.model_type)) if not model.is_test and model.is_parallel and jax.default_backend() != "gpu" else 1
     log.info(f"Received request for {n_jobs} files to be executed in parallel for {model.model_type}_version:{model.version}_states:{model.n_states}_resp_width:{model.response_width}!!")
-    #log.info(f"Received configuration: {model}")
+    
     Parallel(n_jobs=n_jobs, prefer="processes", backend = "loky")(delayed(_run_model)(
                                     
                                     file_loc, data, model.version, 
@@ -97,8 +97,8 @@ def _run_model(file_loc, data, version,
     elif start_width > start_width1:
         raise Warning(f"start_width larger than ideal value of {start_width}. {model_type} model may have unexpected results")
     
-    if model_type == "Quantum":
-        start_width = start_width//2
+    #if model_type == "Quantum":
+    #    start_width = start_width//2
 
     if isinstance(data, str):
         RT_file = f"{file_loc}{data}_rt.csv"
@@ -128,6 +128,8 @@ def _run_model(file_loc, data, version,
     RTs = df_RT.values
     IDs = df_ID.values
     
+    log.info(f"Received participant size: {RTs.shape}")
+
     if scale == "Log":
         RTs = np.log(RTs)
     elif scale=="SQRT":
@@ -146,11 +148,11 @@ def _run_model(file_loc, data, version,
     def run_half_model(i, X, RT, ID):
         
         q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
-        
-        log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {RT.mean() + 2*RT.std()} secs")
+        max_RT_sec = RT.mean() + 3*RT.std()
+        log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {max_RT_sec} secs")
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
-                                                        delta=delta, data_samples=RT.shape, max_RT_sec = RT.mean() + 2*RT.std(),
-                                                        measurement_prob=measurement_prob, X=X, RT=None, n_samples=predictive_n,
+                                                        delta=delta, data_samples=RT.shape, max_RT_sec = max_RT_sec,
+                                                        measurement_prob=measurement_prob, X=None, RT=None, n_samples=predictive_n,
                                                         params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                         likelihood_type=likelihood_type, sampling_type=sampling_type, 
                                                     )
@@ -264,10 +266,13 @@ def _run_model(file_loc, data, version,
         phi_0_samples = post_samples["phi_0"][pred_idx,...]
 
         post_pd_samples = ca.sample_post_pred_params(n_states=n_states, response_width=response_width, delta=delta,measurement_prob=measurement_prob,
-                                                    X=X, data_samples=RT.shape,max_RT_sec = RT.mean() + 2*RT.std(),
+                                                    X=X, 
+                                                    #X=None,
+                                                    data_samples=RT.shape,max_RT_sec = max_RT_sec,
                                                     drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, 
                                                     phi_0_samples=phi_0_samples,
                                                     RT=RT,
+                                                    #RT=None,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                     likelihood_type=likelihood_type, sampling_type=sampling_type,
                                                     is_parallel=False
@@ -277,7 +282,9 @@ def _run_model(file_loc, data, version,
 
 
         with open(f'export/mcmc_samples_{name}_{model_type}_{version}_{i}.pkl', 'wb') as outp:
-            pickle.dump(dict(post_samples = post_samples, 
+            pickle.dump(dict(
+                            n_states = n_states,
+                            post_samples = post_samples, 
                             mean_init_conf = mean_init_conf,
                             mean_final_conf = mean_final_conf, 
                             phi_t = phi_t, 

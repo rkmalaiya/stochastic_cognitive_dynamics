@@ -17,23 +17,25 @@ def collect_dataframes(file_pre, file_post, data_mod_ver, size=None, batch_size=
         
         return df
     else:
-        log.info(f"Getting files from {file_pre + '*' + file_post + f'_*.csv'}")
-        return pd.concat(
-            [
-                pd.read_csv(f"{f}",header="infer" if header else header)
-                  .assign(size=size, subfile_id = f.split(str(version)+"_")[1].removesuffix(".csv"))  
-                  .assign(dataset=d)
-                  .assign(model = m)
-                  #.assign(dims = lambda df:df.params.str.split("[", expand=True)[1].str.removesuffix("]")) 
-                  #.sort_values(["subfile_id", "part_id", "items"])
-                  .assign(part_id = lambda df: df.part_id if "part_id" in df.columns else df.index)
-                  .assign(id = lambda df: df.part_id.astype(int) + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0))
-                  .reset_index(drop=True) 
-                for d,m_v in data_mod_ver.items()
-                for m,version in m_v#zip(model, versions)
-                for f in gl.glob(file_pre + d + file_post + f"_{m}_{version}_*.csv") 
-                
-            ]).reset_index(drop=True)
+        df_arr = []
+        for d,m_v in data_mod_ver.items():
+            for m,version in m_v:#zip(model, versions)
+                filename=file_pre + d + file_post + f"_{m}_{version}_*.csv"
+                for f in gl.glob(filename): 
+                    log.info(f"Getting files from {filename}")
+                    df = (pd.read_csv(f"{f}",header="infer" if header else header)
+                            .assign(size=size, subfile_id = f.split(str(version)+"_")[1].removesuffix(".csv"))  
+                            .assign(dataset=d)
+                            .assign(model=m)
+                            #.assign(dims = lambda df:df.params.str.split("[", expand=True)[1].str.removesuffix("]")) 
+                            #.sort_values(["subfile_id", "part_id", "items"])
+                            .assign(part_id = lambda df: df.part_id if "part_id" in df.columns else df.index)
+                            .assign(id = lambda df: df.part_id.astype(int) + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0))
+                            .reset_index(drop=True)
+                            )
+                    df_arr.append(df)
+
+        return pd.concat(df_arr).reset_index(drop=True)
 
 def collect_response_from_model_output(folder, data_mod_ver, batch_size=0):
     def make_dataframe(arr, indicator, folder, dataset, model, version):
