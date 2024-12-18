@@ -5,6 +5,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import cme.utils.common_logging as cm_log
+import cme.decision_models.confidence_accumulation as ca
+import cme.decision_models.diffusion_discrete as dd
+import cme.decision_models.quantum_discrete as qd
 log = cm_log.get_logger()
 import itertools as iter
 
@@ -108,3 +111,44 @@ def get_predictive_plot(df_pred, df_rt, ncols, nrows, datasets, type="Prior|Post
     plt.tight_layout()
     plt.legend()
     return fig, axs 
+
+def get_conf_traj(condition, df_observed_rt, df_observed_ra, dataset_dict, delta, n_states_dict={}, response_width_dict={}):
+    print("starting: ", condition)
+    model_type = condition.split('_', maxsplit=1)[0]
+    dataset = condition.split('_', maxsplit=1)[1]
+    
+    RT = df_observed_rt.query("model == @model_type and dataset == @dataset").dropna(axis=1).drop(["dataset", "model", "file", "id"], axis=1).values
+    X = df_observed_ra.query("model == @model_type and dataset == @dataset").dropna(axis=1).drop(["dataset", "model", "file", "id"], axis=1).values
+
+    n_states = n_states_dict[model_type] #51 if "Markov" in condition else 21
+    response_width = response_width_dict[model_type] #5 if "Markov" in condition else 2
+    post_samples = dataset_dict[condition]["post_samples"]
+
+    drift_rate_est = post_samples[0]["mu"].mean(axis=0)
+    diffusion_rate_est = post_samples[0]["sigma_final"].mean(axis=0)
+    phi_0_est = post_samples[0]["phi_0"].mean(axis=0) #posterior mean
+
+    #for t in RT.mean(axis=1):
+    rt = np.tile(np.arange(delta,RT.max(),delta),(RT.shape[0],1))
+
+    #for model_type in ["Markov", "Quantum"]:
+    #    for mu, sigma, phi_0 in zip(drift_rate_est, diffusion_rate_est,phi_0_est):
+
+    Mc, Mw, Mn = ca._get_measurement_matrix(n_states, response_width, prob=0.2, model_type = model_type)
+
+    if model_type == "Markov":
+        intensity_matrix = dd._buildK(n_states, drift_rate_est, diffusion_rate_est)
+    elif model_type == "Quantum":
+        intensity_matrix = qd._buildH(n_states, drift_rate_est, diffusion_rate_est)
+
+    ideal_conf_traj_t = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix,phi_0=phi_0_est,
+                        delta= delta, Mc = Mc, Mw=Mw, Mn=Mn, t=rt,x=None, conf_scale=None,
+                        model_type=model_type, transition_type="TIMESTEP", likelihood_type="SINGLE")
+    #conf_traj[condition] = conf_traj_t
+    #RT_mean[condition] = RT.mean(axis=1)
+    resp_conf_traj_t = np.where(rt[...,None,None] > RT.mean(axis=1,keepdims=True)[...,None,None], np.nan,ideal_conf_traj_t)
+    
+    print("ended: ", condition)
+    return condition, ideal_conf_traj_t, resp_conf_traj_t, RT.mean(axis=1)
+
+
