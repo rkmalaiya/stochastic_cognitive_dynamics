@@ -401,7 +401,7 @@ def _get_transition_matrix(intensity_matrix, RT, delta=None, Mn = None, transiti
         #T_t = sci.linalg.expm(intensity_matrix * ((RT[...,None,None]/delta) if not npx.isscalar(RT) else (RT/delta)))
         T_t = sci.linalg.expm(intensity_matrix * ((RT[...,None,None]) if not npx.isscalar(RT) else (RT)))
     elif transition_type == "TIMESTEP":
-        ns=np.ceil(RT/delta) 
+        #ns=np.ceil(RT/delta) 
         ns=np.floor(RT/delta) # uncomment to include all response time
         RT_remaining = RT - ns*delta
         T_delta = sci.linalg.expm(intensity_matrix * delta)
@@ -553,7 +553,7 @@ def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=No
     mv = npx.arange(-(Mid-1), (Mid))
     if conf_scale is not None:
         add_scale, mul_scale = conf_scale
-        mv = cu.get_conf_scale(mv, add_scale, mul_scale)
+        mv = cu.get_conf_scale(mv, add_scale, mul_scale, n_states)
 
     if return_type == "Probability":
         ret_val = P_t.sum()

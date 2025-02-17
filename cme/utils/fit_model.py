@@ -4,6 +4,7 @@ from attr import dataclass
 import cme.decision_models.confidence_accumulation as ca
 import cme.decision_models.diffusion_discrete as dd
 import cme.decision_models.quantum_discrete as qd
+import cme.utils.post_process_model as ppm
 import jax.numpy as npx
 import pandas as pd
 import seaborn as sns
@@ -54,7 +55,7 @@ class ModelDetails:
     estimation_type:str = "MCMC|VI"
     execution_type:str = "Both" #Posterior|Predictive|Both
     scale: str = None #"None|Log|SQRT"
-    conf_scale: str = None #"None|(add_scale, mul_scale)"
+    conf_scale: list = [None,None] #"None|(add_scale, mul_scale)"
     csv_header:bool = False
     is_test:bool = False
     is_parallel:bool=False
@@ -80,9 +81,9 @@ def fit_model(model: ModelDetails):
                                     model.params_type, model_type, model.transition_type, model.likelihood_type, 
                                     model.sampling_type, model.estimation_type, model.execution_type,
                                     model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, 
-                                    model.scale, model.conf_scale, model.csv_header, model.is_parallel) 
+                                    model.scale, conf_scale, model.csv_header, model.is_parallel) 
                                                 
-                                    for data, (model_type, n_states, response_width) in iter.product(model.data, zip(model.model_type, model.n_states, model.response_width)))
+                                    for data, (model_type, n_states, response_width, conf_scale) in iter.product(model.data, zip(model.model_type, model.n_states, model.response_width, model.conf_scale)))
     log.info(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
 
 
@@ -147,12 +148,11 @@ def _run_model(file_loc, data, version,
     
     def run_half_model(i, X, RT, ID):
         
-        q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
         max_RT_sec = RT.mean() + 3*RT.std()
         log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {max_RT_sec} secs")
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
-                                                        delta=delta, data_samples=RT.shape, max_RT_sec = max_RT_sec,
-                                                        measurement_prob=measurement_prob, X=None, RT=None, n_samples=predictive_n,
+                                                        delta=0.1, data_samples=RT.shape, max_RT_sec = max_RT_sec,
+                                                        measurement_prob=measurement_prob, X=X, RT=None, n_samples=predictive_n,
                                                         params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                         likelihood_type=likelihood_type, sampling_type=sampling_type, 
                                                     )
@@ -235,21 +235,14 @@ def _run_model(file_loc, data, version,
         diffusion_rate_est = post_samples["sigma_final"].mean(axis=0)
         phi_0_est = post_samples["phi_0"].mean(axis=0) #posterior mean
 
-        if model_type == "Markov":
-            intensity_matrix = dd._buildK(n_states, drift_rate_est, diffusion_rate_est)
-        elif model_type == "Quantum":
-            intensity_matrix = qd._buildH(n_states, drift_rate_est, diffusion_rate_est)
+        mean_init_conf, mean_final_conf, mean_resp_conf = ppm.get_mean_confidence(n_states, response_width, measurement_prob, delta, 
+                                                                                  X, RT, drift_rate_est, diffusion_rate_est, phi_0_est, 
+                                                                                  conf_scale, model_type, transition_type, likelihood_type)
 
-        mean_init_conf = ca.get_mean_init_confidence(n_states=n_states, phi_0 = phi_0_est, model_type=model_type)
-        mean_final_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix,phi_0=phi_0_est,
-                            delta= delta, Mc = q_Mc, Mw=q_Mw, Mn=q_Mn, t=RT,x=X, conf_scale=conf_scale,
-                            model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
-        mean_resp_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix,phi_0=phi_0_est,
-                            delta= delta, Mc = q_Mc, Mw=q_Mw, Mn=q_Mn, t=RT,x=X, conf_scale=conf_scale,
-                            model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type,
-                            return_type = "ResponseConfidence"
-                            )
-        phi_t = ca.perform_state_transition(intensity_matrix, RT_s = RT, RA_s = X, Mc=q_Mc, Mw=q_Mw, Mn=q_Mn, phi_0=phi_0_est, delta=delta,
+        intensity_matrix = ca.get_intensity_matrix(n_states, drift_rate_est, diffusion_rate_est, model_type)
+        Mc, Mw, Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
+
+        phi_t = ca.perform_state_transition(intensity_matrix, RT_s = RT, RA_s = X, Mc=Mc, Mw=Mw, Mn=Mn, phi_0=phi_0_est, delta=delta,
                                             transition_type=transition_type, likelihood_type=likelihood_type)
 
         pd.DataFrame(mean_init_conf[...,0]).reset_index(names="part_id").to_csv(f"export/mean_init_conf_{name}_{model_type}_{version}_{i}.csv")
@@ -265,14 +258,16 @@ def _run_model(file_loc, data, version,
         diffusion_rate_samples = post_samples["sigma_final"][pred_idx,...]
         phi_0_samples = post_samples["phi_0"][pred_idx,...]
 
-        post_pd_samples = ca.sample_post_pred_params(n_states=n_states, response_width=response_width, delta=delta,measurement_prob=measurement_prob,
+        post_pd_samples = ca.sample_post_pred_params(n_states=n_states, response_width=response_width, 
+                                                     delta=0.1,
+                                                     measurement_prob=measurement_prob,
                                                     X=X, 
                                                     #X=None,
                                                     data_samples=RT.shape,max_RT_sec = max_RT_sec,
                                                     drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, 
                                                     phi_0_samples=phi_0_samples,
-                                                    RT=RT,
-                                                    #RT=None,
+                                                    #RT=RT,
+                                                    RT=None,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                     likelihood_type=likelihood_type, sampling_type=sampling_type,
                                                     is_parallel=False
@@ -293,8 +288,6 @@ def _run_model(file_loc, data, version,
                             post_pd_samples = post_pd_samples, 
                             RT = RT, 
                             X = X), outp, pickle.HIGHEST_PROTOCOL)
-
-
 
     fn = []
 

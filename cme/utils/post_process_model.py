@@ -152,3 +152,24 @@ def get_conf_traj(condition, df_observed_rt, df_observed_ra, dataset_dict, delta
     return condition, ideal_conf_traj_t, resp_conf_traj_t, RT.mean(axis=1)
 
 
+def get_mean_confidence(n_states, response_width, measurement_prob, delta, X, RT, drift_rate_est, diffusion_rate_est, phi_0_est, conf_scale, model_type, transition_type, likelihood_type):
+        intensity_matrix = ca.get_intensity_matrix(n_states, drift_rate_est, diffusion_rate_est, model_type)
+        Mc, Mw, Mn = ca._get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
+
+        # if model_type == "Markov":
+        #     intensity_matrix = dd._buildK(n_states, drift_rate_est, diffusion_rate_est)
+        # elif model_type == "Quantum":
+        #     intensity_matrix = qd._buildH(n_states, drift_rate_est, diffusion_rate_est)
+
+        
+        mean_init_conf = ca.get_mean_init_confidence(n_states=n_states, phi_0 = phi_0_est, model_type=model_type)
+        mean_final_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix,phi_0=phi_0_est,
+                            delta= delta, Mc = Mc, Mw=Mw, Mn=Mn, t=RT,x=X, conf_scale=conf_scale,
+                            model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
+        mean_resp_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix,phi_0=phi_0_est,
+                            delta= delta, Mc = Mc, Mw=Mw, Mn=Mn, t=RT,x=X, conf_scale=conf_scale,
+                            model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type,
+                            return_type = "ResponseConfidence"
+                            )
+                            
+        return mean_init_conf,mean_final_conf,mean_resp_conf

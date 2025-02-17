@@ -44,11 +44,12 @@ def get_conf_limits(n_states, keep_centered=True):
         mv_arr = np.arange(0,n_states)
     return mv_arr
 
-def get_conf_scale(mv, add_scale, mul_scale, n_states, is_centered=True):
+def get_conf_scale(mv, add_scale, mul_scale, n_states=None, is_centered=True):
     if not is_centered:
         mv_arr = get_conf_limits(n_states)
         mv = mv_arr[mv]
-    mv = (mv + (add_scale * np.sign(mv))) * mul_scale
+    #mv = (mv + (add_scale * np.sign(mv))) * mul_scale
+    mv = (mv * mul_scale) + (add_scale * np.sign(mv))
     return mv
 
 def calculate_r_star(df_posterior, group_var, group_std_name, var_name, idx_name):
