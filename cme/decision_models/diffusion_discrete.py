@@ -35,7 +35,7 @@ npy.set_host_device_count(64)
 _rng_key = random.PRNGKey(0)
 _rng_key, _rng_key_ = random.split(_rng_key)
 
-def _buildK(n_states, mu, sigma=1, delta=0.01): 
+def _buildK(n_states, mu, sigma=1, delta=0.01, boundary_type = "External"): 
 # m = number of states  
 # a = off diag left  
 # b = diag  
@@ -96,11 +96,14 @@ def _buildK(n_states, mu, sigma=1, delta=0.01):
     i, params = lax.scan(_create_i, 0, params)#, unroll=True)
     K = params["K"]
 
-    K = K.at[:,0,:,0].set(0) # resetting the first and last columns as the correct values will be defined below.
+    # resetting the first and last columns. If boundary type is Internal, no further change needed, else transition specific to RT will be set as below.
+
+    K = K.at[:,0,:,0].set(0) 
     K = K.at[:,0,:,-1].set(0)
 
-    K = K.at[:,0,[0,1],0].set(npx.asarray([a[:,0], -a[:,0]]).T)
-    K = K.at[:,0,[-2,-1],-1].set(npx.asarray([-a[:,-1], a[:,-1]]).T)
+    if boundary_type == "External":
+        K = K.at[:,0,[0,1],0].set(npx.asarray([a[:,0], -a[:,0]]).T)
+        K = K.at[:,0,[-2,-1],-1].set(npx.asarray([-a[:,-1], a[:,-1]]).T)
 
         #K = K.at[i,0,[0,1],0].set([a, -a])
         #K = K.at[i,0,[-2,-1],-1].set([-a, a])

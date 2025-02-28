@@ -408,8 +408,9 @@ def _get_transition_matrix(intensity_matrix, RT, delta=None, Mn = None, transiti
 
         # uncomment to include all response time
         T_delta_remaining = sci.linalg.expm(intensity_matrix * ((RT_remaining[...,None,None]) if not npx.isscalar(RT_remaining) else (RT_remaining)))
-                
-        #T_t = _timestep_transition_matrix(ns, T_delta, Mn)  #uncomment if fails
+        
+        #uncomment if fails
+        #T_t = _timestep_transition_matrix(ns, T_delta, Mn)  
                 
         # uncomment to include all response time
         T_t = T_delta_remaining @ _timestep_transition_matrix(ns, T_delta, Mn)

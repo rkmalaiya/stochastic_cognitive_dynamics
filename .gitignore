@@ -2,8 +2,10 @@
 __pycache__
 *.npy
 *.csv
-examples
+examples/data
+examples/export
 *.data*
 *.index
 *.pkl
 *checkpoint*
+*.gif
