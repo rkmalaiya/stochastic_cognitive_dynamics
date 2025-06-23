@@ -132,6 +132,7 @@ def _get_initial_state(n_states, response_width, I = 1, prob=1):
              
     p_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)**(1/2)) #.transpose(0,1,3,2)
     #p_0 = p_0 / npx.sqrt(p_0.transpose(0,1,3,2) @ p_0)
+    #p_0 = npy.deterministic("phi_0", p_0 / npx.sqrt(p_0.transpose(0,1,3,2) @ p_0))
     return p_0 # I x 1 x n_states x 1
 
 

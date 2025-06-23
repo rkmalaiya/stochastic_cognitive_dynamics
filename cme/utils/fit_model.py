@@ -92,7 +92,7 @@ def _run_model(file_loc, data, version,
             params_type, model_type, transition_type, likelihood_type, sampling_type, estimation_type,execution_type,
             num_warmup, samples_n, predictive_n, batch_size, is_test, scale, conf_scale, csv_header, is_parallel):
     
-    start_width1 = (n_states-2*response_width)
+    start_width1 = (n_states-2*response_width)//2
     if start_width == None or start_width == 0:
         start_width = start_width1
     elif start_width > start_width1:

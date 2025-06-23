@@ -24,8 +24,9 @@ def collect_dataframes(file_pre, file_post, data_mod_ver, size=None, batch_size=
         for d,m_v in data_mod_ver.items():
             for m,version in m_v:#zip(model, versions)
                 filename=file_pre + d + file_post + f"_{m}_{version}_*.csv"
+                log.info(f"***********Getting files from {filename}*************")
                 for f in gl.glob(filename): 
-                    log.info(f"Getting files from {filename}")
+                    log.info(f"Current File {f}")
                     df = (pd.read_csv(f"{f}",header="infer" if header else header)
                             .assign(size=size, subfile_id = f.split(str(version)+"_")[1].removesuffix(".csv"))  
                             .assign(dataset=d)
