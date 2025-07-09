@@ -569,6 +569,9 @@ def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=No
             P_t_c = npx.abs(phi_t_c)**2
             P_t_w = npx.abs(phi_t_w)**2
 
+        P_t_c = phi_t_c / phi_t_c.sum(axis=-1)
+        P_t_w = phi_t_w / phi_t_w.sum(axis=-1)
+
         #P_t = npx.where(x==1,P_t_c.sum(axis=(-1,-2)),P_t_w.sum(axis=(-1,-2)))
         ret_val_c = mv[None, None, None,:] @ P_t_c
         ret_val_w = mv[None, None, None,:] @ P_t_w
