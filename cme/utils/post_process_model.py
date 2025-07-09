@@ -167,8 +167,12 @@ def get_mean_confidence(n_states, response_width, measurement_prob, delta, X, RT
         mean_final_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix,phi_0=phi_0_est,
                             delta= delta, Mc = Mc, Mw=Mw, Mn=Mn, t=RT,x=X, conf_scale=conf_scale,
                             model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
+        
+        # To select states specific to correctness of response only
+        response_width_r = (n_states + 1) // 2
+        Mc_r, Mw_r, Mn_r = ca._get_measurement_matrix(n_states, response_width_r, prob=measurement_prob, model_type = model_type)
         mean_resp_conf = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix,phi_0=phi_0_est,
-                            delta= delta, Mc = Mc, Mw=Mw, Mn=Mn, t=RT,x=X, conf_scale=conf_scale,
+                            delta= delta, Mc = Mc_r, Mw=Mw_r, Mn=Mn_r, t=RT,x=X, conf_scale=conf_scale,
                             model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type,
                             return_type = "ResponseConfidence"
                             )
