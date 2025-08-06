@@ -221,3 +221,5 @@ if __name__ == "__main__":
     sns.barplot(df_avg_conf.groupby("delta")["avg_conf"].mean().reset_index().assign(N = lambda df: np.round(rt/df["delta"])),
         x="N",
         y="avg_conf", color="Grey")
+    
+    plt.show()
