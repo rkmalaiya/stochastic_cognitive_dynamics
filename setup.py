@@ -2,7 +2,7 @@ from setuptools import setup
 
 # See setup details from https://python-packaging.readthedocs.io/en/latest/minimal.html
 # pip install -e .
-setup(name='Computational_models_of_Reasoning',
+setup(name='Stochastic Cognitive Dynamics',
       version='0.1',
       description='Drift diffusion model and Qauntum Probability models used in Psychology',
       url='',
