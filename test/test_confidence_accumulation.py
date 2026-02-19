@@ -314,3 +314,30 @@ class Test_Confidence:
         
         assert npx.allclose(mean_conf_markov, 0.14686, rtol = 1e-3) & npx.allclose(mean_conf_quantum, 0.239, rtol = 1e-3), "Integration Test Failed"
 
+
+    def test_integration_initial_to_internal_likelihood_markov(self, model_constants, markov_constant_matrix, measurement_matrix_correct, measurement_matrix_incorrect, measurement_matrix_noresp):
+        phi_0_markov = ca._get_initial_state(model_constants.n_states, model_constants.start_width,
+                                             model_constants.response_width,
+                                             model_type="Markov", prior_type="Upper")
+        
+        likl_markov = ca.likelihood(intensity_matrix=markov_constant_matrix[None, None, ...], phi_0=phi_0_markov, delta=1,
+                                    RT_s=npx.asarray([[10, 20]]), RA_s=npx.asarray([[1, 0]]),  
+                                    Mc=measurement_matrix_correct, Mw=measurement_matrix_incorrect, Mn=measurement_matrix_noresp, 
+                                    transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Markov")
+        assert npx.allclose(likl_markov, npx.asarray([1.4769e-02, 2.0872e-06]), atol=1e-4), "Markov Likelihood not as expected"
+
+
+    def test_integration_initial_to_internal_likelihood_quantum(self, model_constants, quantum_constant_matrix, measurement_matrix_correct, measurement_matrix_incorrect, measurement_matrix_noresp):
+        phi_0_quantum = ca._get_initial_state(model_constants.n_states, model_constants.start_width,
+                                              model_constants.response_width,
+                                             model_type="Quantum" , prior_type="Upper")
+        
+        quantum_intensity_matrix = -1j*quantum_constant_matrix[None, None, ...]
+        likl_quantum = ca.likelihood(intensity_matrix=quantum_intensity_matrix, 
+                                     phi_0=phi_0_quantum, delta=1,
+                                     RT_s=npx.asarray([[10, 30]]), RA_s=npx.asarray([[1, 0]]),  
+                                     Mc=npx.sqrt(measurement_matrix_correct), Mw=npx.sqrt(measurement_matrix_incorrect),
+                                     Mn=npx.sqrt(measurement_matrix_noresp), 
+                                     transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Quantum")
+        assert npx.allclose(likl_quantum, npx.asarray([0.0209, 0.000307]), atol=1e-4), "Quantum Likelihood not as expected"
+
