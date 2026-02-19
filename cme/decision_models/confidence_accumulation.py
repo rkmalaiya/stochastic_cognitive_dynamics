@@ -3,8 +3,7 @@ from turtle import pos
 import jax.numpy as npx
 import jax.scipy as sci
 import numpyro as pyro
-import cme.decision_models.quantum_discrete as qd
-import cme.decision_models.diffusion_discrete as dd
+import numpyro as npy
 import jax
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive, SVI, Trace_ELBO
@@ -33,6 +32,130 @@ log = cl.get_logger("confidence_accumulation")
 #pyro.set_platform("cpu")
 pyro.set_host_device_count(64)
 #pyro.enable_x64()
+
+def diffusion_buildK(n_states, mu, sigma=1, delta=0.01, boundary_type = "External"): 
+# m = number of states  
+# a = off diag left  
+# b = diag  
+# c = off diag right
+    mu = npx.asarray(mu) #Ix1
+    n_part, n_mu = mu.shape #if len(npx.asarray(mu).shape) > 0 else 1
+    K = npx.zeros((n_part, 1, n_states,n_states)) # participants, trials, transition states
+
+    if n_mu == 1:
+        mu=npx.repeat(mu,n_states,axis=1) # keeping mu constant over states
+
+    b1 = 0.5 * (sigma - mu) #IxJ
+    b2 = 0.5 * (sigma + mu) #IxJ
+    #b1 = 0.5 * (((sigma**2)/(delta**2)) - (mu/delta)) # 9.765
+    #b2 = 0.5 * (((sigma**2)/(delta**2)) + (mu/delta)) # 10.325 
+    a = -(b1+b2) #IxJ
+
+    #for i in range(n_part):
+    def _create(static_params, params):
+    #for j in range(1,n_states-1):
+        #b1 = 0.5 * (((sigma**2)/delta**2) - mu[i,:]/delta) # 9.765
+        #b2 = 0.5 * (((sigma**2)/delta**2) + mu[i,:]/delta) # 10.325 
+        #b1 = 0.5 * (sigma[i,:] - mu[i,:])
+        #b2 = 0.5 * (sigma[i,:] + mu[i,:])
+                
+        b1 = params["b1"] #scaler
+        b2 = params["b2"] #scaler
+        a = params["a"] #scaler
+        K = static_params["K"] #n_states x n_states
+        j = static_params["j"]
+        #for j in range(1,n_states-1):
+            #try:
+        K = K.at[0,[j-1,j,j+1],j].set([b1, a, b2])
+            #except Exception as e:
+            #    print(e)
+            #    print("mu", mu.shape)
+            #    print("sigma", sigma.shape)
+                
+            #    print(b1.shape)
+            #    print(b2.shape)
+            #    print(a.shape)
+            #K = K.at[i,0,[j-1,j,j+1],j].set([b1, a, b2])
+            #params["K"] = K
+        
+        static_params = {"j":j+1, "K":K}
+        return (static_params,params)
+    
+    def _create_i(i, params):
+        params_j = {"b1":params["b1"], "b2":params["b2"], "a":params["a"]}
+        static_params = {"j":0, "K":params["K"]}
+        
+        static_params, params_j = lax.scan(_create, static_params, params_j)#, unroll=True)
+        params_j["K"] = static_params["K"]
+        return (i, params_j)    
+
+    
+    params = {"b1":b1, "b2":b2, "a":a, "K":K}
+    i, params = lax.scan(_create_i, 0, params)#, unroll=True)
+    K = params["K"]
+
+    # resetting the first and last columns. If boundary type is Internal, no further change needed, else transition specific to RT will be set as below.
+
+    K = K.at[:,0,:,0].set(0) 
+    K = K.at[:,0,:,-1].set(0)
+
+    if boundary_type == "External":
+        K = K.at[:,0,[0,1],0].set(npx.asarray([a[:,0], -a[:,0]]).T)
+        K = K.at[:,0,[-2,-1],-1].set(npx.asarray([-a[:,-1], a[:,-1]]).T)
+
+        #K = K.at[i,0,[0,1],0].set([a, -a])
+        #K = K.at[i,0,[-2,-1],-1].set([-a, a])
+        
+    return K
+
+
+def quantum_buildH(n_states, mu, sigma, delta=0.001, n_trials = None): 
+    # H = buildH(a,b,c)
+    # m = number of states  
+    # a = off diag left  
+    # b = diag  
+    # c = off diag right
+    
+    mu = npx.asarray(mu) #Ix1
+    n_part, _ = mu.shape
+
+    # build Hamiltonian  
+    Mid = int((n_states+1)/2)
+    mv = np.arange(-(Mid-1),(Mid)) #np.arange(0,n_states) #np.arange(-(Mid-1),(Mid))  # Basis vector
+    b = (mu[...,None])*mv[None,None,:];  # I,1,n_states
+    a = sigma#*np.ones((ns,1));  Ix1
+    c=a
+
+    H = npx.zeros((n_part,
+                   1 if n_trials is None else n_trials,
+                   n_states, n_states))
+
+    def _create(i, params):
+        a = params["a"]
+        b = params["b"]
+        c = params["c"]
+        H = params["H"]
+        
+        rows_ = npx.arange(1,n_states)
+        cols_ = npx.arange(0,n_states-1)
+        diags_ = npx.arange(0, n_states)
+    #for i in npx.arange(n_part):
+        H = H.at[:,rows_,cols_].set(c[0])
+        H = H.at[:,cols_, rows_].set(a[0])
+        if n_trials is None:
+            H = H.at[0,diags_, diags_].set(b[0,...])
+        else:
+            for n in range(n_trials):
+                H = H.at[n,diags_, diags_].set(b[0,...])
+
+        params["H"] = H
+        return (i, params)    
+    
+    params = {"a":a, "b":b, "c":c, "H":H}
+
+    i, params = lax.scan(_create, 0, params)#, unroll=True)
+
+    return -1j * params["H"] # The -1j is being multiplied here to simplify the transaction multiplication operations.
 
 
 def centralized_parameters(I):
@@ -131,19 +254,48 @@ def _get_transition_matrix(intensity_matrix, RT, delta=None, Mn = None, transiti
 def _get_measurement_matrix(n_states, response_width, prob=0.5, model_type = "Markov|Quantum"):
 
     if model_type == "Markov":
-        Mc, Mw, Mn = dd._get_measurement_matrix(n_states, response_width, prob)
+        Mcorr = npx.zeros(n_states)
+        Mcorr = Mcorr.at[-response_width:].set(prob)
+        Mcorr = npx.diag(Mcorr)
+
+        Mincorr = npx.zeros(n_states)
+        Mincorr = Mincorr.at[:response_width].set(prob)
+        Mincorr = npx.diag(Mincorr)
+        Mnoresp = npx.eye(n_states) - Mcorr - Mincorr
     elif model_type == "Quantum":
-        Mc, Mw, Mn = qd._get_measurement_matrix(n_states, response_width, prob)
+        Mcorr = npx.zeros(n_states)
+        Mcorr = Mcorr.at[-response_width:].set(npx.sqrt(prob))
+        Mcorr = npx.diag(Mcorr)
+
+        Mincorr = npx.zeros(n_states)
+        Mincorr = Mincorr.at[:response_width].set(npx.sqrt(prob))
+        Mincorr = npx.diag(Mincorr)
+        Mnoresp = npx.sqrt(npx.eye(n_states) - (Mcorr**2 + Mincorr**2))
     else:
         raise Exception(f"Please select one of {model_type}")
-    return Mc, Mw, Mn
+    return Mcorr, Mincorr, Mnoresp
 
 def _get_initial_state(n_states, start_width, response_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Upper|Lower|Centered|All|Model"):
     if prior_type == "Model":
         if model_type == "Markov":
-            phi_0 = dd._get_initial_state(n_states, response_width, I, prob)   
+            with npy.plate('I1', I, dim=-4):
+                with npy.plate('S', n_states - 2*response_width, dim=-1):
+                    conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
+
+            with npy.plate('I2', I, dim=-3):
+                p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+            p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
+            phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)  
         elif model_type == "Quantum":
-            phi_0 = qd._get_initial_state(n_states, response_width, I, prob)
+            with npy.plate('I1', I, dim=-4):
+                with npy.plate('S', n_states - 2*response_width, dim=-1):
+                    conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
+
+            with npy.plate('I2', I, dim=-3):
+                p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+                
+            p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
+            phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)**(1/2))
         else:
             raise Exception(f"Please select one of {model_type}")
     else:
@@ -342,11 +494,11 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
 
     if model_type == "Markov":
         sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma**2) # Sigma needs to be larger than mu and Sigma cannot be negative
-        intensity_matrix = dd._buildK(n_states, mu, sigma, delta)
+        intensity_matrix = diffusion_buildK(n_states, mu, sigma, delta)
 
     elif model_type == "Quantum":
         sigma = pyro.deterministic("sigma_final",sigma**2) # Sigma cannot be negative
-        intensity_matrix = qd._buildH(n_states, mu, sigma, delta)
+        intensity_matrix = quantum_buildH(n_states, mu, sigma, delta)
     else:
         raise Exception(f"Please select one of {model_type}")
 
@@ -443,10 +595,10 @@ def simulate_likelihood(RT_pred, n_states, response_width, delta, measurement_pr
     Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, response_width=response_width, prob=measurement_prob, model_type = model_type)
     
     if model_type == "Markov":
-        intensity_matrix = dd._buildK(n_states, drift_rate, diffusion_rate, delta)
+        intensity_matrix = diffusion_buildK(n_states, drift_rate, diffusion_rate, delta)
 
     elif model_type == "Quantum":
-        intensity_matrix = qd._buildH(n_states, drift_rate, diffusion_rate, delta)
+        intensity_matrix = quantum_buildH(n_states, drift_rate, diffusion_rate, delta)
     else:
         raise Exception(f"Please select one of {model_type}")
         
@@ -462,10 +614,10 @@ def predictive_model(RT_pred, n_states, response_width, delta, measurement_prob,
     Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, response_width=response_width, prob=measurement_prob, model_type = model_type)
     
     if model_type == "Markov":
-        intensity_matrix = dd._buildK(n_states, drift_rate, diffusion_rate)
+        intensity_matrix = diffusion_buildK(n_states, drift_rate, diffusion_rate)
 
     elif model_type == "Quantum":
-        intensity_matrix = qd._buildH(n_states, drift_rate, diffusion_rate)
+        intensity_matrix = quantum_buildH(n_states, drift_rate, diffusion_rate)
     else:
         raise Exception(f"Please select one of {model_type}")
     
@@ -478,11 +630,11 @@ def guide(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
     mu, sigma = non_centralized_parameters_VI(I)
     if model_type == "Markov":
         sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
-        intensity_matrix = dd._buildK(n_states, mu, sigma, delta)
+        intensity_matrix = diffusion_buildK(n_states, mu, sigma, delta)
 
     elif model_type == "Quantum":
         sigma = pyro.deterministic("sigma_final",sigma) # Sigma cannot be negative
-        intensity_matrix = qd._buildH(n_states, mu, sigma, delta)
+        intensity_matrix = quantum_buildH(n_states, mu, sigma, delta)
     else:
         raise Exception(f"Please select one of {model_type}")
 
@@ -655,9 +807,9 @@ def get_arviz_model(mcmc_chain):
 
 def get_intensity_matrix(n_states, mu, sigma, model_type="Markov|Quantum"):
     if model_type == "Markov":
-        return dd._buildK(n_states, mu, sigma)
+        return diffusion_buildK(n_states, mu, sigma)
     elif model_type == "Quantum":
-        return qd._buildH(n_states, mu, sigma)
+        return quantum_buildH(n_states, mu, sigma)
     else:
         raise Exception(f"Please select one of {model_type}")
 
