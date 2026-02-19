@@ -6,21 +6,17 @@ import numpyro as pyro
 import numpyro as npy
 import jax
 import numpyro.distributions as dist
-from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive, SVI, Trace_ELBO
+from numpyro.infer import MCMC, NUTS, Predictive, SVI, Trace_ELBO
 import numpyro.infer.autoguide as ag
-from numpyro.optim import Adam
-from jax import random
 from jax import lax
 import arviz as az 
 from numpyro.distributions import constraints
 
 import numpy as np 
 import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
 import scipy.stats as stats
 from joblib import Parallel, delayed
-from joblib import parallel_config
+
 
 from numpyro import enable_validation
 enable_validation(True)
@@ -34,10 +30,6 @@ pyro.set_host_device_count(64)
 #pyro.enable_x64()
 
 def diffusion_buildK(n_states, mu, sigma=1, delta=0.01, boundary_type = "External"): 
-# m = number of states  
-# a = off diag left  
-# b = diag  
-# c = off diag right
     mu = npx.asarray(mu) #Ix1
     n_part, n_mu = mu.shape #if len(npx.asarray(mu).shape) > 0 else 1
     K = npx.zeros((n_part, 1, n_states,n_states)) # participants, trials, transition states
@@ -47,36 +39,15 @@ def diffusion_buildK(n_states, mu, sigma=1, delta=0.01, boundary_type = "Externa
 
     b1 = 0.5 * (sigma - mu) #IxJ
     b2 = 0.5 * (sigma + mu) #IxJ
-    #b1 = 0.5 * (((sigma**2)/(delta**2)) - (mu/delta)) # 9.765
-    #b2 = 0.5 * (((sigma**2)/(delta**2)) + (mu/delta)) # 10.325 
     a = -(b1+b2) #IxJ
 
-    #for i in range(n_part):
     def _create(static_params, params):
-    #for j in range(1,n_states-1):
-        #b1 = 0.5 * (((sigma**2)/delta**2) - mu[i,:]/delta) # 9.765
-        #b2 = 0.5 * (((sigma**2)/delta**2) + mu[i,:]/delta) # 10.325 
-        #b1 = 0.5 * (sigma[i,:] - mu[i,:])
-        #b2 = 0.5 * (sigma[i,:] + mu[i,:])
-                
         b1 = params["b1"] #scaler
         b2 = params["b2"] #scaler
         a = params["a"] #scaler
         K = static_params["K"] #n_states x n_states
         j = static_params["j"]
-        #for j in range(1,n_states-1):
-            #try:
         K = K.at[0,[j-1,j,j+1],j].set([b1, a, b2])
-            #except Exception as e:
-            #    print(e)
-            #    print("mu", mu.shape)
-            #    print("sigma", sigma.shape)
-                
-            #    print(b1.shape)
-            #    print(b2.shape)
-            #    print(a.shape)
-            #K = K.at[i,0,[j-1,j,j+1],j].set([b1, a, b2])
-            #params["K"] = K
         
         static_params = {"j":j+1, "K":K}
         return (static_params,params)
@@ -94,27 +65,17 @@ def diffusion_buildK(n_states, mu, sigma=1, delta=0.01, boundary_type = "Externa
     i, params = lax.scan(_create_i, 0, params)#, unroll=True)
     K = params["K"]
 
-    # resetting the first and last columns. If boundary type is Internal, no further change needed, else transition specific to RT will be set as below.
-
     K = K.at[:,0,:,0].set(0) 
     K = K.at[:,0,:,-1].set(0)
 
     if boundary_type == "External":
         K = K.at[:,0,[0,1],0].set(npx.asarray([a[:,0], -a[:,0]]).T)
         K = K.at[:,0,[-2,-1],-1].set(npx.asarray([-a[:,-1], a[:,-1]]).T)
-
-        #K = K.at[i,0,[0,1],0].set([a, -a])
-        #K = K.at[i,0,[-2,-1],-1].set([-a, a])
         
     return K
 
 
 def quantum_buildH(n_states, mu, sigma, delta=0.001, n_trials = None): 
-    # H = buildH(a,b,c)
-    # m = number of states  
-    # a = off diag left  
-    # b = diag  
-    # c = off diag right
     
     mu = npx.asarray(mu) #Ix1
     n_part, _ = mu.shape
@@ -139,7 +100,6 @@ def quantum_buildH(n_states, mu, sigma, delta=0.001, n_trials = None):
         rows_ = npx.arange(1,n_states)
         cols_ = npx.arange(0,n_states-1)
         diags_ = npx.arange(0, n_states)
-    #for i in npx.arange(n_part):
         H = H.at[:,rows_,cols_].set(c[0])
         H = H.at[:,cols_, rows_].set(a[0])
         if n_trials is None:
@@ -186,40 +146,40 @@ def non_centralized_parameters(I):
         sigma = pyro.deterministic("sigma", (m + s * sigma_r)**2) 
     return mu, sigma
 
-def non_centralized_parameters_VI(I):
-    """
-    I: Number of participants
+# def non_centralized_parameters_VI(I):
+#     """
+#     I: Number of participants
     
-    """
-    m_m = pyro.param("m_m", 0, constraint=constraints.positive)
-    m_s = pyro.param("m_s", 1, constraint=constraints.positive)
-    m = pyro.sample("m", dist.Normal(m_m,m_s))
-    s = pyro.sample("s", dist.HalfNormal(m_s))
+#     """
+#     m_m = pyro.param("m_m", 0, constraint=constraints.positive)
+#     m_s = pyro.param("m_s", 1, constraint=constraints.positive)
+#     m = pyro.sample("m", dist.Normal(m_m,m_s))
+#     s = pyro.sample("s", dist.HalfNormal(m_s))
 
-    with pyro.plate('I4', I, dim=-2):
-        mu_r_m = pyro.param("m_m", 2, constraint=constraints.positive)
-        mu_r_s = pyro.param("m_m", 1, constraint=constraints.positive)
+#     with pyro.plate('I4', I, dim=-2):
+#         mu_r_m = pyro.param("m_m", 2, constraint=constraints.positive)
+#         mu_r_s = pyro.param("m_m", 1, constraint=constraints.positive)
         
-        mu_r = pyro.sample("mu_r", dist.Normal(mu_r_m,mu_r_s)) # Drift Rate
-        sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
+#         mu_r = pyro.sample("mu_r", dist.Normal(mu_r_m,mu_r_s)) # Drift Rate
+#         sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
 
-        mu = pyro.deterministic("mu", m + s * mu_r)
-        sigma = pyro.deterministic("sigma", m + s * sigma_r) 
+#         mu = pyro.deterministic("mu", m + s * mu_r)
+#         sigma = pyro.deterministic("sigma", m + s * sigma_r) 
     
-    return mu, sigma
+#     return mu, sigma
 
-def _get_initial_state_VI(n_states, start_width, I=1, prob=1,sub_sample_size=None):
+# def _get_initial_state_VI(n_states, start_width, I=1, prob=1,sub_sample_size=None):
 
-    with pyro.plate('I2', I, dim=-4,subsample_size=sub_sample_size):
-        with pyro.plate('S', n_states, dim=-1):
-            conc = pyro.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
+#     with pyro.plate('I2', I, dim=-4,subsample_size=sub_sample_size):
+#         with pyro.plate('S', n_states, dim=-1):
+#             conc = pyro.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
 
-    with pyro.plate('I3', I, dim=-3,subsample_size=sub_sample_size):
-        p_0 = pyro.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+#     with pyro.plate('I3', I, dim=-3,subsample_size=sub_sample_size):
+#         p_0 = pyro.sample("phi_init", dist.Dirichlet(conc)) # Initial State
                  
-    p_0 = pyro.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)
+#     p_0 = pyro.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)
 
-    return p_0 #s_0
+#     return p_0 #s_0
 
 
 def _timestep_transition_matrix(n, T_delta, Mn):
@@ -386,15 +346,15 @@ def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=No
     phi_t = perform_state_transition(intensity_matrix, RT_s = t, RA_s = x, Mc=Mc, Mw=Mw, Mn=Mn, phi_0=phi_0, delta=delta,
                                      transition_type=transition_type, likelihood_type=likelihood_type)
  
-    if(return_type == "Probability"):
-        phi_t_c = Mc @ phi_t
-        phi_t_w = Mw @ phi_t
+    # if(return_type == "Probability"):
+    #     phi_t_c = Mc @ phi_t
+    #     phi_t_w = Mw @ phi_t
 
-        # This is a bug and will not work
-        if(likelihood_type == "SINGLE"):
-            phi_t = phi_t_c if x==1 else phi_t_w
-        elif(likelihood_type == "JOINT"):
-            phi_t = phi_t_c if x[1]==1 else phi_t_w 
+    #     # This is a bug and will not work
+    #     if(likelihood_type == "SINGLE"):
+    #         phi_t = phi_t_c if x==1 else phi_t_w
+    #     elif(likelihood_type == "JOINT"):
+    #         phi_t = phi_t_c if x[1]==1 else phi_t_w 
 
     if model_type == "Markov":
         P_t = phi_t
@@ -512,23 +472,23 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
         pyro.deterministic("likl_rt", likl)
         pyro.factor("likelihood", likl) #.sum()
 
-def gen_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
-                     drift_rate, diffusion_rate, phi_0, data_samples = (1,10), 
-                     model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
-                     key=None, max_RT_sec=50
-                     ):
-    threshold = 0.85 # or 85
-    key1 = cu.get_rng() if key is None else key
-    part_I, part_J = data_samples
-    max_samples = part_J * 10
-    I, mu, sigma = part_I, drift_rate, diffusion_rate
+# def gen_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
+#                      drift_rate, diffusion_rate, phi_0, data_samples = (1,10), 
+#                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
+#                      key=None, max_RT_sec=50
+#                      ):
+#     #threshold = 0.85 # or 85
+#     #key1 = cu.get_rng() if key is None else key
+#     part_I, part_J = data_samples
+#     max_samples = part_J * 10
+#     I, mu, sigma = part_I, drift_rate, diffusion_rate
 
-    random_ts = stats.uniform.rvs(delta, max_RT_sec/delta, (I,max_samples))     #dist.Uniform(delta, max_RT_sec/delta).sample(key=key1, sample_shape=(I,max_samples))
+#     #random_ts = stats.uniform.rvs(delta, max_RT_sec/delta, (I,max_samples))     #dist.Uniform(delta, max_RT_sec/delta).sample(key=key1, sample_shape=(I,max_samples))
     
-    intensity_matrix = get_intensity_matrix(n_states, mu, sigma, model_type=model_type)
-    Mc, Mw, Mn = _get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
+#     #intensity_matrix = get_intensity_matrix(n_states, mu, sigma, model_type=model_type)
+#     #Mc, Mw, Mn = _get_measurement_matrix(n_states, response_width, prob=measurement_prob, model_type = model_type)
         
-    return RT, RA, states_final
+#     return RT, RA, None
 
 def get_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
                      drift_rate, diffusion_rate, phi_0, data_samples = (1,10), max_RT_sec=10, param_sample_id=-1,
@@ -625,20 +585,20 @@ def predictive_model(RT_pred, n_states, response_width, delta, measurement_prob,
                       transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
     return likl.sum()
 
-def guide(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
-    I, _ = RA_s.shape
-    mu, sigma = non_centralized_parameters_VI(I)
-    if model_type == "Markov":
-        sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
-        intensity_matrix = diffusion_buildK(n_states, mu, sigma, delta)
+# def guide(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
+#     I, _ = RA_s.shape
+#     mu, sigma = non_centralized_parameters_VI(I)
+#     if model_type == "Markov":
+#         sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
+#         intensity_matrix = diffusion_buildK(n_states, mu, sigma, delta)
 
-    elif model_type == "Quantum":
-        sigma = pyro.deterministic("sigma_final",sigma) # Sigma cannot be negative
-        intensity_matrix = quantum_buildH(n_states, mu, sigma, delta)
-    else:
-        raise Exception(f"Please select one of {model_type}")
+#     elif model_type == "Quantum":
+#         sigma = pyro.deterministic("sigma_final",sigma) # Sigma cannot be negative
+#         intensity_matrix = quantum_buildH(n_states, mu, sigma, delta)
+#     else:
+#         raise Exception(f"Please select one of {model_type}")
 
-    phi_0 = _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type, prior_type="Model")
+#     phi_0 = _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type, prior_type="Model")
 
 
 def get_original_params(posterior_samples, response_width, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum"):
