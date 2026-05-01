@@ -174,3 +174,80 @@ def get_mean_confidence(n_states, response_width, measurement_prob, delta, X, RT
                             )
                             
         return mean_init_conf,mean_final_conf,mean_resp_conf
+
+
+def get_all_stored_data(export_version, participant_folder, est_folder, data_mod_ver):
+    df_all = pd.read_csv(participant_folder, index_col=0)
+    df_all = df_all.assign(item = lambda df: df[["item", "difficulty"]].groupby("difficulty", sort=False).rank(method="dense", axis=0)["item"])
+    df_all = df_all.assign(difficulty = lambda df: df.difficulty.map({"far":"Easy", "close":"Hard"}))
+    df_all = df_all \
+    .assign(confidence_pre = lambda df: np.where(((df.ra_pre==0) & (df.confidence_pre!=50)), -df.confidence_pre, df.confidence_pre)) 
+    
+
+    df_observed_rt, _, _, _, dataset_dict = ut.collect_response_from_model_output(f"{est_folder}", data_mod_ver, 50)
+    
+    conditions = list(dataset_dict.keys()) #[k.split("_", maxsplit=1) for k in dataset_dict.keys()]
+    df_part_id_e = pd.read_csv(f"{est_folder}/participants_id_init_far_{list(data_mod_ver.values())[0][0][0]}_{export_version}_0.csv").rename(columns={"Unnamed: 0":"part_id", "0":"id"}).assign(difficulty="Easy")
+    df_part_id_h = pd.read_csv(f"{est_folder}/participants_id_init_close_{list(data_mod_ver.values())[0][0][0]}_{export_version}_0.csv").rename(columns={"Unnamed: 0":"part_id", "0":"id"}).assign(difficulty="Hard")
+
+    df_part_id = pd.concat([df_part_id_e, df_part_id_h])
+    part_n = {"far":df_part_id_e.shape[0], "close":df_part_id_h.shape[0]}
+
+    return (df_all, df_part_id, part_n, dataset_dict, df_observed_rt, conditions)
+
+def get_admin_model_conf(n_states, administered_conf_levels, modeled_states_per_obs, modeled_states):
+    global administered_conf_levels_center
+    obs_conf_levels = np.hstack([np.flip(np.repeat(-np.asarray(administered_conf_levels), modeled_states_per_obs)),
+    np.array(administered_conf_levels_center),
+    np.repeat(np.asarray(administered_conf_levels), modeled_states_per_obs)])
+
+    modeled_conf_levels = list(reversed([-i for i in range(1,modeled_states+1)])) + [i for i in range(0,modeled_states+1)]
+    np.asarray(modeled_conf_levels).shape
+
+    obs_modeled_map = dict(zip(modeled_conf_levels, obs_conf_levels))
+
+    M_c = np.zeros(n_states)
+    #M_c[modeled_states+1:] = 1
+    M_c[modeled_states:] = 1
+    M_w = np.zeros(n_states)
+    #M_w[:modeled_states] = 1
+    M_w[:modeled_states+1] = 1
+    
+    return obs_modeled_map, M_c, M_w
+
+def get_conf_for_each_resp(n_states, n_items,conditions, center_state, df_all, obs_modeled_map, dataset_dict, df_part_id, df_pdf, part_n, M_c, M_w):
+
+    df_conf_resp_state = []
+    for c_l in conditions:
+        diff = c_l.split("_init_")[1]
+        mod = c_l.split("_init_")[0]
+        phi_t = np.asarray(dataset_dict[c_l]["phi_t"]).squeeze()
+        #n_states = phi_t.shape[-1]
+        df_t = pd.DataFrame(phi_t.reshape(-1,n_states)) \
+        .assign(part_id = np.repeat(np.arange(0, part_n[diff]), n_items), 
+                item_id = np.tile(np.arange(1, 31),  part_n[diff])) \
+        .melt(id_vars=["part_id", "item_id"], var_name="state_id", value_name="state_prob") \
+        .assign(model = mod, difficulty = "Easy" if diff == "far" else "Hard")
+        if mod == "Quantum":
+            df_t = df_t.assign(state_prob = lambda df:np.abs(df.state_prob)**2)
+        df_conf_resp_state.append(df_t)
+    df_conf_resp_state = pd.concat(df_conf_resp_state)
+
+    df_conf_resp_state = df_conf_resp_state.merge(df_part_id, left_on=["part_id", "difficulty"], right_on = ["part_id", "difficulty"])
+    df_conf_resp_state = df_conf_resp_state.merge(df_all, left_on=["id", "item_id", "difficulty"], right_on=["id", "item", "difficulty"]).drop(columns="item")
+    df_conf_resp_state = df_conf_resp_state.assign(state_id = lambda df:df.state_id - center_state,
+                                    state_id_scaled = lambda df:df.state_id.map(obs_modeled_map))
+
+    conf_resp_arr = []
+    for k, df in df_conf_resp_state.groupby(df_conf_resp_state.columns.drop(["state_id", "state_id_scaled", "state_prob"]).tolist()):
+        df.sort_values("state_id", ascending=True)["state_id"]
+        df = df.assign(conf_meas_mat = M_c if df.ra_pre.sum() > 0 else M_w) 
+        # uncomment this if need confidence given choice
+        df = df.assign(state_prob = df.state_prob*df.conf_meas_mat)
+        # -------
+        df = df.assign(state_prob = (df.state_prob)/(df.state_prob).sum())
+        
+        conf_resp_arr.append(df)
+    df_conf_resp_state = pd.concat(conf_resp_arr)
+
+    return df_conf_resp_state

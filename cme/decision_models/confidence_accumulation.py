@@ -53,7 +53,7 @@ def centralized_parameters(I):
     #sigma = pyro.deterministic("sigma", npx.ones((I,1)))    
     return mu, sigma
 
-def non_centralized_parameters(I):
+def non_centralized_parameters(model_type, I):
     """
     I: Number of participants
     
@@ -62,12 +62,18 @@ def non_centralized_parameters(I):
     s = pyro.sample("s", dist.HalfNormal(1))
 
     with pyro.plate('I3', I, dim=-2):
-        mu_r = pyro.sample("mu_r", dist.Normal(2,1)) # Drift Rate
+        if model_type == "Markov":
+            mu_r = pyro.sample("mu_r", dist.Normal(2,1)) # Drift Rate
+        elif model_type == "Quantum":
+            mu_r = pyro.sample("mu_r", dist.Normal(0,1)) # Drift Rate
         #sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
 
         #mu_r = pyro.sample("mu_r", dist.Normal(2,1)) # Drift Rate
-        #sigma_r = pyro.sample("sigma_r", dist.HalfNormal(1)) # Diffusion Rate
-        sigma_r = pyro.sample("sigma_r", dist.Normal(0,1)) # Diffusion Rate
+        if model_type == "Markov":
+            sigma_r = pyro.sample("sigma_r", dist.Normal(0,1)) # Diffusion Rate
+        elif model_type == "Quantum":
+            #sigma_r = pyro.sample("sigma_r", dist.HalfNormal(1)) # Diffusion Rate
+            sigma_r = pyro.sample("sigma_r", dist.Normal(0,0.1)) # Diffusion Rate
 
         mu = pyro.deterministic("mu", m + s * mu_r)
         sigma = pyro.deterministic("sigma", (m + s * sigma_r)**2) 
@@ -618,7 +624,11 @@ def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transitio
 
     P_t_c = (Mc @ phi_t)
     P_t_w = (Mw @ phi_t)
-    P_t = npx.where(RA[...,None,None]==1, P_t_c, P_t_w)
+    if (np.unique(RA).shape[0] == 2):
+        P_t = npx.where(RA[...,None,None]==1, P_t_c, P_t_w)
+    elif (np.unique(RA).shape[0] == 3):
+        P_t_n = (Mn @ phi_t)
+        P_t = npx.where(RA[...,None,None]==1, P_t_c, npx.where(RA[...,None,None]==-1, P_t_w, P_t_n))
 
     if model_type == "Markov":
         #P_t_c = (Mc @ phi_t).sum(axis=(-2,-1))
@@ -659,7 +669,7 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
     if params_type == "Centralized":
         mu, sigma = centralized_parameters(I)
     elif params_type == "NonCentralized":
-        mu, sigma = non_centralized_parameters(I)
+        mu, sigma = non_centralized_parameters(model_type, I)
     else:
         raise Exception(f"Please select one of {params_type}")
 
@@ -803,13 +813,13 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
 
         df_sim_RT = (pd.DataFrame(RT).assign(drift_rate=drift_rate, diffusion_rate=diffusion_rate)
         .reset_index(names="part_id")
-        .melt(id_vars=["part_id", "drift_rate", "diffusion_rate"], var_name="items", value_name="RT")
+        .melt(id_vars=["part_id", "drift_rate", "diffusion_rate"], var_name="pseudo_item_id", value_name="RT")
         .assign(RA = RA.flatten())
-        .set_index(["part_id","items"])
+        .set_index(["part_id","pseudo_item_id"])
         .join(pd.DataFrame(likl)
             .reset_index(names="part_id")
-            .melt(id_vars="part_id", var_name="items", value_name="logp")
-            .set_index(["part_id","items"]))
+            .melt(id_vars="part_id", var_name="pseudo_item_id", value_name="logp")
+            .set_index(["part_id","pseudo_item_id"]))
         )
         df_sim_RT = df_sim_RT.where(lambda df:~np.isnan(df),0)
         samples_arr = []
@@ -1070,7 +1080,8 @@ def sample_prior_pred_params(n_states, start_width, response_width, delta, measu
 
     prior_predictive = Predictive(model, num_samples=n_samples, parallel=True)    
     if X is None:
-        X = np.ones(data_samples)
+        #X = np.ones(data_samples)
+        raise Exception("X cannot be missing")
     prior_samples = prior_predictive(cu.get_rng() if key is None else key, n_states, start_width, response_width, delta, X, None, measurement_prob,
                                     params_type = params_type, transition_type=transition_type, 
                                     likelihood_type=likelihood_type, model_type=model_type)
@@ -1108,6 +1119,8 @@ def sample_post_pred_params(n_states, response_width, delta, measurement_prob, X
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
                             transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
                             sampling_type = "MCMC|GEN", is_parallel=True):
+    if X is None:
+        raise Exception("X cannot be missing")
     predictive_samples = []
     n_jobs = drift_rate_samples.shape[0] if drift_rate_samples.shape[0] < 60 else 60
     parallel = Parallel(n_jobs=1 if not is_parallel else n_jobs)

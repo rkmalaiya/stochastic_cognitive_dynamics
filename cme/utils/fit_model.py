@@ -1,3 +1,6 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0" # "0" "1"
+
 #from pyexpat import model
 from attr import dataclass
 #from dataclasses import dataclass, fields
@@ -213,7 +216,7 @@ def _run_model(file_loc, data, version,
                     )
         df_summary_csv.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}_{i}.csv")
         total_samples = post_samples["mu"].shape[0]
-        pred_idx = np.random.default_rng().choice(total_samples, predictive_n)
+        pred_idx = np.random.default_rng().choice(total_samples, predictive_n, replace=False)
         log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i} after {((time.perf_counter() - start_time_sampling)/60):.2f} mins")
         
         df_phi = df_summary.filter(like="phi_0",axis=0)[["mean"]].reset_index(names="idx")
