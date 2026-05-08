@@ -8,8 +8,34 @@ import cme.utils.common_logging as cm_log
 import cme.decision_models.confidence_accumulation as ca
 import cme.decision_models.diffusion_discrete as dd
 import cme.decision_models.quantum_discrete as qd
+import arviz as az
+import xarray as xa
+import polars as pl
 log = cm_log.get_logger()
 import itertools as iter
+
+def collect_inference_data(file_pre, part_pre, file_post, data_mod_ver):
+    return_dict = {}
+    for d,m_v in data_mod_ver.items():
+        for m,version in m_v:
+            post_smpl = []
+            obs_data = []
+            log_likl = []
+            sample_stats = []
+            filename=file_pre + d + file_post + f"_{m}_{version}_*.nc"
+            log.info(f"***********Getting files from {filename}*************")
+            for fl_az in gl.glob(filename):
+                subfile_id = fl_az.split(str(version)+"_")[1].removesuffix(".nc")
+                fl_df=part_pre + d + file_post + f"_{m}_{version}_{subfile_id}.csv"
+                post_smpl.append(az.from_netcdf(fl_az).assign_coords({"part_id": pl.read_csv(fl_df)["0"].to_numpy()}).posterior)
+                obs_data.append(az.from_netcdf(fl_az).assign_coords({"part_id": pl.read_csv(fl_df)["0"].to_numpy()}).observed_data )
+                log_likl.append(az.from_netcdf(fl_az).assign_coords({"part_id": pl.read_csv(fl_df)["0"].to_numpy()}).log_likelihood )
+                sample_stats.append(az.from_netcdf(fl_az).assign_coords({"part_id": pl.read_csv(fl_df)["0"].to_numpy()}).sample_stats)
+                return_dict[d+"_"+m+"_"+version] = az.InferenceData(posterior=xa.concat(post_smpl, dim="part_id"),
+                                                observed_data=xa.concat(obs_data, dim="part_id"),
+                                                log_likelihood=xa.concat(log_likl, dim="part_id"),
+                                                sample_stats=xa.concat(sample_stats, dim="part_id"))
+    return return_dict
 
 def collect_dataframes(file_pre, file_post, data_mod_ver, size=None, batch_size=0, header=True, is_glob=False):
     if not is_glob: 
