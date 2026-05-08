@@ -10,7 +10,6 @@ import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive, SVI, Trace_ELBO
 import numpyro.infer.autoguide as ag
 from numpyro.optim import Adam
-from jax import random
 from jax import lax
 import arviz as az 
 from numpyro.distributions import constraints
@@ -58,26 +57,26 @@ def non_centralized_parameters(model_type, I):
     I: Number of participants
     
     """
-    m = pyro.sample("m", dist.Normal(0,1))
+    m = pyro.sample("m", dist.Normal(2,1))
     s = pyro.sample("s", dist.HalfNormal(1))
+
+    m_si = pyro.sample("m_si", dist.Normal(0,1))
+    s_si = pyro.sample("s_si", dist.HalfNormal(1))
 
     with pyro.plate('I3', I, dim=-2):
         if model_type == "Markov":
-            mu_r = pyro.sample("mu_r", dist.Normal(2,1)) # Drift Rate
+            mu_r = pyro.sample("mu_r", dist.Normal(0,1)) # Drift Rate
         elif model_type == "Quantum":
             mu_r = pyro.sample("mu_r", dist.Normal(0,1)) # Drift Rate
-        #sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
-
-        #mu_r = pyro.sample("mu_r", dist.Normal(2,1)) # Drift Rate
+       
         if model_type == "Markov":
             sigma_r = pyro.sample("sigma_r", dist.Normal(0,1)) # Diffusion Rate
         elif model_type == "Quantum":
-            #sigma_r = pyro.sample("sigma_r", dist.HalfNormal(1)) # Diffusion Rate
-            sigma_r = pyro.sample("sigma_r", dist.Normal(0,0.1)) # Diffusion Rate
+            sigma_r = pyro.sample("sigma_r", dist.Normal(0,1)) # Diffusion Rate
 
         mu = pyro.deterministic("mu", m + s * mu_r)
-        sigma = pyro.deterministic("sigma", (m + s * sigma_r)**2) 
-    #sigma = pyro.deterministic("sigma", npx.ones((I,1)))
+        sigma = pyro.deterministic("sigma", jax.nn.softplus(m_si + s_si * sigma_r)) # To avoid sigma from exploding
+        #sigma = sigma**2
     
     return mu, sigma
 
