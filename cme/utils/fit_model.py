@@ -153,7 +153,7 @@ def _run_model(file_loc, data, version,
         
         min_RT_sec = RT.mean() - 3*RT.std()
         max_RT_sec = RT.mean() + 3*RT.std()
-        log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {max_RT_sec} secs")
+        log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {min_RT_sec} to {max_RT_sec} secs")
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
                                                         delta=0.1, data_samples=RT.shape, min_RT_sec = min_RT_sec, max_RT_sec = max_RT_sec,
                                                         measurement_prob=measurement_prob, X=X, RT=None, n_samples=predictive_n,

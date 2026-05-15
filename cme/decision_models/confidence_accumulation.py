@@ -865,7 +865,7 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         #if RT is None:
         if RT is None:
             #rt = np.arange(delta,max_RT_sec,delta)
-            rt = np.linspace(delta, max_RT_sec, max_J)
+            rt = np.linspace(min_RT_sec, max_RT_sec, max_J)
             RT = np.tile(rt, (part_I,1))
         
         
