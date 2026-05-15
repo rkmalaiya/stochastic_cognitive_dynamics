@@ -604,8 +604,8 @@ def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn
     P_t = npx.where(P_t <= 0, 10e-12, P_t)
     P_t = npx.where(npx.isnan(P_t), 10e-12, P_t)
     P_t = npx.log(P_t)
-    pyro.deterministic("loglikl", P_t.sum(axis=-1)) #summing over trials
-    return P_t.sum()
+    #pyro.deterministic("loglikl", P_t.sum(axis=-1)) #summing over trials
+    return P_t.sum(axis=-1)
 
 def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
 
