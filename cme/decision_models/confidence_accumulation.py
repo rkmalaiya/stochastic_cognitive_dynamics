@@ -601,10 +601,11 @@ def transformed_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, M
 def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
     P_t = likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
     #P_t = npx.where(P_t <= 0, 0.00001, npx.log(P_t))
-    P_t = npx.where(P_t <= 0, 0, P_t)
-    P_t = npx.where(npx.isnan(P_t), 0, P_t)
-    
-    return P_t
+    P_t = npx.where(P_t <= 0, 10e-12, P_t)
+    P_t = npx.where(npx.isnan(P_t), 10e-12, P_t)
+    P_t = npx.log(P_t)
+    pyro.deterministic("loglikl", P_t.sum(axis=-1)) #summing over trials
+    return P_t.sum()
 
 def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
 
@@ -781,7 +782,7 @@ def gen_RT(RT, n_states, response_width, delta, measurement_prob, RA,
     return RT, RA, states_final
 
 def get_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
-                     drift_rate, diffusion_rate, phi_0, data_samples = (1,10), max_RT_sec=10, param_sample_id=-1,
+                     drift_rate, diffusion_rate, phi_0, data_samples = (1,10), min_RT_sec = 0, max_RT_sec=10, param_sample_id=-1,
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
                      sampling_type = "GEN|SIM", is_test=False, key=None
                      ):
@@ -855,7 +856,7 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
     if sampling_type == "SIM":
         if RT is None:
             #rt = np.arange(0,max_RT_sec,delta)
-            rt = np.linspace(0, max_RT_sec, max_J)
+            rt = np.linspace(min_RT_sec, max_RT_sec, max_J)
             RT = np.tile(rt, (part_I,1))
         df_samples, df_sim_RT = sim_RT()
     elif sampling_type == "GEN":
@@ -1073,7 +1074,7 @@ def predictive_mcmc_fn(n_states, response_width, delta, measurement_prob, X,
     return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "predictive_chain":az.from_numpyro(predictive_mcmc)} #predictive_samples
 
 def sample_prior_pred_params(n_states, start_width, response_width, delta, measurement_prob, X, RT=None,  
-                        n_samples=10, data_samples=(1,10), max_RT_sec = 10,
+                        n_samples=10, data_samples=(1,10), min_RT_sec = 0, max_RT_sec = 10,
                         params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
                         transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN", n_jobs=1, key=None):
 
@@ -1099,7 +1100,7 @@ def sample_prior_pred_params(n_states, start_width, response_width, delta, measu
                                     )
     elif sampling_type == "GEN" or sampling_type == "SIM":
             predictive_samples = parallel(delayed(get_RT)(RT, n_states, response_width, delta, measurement_prob, X, 
-                                                drift_rate, diffusion_rate, phi_0, max_RT_sec = max_RT_sec,
+                                                drift_rate, diffusion_rate, phi_0, min_RT_sec = min_RT_sec,  max_RT_sec = max_RT_sec,
                                                 param_sample_id = param_sample_id,
                                                 model_type = model_type, transition_type = transition_type, 
                                                 likelihood_type = likelihood_type, data_samples = data_samples,
@@ -1114,7 +1115,7 @@ def sample_prior_pred_params(n_states, start_width, response_width, delta, measu
 
 def sample_post_pred_params(n_states, response_width, delta, measurement_prob, X,
                             drift_rate_samples, diffusion_rate_samples, phi_0_samples, RT=None, 
-                            data_samples=(1,10), max_RT_sec=10,
+                            data_samples=(1,10), min_RT_sec = 0, max_RT_sec=10,
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
                             transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
                             sampling_type = "MCMC|GEN", is_parallel=True):
@@ -1131,7 +1132,7 @@ def sample_post_pred_params(n_states, response_width, delta, measurement_prob, X
                                     )
     elif sampling_type == "GEN" or sampling_type == "SIM":
             predictive_samples = parallel(delayed(get_RT)(RT, n_states, response_width, delta, measurement_prob, X, 
-                                                drift_rate, diffusion_rate, phi_0, max_RT_sec=max_RT_sec,
+                                                drift_rate, diffusion_rate, phi_0, min_RT_sec = min_RT_sec, max_RT_sec=max_RT_sec,
                                                 param_sample_id = param_sample_id,
                                                 model_type = model_type, transition_type = transition_type, 
                                                 likelihood_type = likelihood_type, data_samples = data_samples, 

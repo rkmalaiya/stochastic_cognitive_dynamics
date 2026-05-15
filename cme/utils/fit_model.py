@@ -151,10 +151,11 @@ def _run_model(file_loc, data, version,
     
     def run_half_model(i, X, RT, ID):
         
+        min_RT_sec = RT.mean() - 3*RT.std()
         max_RT_sec = RT.mean() + 3*RT.std()
         log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {max_RT_sec} secs")
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
-                                                        delta=0.1, data_samples=RT.shape, max_RT_sec = max_RT_sec,
+                                                        delta=0.1, data_samples=RT.shape, min_RT_sec = min_RT_sec, max_RT_sec = max_RT_sec,
                                                         measurement_prob=measurement_prob, X=X, RT=None, n_samples=predictive_n,
                                                         params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                         likelihood_type=likelihood_type, sampling_type=sampling_type, 
@@ -177,7 +178,17 @@ def _run_model(file_loc, data, version,
                                                     )
             
             post_samples = post_chain.get_samples()
-            arviz_data = az.from_numpyro(post_chain)
+            coords = {
+                        "part_id": ID,
+                    }
+            dims = {
+                        "mu_r": ["part_id"],
+                        "sigma_r": ["part_id"],
+                        "phi_0": ["part_id"],
+                    }
+            arviz_data = az.from_numpyro(post_chain,
+                                        coords=coords,
+                                        dims=dims)
             df_summary = az.summary(arviz_data, var_names=["mu", "phi_0", "sigma_final"]) #"sigma_final", "likl_rt", 
             
             #df_summary = (df_summary.reset_index(names="params")
@@ -267,7 +278,8 @@ def _run_model(file_loc, data, version,
                                                      measurement_prob=measurement_prob,
                                                     X=X, 
                                                     #X=None,
-                                                    data_samples=RT.shape,max_RT_sec = max_RT_sec,
+                                                    data_samples=RT.shape, 
+                                                    min_RT_sec = min_RT_sec, max_RT_sec = max_RT_sec,
                                                     drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, 
                                                     phi_0_samples=phi_0_samples,
                                                     #RT=RT,
