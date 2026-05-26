@@ -80,7 +80,7 @@ def non_centralized_parameters(model_type, I):
     
     return mu, sigma
 
-def non_centralized_parameters_VI(I):
+def non_centralized_parameters_VI_delete(I):
     """
     I: Number of participants
     
@@ -674,11 +674,13 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
         raise Exception(f"Please select one of {params_type}")
 
     if model_type == "Markov":
-        sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma**2) # Sigma needs to be larger than mu and Sigma cannot be negative
+        sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
+                # removed sigma**2 to allow stability in parameter estimates. Negative values are avoided through softplus now
         intensity_matrix = dd._buildK(n_states, mu, sigma, delta)
 
     elif model_type == "Quantum":
-        sigma = pyro.deterministic("sigma_final",sigma**2) # Sigma cannot be negative
+        sigma = pyro.deterministic("sigma_final",sigma) # Sigma cannot be negative
+                # removed sigma**2 to allow stability in parameter estimates. Negative values are avoided through softplus now
         intensity_matrix = qd._buildH(n_states, mu, sigma, delta)
     else:
         raise Exception(f"Please select one of {model_type}")
@@ -968,11 +970,15 @@ def get_original_params(posterior_samples, response_width, params_type = "Centra
         m = posterior_samples["m"]
         s = posterior_samples["s"]
 
+        m_si = posterior_samples["m_si"]
+        s_si = posterior_samples["s_si"]
+
+
         mu_r = posterior_samples["mu_r"]
         sigma_r = posterior_samples["sigma_r"]
 
         posterior_samples["mu"] = m[:,None,None] + s[:,None,None] * mu_r
-        posterior_samples["sigma"] = (m[:,None,None] + s[:,None,None] * sigma_r)**2 
+        posterior_samples["sigma"] = jax.nn.softplus(m_si[:,None,None] + s_si[:,None,None] * sigma_r) #(m[:,None,None] + s[:,None,None] * sigma_r)**2 
     
     p_0 = posterior_samples["phi_init"]
 
@@ -986,9 +992,10 @@ def get_original_params(posterior_samples, response_width, params_type = "Centra
 
     posterior_samples["phi_0"] = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width),(0,0)))
 
-    posterior_samples["mu"] = posterior_samples["mu"].mean(axis=0, keepdims=True)
-    posterior_samples["sigma_final"] = posterior_samples["sigma_final"].mean(axis=0, keepdims=True)
-    posterior_samples["phi_0"] = posterior_samples["phi_0"].mean(axis=0, keepdims=True)
+    # Commenting these out so that point estimate is not calculated. That way Bayesian model checks can be used.
+    # posterior_samples["mu"] = posterior_samples["mu"].mean(axis=0, keepdims=True)
+    # posterior_samples["sigma_final"] = posterior_samples["sigma_final"].mean(axis=0, keepdims=True)
+    # posterior_samples["phi_0"] = posterior_samples["phi_0"].mean(axis=0, keepdims=True)
 
     return posterior_samples
 

@@ -189,6 +189,7 @@ def _run_model(file_loc, data, version,
             arviz_data = az.from_numpyro(post_chain,
                                         coords=coords,
                                         dims=dims)
+            arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
             df_summary = az.summary(arviz_data, var_names=["mu", "phi_0", "sigma_final"]) #"sigma_final", "likl_rt", 
             
             #df_summary = (df_summary.reset_index(names="params")
@@ -290,7 +291,7 @@ def _run_model(file_loc, data, version,
                                                     )
         df_post_pred_all = pd.concat([samples["Samples"] for samples in post_pd_samples])
         df_post_pred_all.to_csv(f"export/posterior_predictive_{name}_{model_type}_{version}_{i}.csv")
-        arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
+        #arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
 
         with open(f'export/mcmc_samples_{name}_{model_type}_{version}_{i}.pkl', 'wb') as outp:
             pickle.dump(dict(
