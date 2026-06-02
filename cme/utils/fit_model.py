@@ -151,11 +151,11 @@ def _run_model(file_loc, data, version,
     
     def run_half_model(i, X, RT, ID):
         
-        min_RT_sec = RT.mean() - 3*RT.std()
+        min_RT_sec = np.clip(RT.mean() - 3*RT.std(), a_min=delta, a_max=None)
         max_RT_sec = RT.mean() + 3*RT.std()
         log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {min_RT_sec} to {max_RT_sec} secs")
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
-                                                        delta=0.1, data_samples=RT.shape, min_RT_sec = min_RT_sec, max_RT_sec = max_RT_sec,
+                                                        delta=delta, data_samples=RT.shape, min_RT_sec = min_RT_sec, max_RT_sec = max_RT_sec,
                                                         measurement_prob=measurement_prob, X=X, RT=None, n_samples=predictive_n,
                                                         params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                         likelihood_type=likelihood_type, sampling_type=sampling_type, 
@@ -179,7 +179,7 @@ def _run_model(file_loc, data, version,
             
             post_samples = post_chain.get_samples()
             coords = {
-                        "part_id": ID,
+                        "part_id": ID.squeeze(),
                     }
             dims = {
                         "mu_r": ["part_id"],
@@ -209,14 +209,14 @@ def _run_model(file_loc, data, version,
             df_summary = []
             for k in keys:
                 d = post_samples[k]
-                d = d.mean(axis=0)
+                d = d.mean(axis=(0))
                 ranges = [range(s) for s in d.shape]
                 names=[]
                 for r in iter.product(*ranges):
                     names.append(k + "[" + ",".join(str(n)  for n in r) + "]")
                 df_summary.append(pd.DataFrame(dict(
                     params = names,
-                    mean = d.flatten()
+                    mean = d.flatten(),
                 )))
             df_summary = pd.concat(df_summary).set_index("params")
         else:

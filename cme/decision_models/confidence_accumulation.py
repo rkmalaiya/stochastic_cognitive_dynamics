@@ -601,10 +601,17 @@ def transformed_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, M
 def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
     P_t = likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
     #P_t = npx.where(P_t <= 0, 0.00001, npx.log(P_t))
-    P_t = npx.where(P_t <= 0, 10e-12, P_t)
-    P_t = npx.where(npx.isnan(P_t), 10e-12, P_t)
+    # P_t = npx.where(P_t <= 0, 10e-12, P_t)
+    # P_t = npx.where(npx.isnan(P_t), 10e-12, P_t)
+    # P_t = npx.log(P_t)
+    # #pyro.deterministic("loglikl", P_t.sum(axis=-1)) #summing over trials
+    # return P_t.sum(axis=-1)
+    eps = 1e-12
+
+    P_t = npx.where(npx.isnan(P_t), eps, P_t)
+    P_t = npx.clip(P_t, eps, 1.0)
     P_t = npx.log(P_t)
-    #pyro.deterministic("loglikl", P_t.sum(axis=-1)) #summing over trials
+
     return P_t.sum(axis=-1)
 
 def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
@@ -1004,8 +1011,9 @@ def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, del
                             num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
     #guide = ag.AutoNormal(model)
-    guide = ag.AutoDiagonalNormal(model)
+    #guide = ag.AutoDiagonalNormal(model)
     #guide = ag.AutoMultivariateNormal(model)
+    guide = ag.AutoLowRankMultivariateNormal(model)
     #guide = ag.AutoDAIS(model)
     #guide = ag.AutoDelta(model)
 
