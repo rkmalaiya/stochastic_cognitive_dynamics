@@ -275,7 +275,7 @@ def _run_model(file_loc, data, version,
         phi_0_samples = post_samples["phi_0"][pred_idx,...]
 
         post_pd_samples = ca.sample_post_pred_params(n_states=n_states, response_width=response_width, 
-                                                     delta=0.1,
+                                                     delta=delta,
                                                      measurement_prob=measurement_prob,
                                                     X=X, 
                                                     #X=None,
