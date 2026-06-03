@@ -184,6 +184,8 @@ def _run_model(file_loc, data, version,
             dims = {
                         "mu_r": ["part_id"],
                         "sigma_r": ["part_id"],
+                        "mu": ["part_id"],
+                        "sigma_final": ["part_id"],
                         "phi_0": ["part_id"],
                     }
             arviz_data = az.from_numpyro(post_chain,
@@ -234,7 +236,7 @@ def _run_model(file_loc, data, version,
         
         df_phi = df_summary.filter(like="phi_0",axis=0)[["mean"]].reset_index(names="idx")
         df_t = df_phi.idx.str.split("[", expand=True)[1].str.split(",", expand=True)
-        df_phi[["part_id", "phi_0"]] = df_t[[0,2]].astype(int)
+        df_phi[["part_id", "phi_0"]] = df_t[[0,2]]#.astype(int)
         df_phi = df_phi.pivot(index="part_id", columns="phi_0", values="mean")
         
         #df_init_state_all = pd.concat([pd.DataFrame(i_s.squeeze()).reset_index().rename(columns={"index":"part_id"}).melt(id_vars="part_id", var_name="state", value_name="value").assign(param_id = i)
