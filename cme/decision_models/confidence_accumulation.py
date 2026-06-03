@@ -931,10 +931,10 @@ def predictive_model(RT_pred, n_states, response_width, delta, measurement_prob,
     Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, response_width=response_width, prob=measurement_prob, model_type = model_type)
     
     if model_type == "Markov":
-        intensity_matrix = dd._buildK(n_states, drift_rate, diffusion_rate)
+        intensity_matrix = dd._buildK(n_states, drift_rate, diffusion_rate, delta)
 
     elif model_type == "Quantum":
-        intensity_matrix = qd._buildH(n_states, drift_rate, diffusion_rate)
+        intensity_matrix = qd._buildH(n_states, drift_rate, diffusion_rate, delta)
     else:
         raise Exception(f"Please select one of {model_type}")
     
