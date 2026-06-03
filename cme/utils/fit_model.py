@@ -186,11 +186,11 @@ def _run_model(file_loc, data, version,
                         "sigma_r": ["part_id"],
                         "mu": ["part_id"],
                         "sigma_final": ["part_id"],
-                        "phi_0": ["part_id"],
+                        "phi_0": ["part_id"]
                     }
             arviz_data = az.from_numpyro(post_chain,
                                         coords=coords,
-                                        dims=dims)
+                                        dims=dims, log_likelihood=True)
             arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
             df_summary = az.summary(arviz_data, var_names=["mu", "phi_0", "sigma_final"]) #"sigma_final", "likl_rt", 
             
