@@ -1,3 +1,6 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0" # "0" "1"
+
 #from pyexpat import model
 from attr import dataclass
 #from dataclasses import dataclass, fields
@@ -148,10 +151,11 @@ def _run_model(file_loc, data, version,
     
     def run_half_model(i, X, RT, ID):
         
+        min_RT_sec = np.clip(RT.mean() - 3*RT.std(), a_min=delta, a_max=None)
         max_RT_sec = RT.mean() + 3*RT.std()
-        log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {max_RT_sec} secs")
+        log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {min_RT_sec} to {max_RT_sec} secs")
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
-                                                        delta=0.1, data_samples=RT.shape, max_RT_sec = max_RT_sec,
+                                                        delta=delta, data_samples=RT.shape, min_RT_sec = min_RT_sec, max_RT_sec = max_RT_sec,
                                                         measurement_prob=measurement_prob, X=X, RT=None, n_samples=predictive_n,
                                                         params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                         likelihood_type=likelihood_type, sampling_type=sampling_type, 
@@ -174,7 +178,21 @@ def _run_model(file_loc, data, version,
                                                     )
             
             post_samples = post_chain.get_samples()
-            df_summary = az.summary(az.from_numpyro(post_chain), var_names=["mu", "phi_0", "sigma_final"]) #"sigma_final", "likl_rt", 
+            coords = {
+                        "part_id": ID.squeeze(),
+                    }
+            dims = {
+                        "mu_r": ["part_id"],
+                        "sigma_r": ["part_id"],
+                        "mu": ["part_id"],
+                        "sigma_final": ["part_id"],
+                        "phi_0": ["part_id"]
+                    }
+            arviz_data = az.from_numpyro(post_chain,
+                                        coords=coords,
+                                        dims=dims, log_likelihood=True)
+            arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
+            df_summary = az.summary(arviz_data, var_names=["mu", "phi_0", "sigma_final"]) #"sigma_final", "likl_rt", 
             
             #df_summary = (df_summary.reset_index(names="params")
                             #.assign(param_name = lambda df: df.params.str.split("[",expand=True)[0])
@@ -193,14 +211,14 @@ def _run_model(file_loc, data, version,
             df_summary = []
             for k in keys:
                 d = post_samples[k]
-                d = d.mean(axis=0)
+                d = d.mean(axis=(0))
                 ranges = [range(s) for s in d.shape]
                 names=[]
                 for r in iter.product(*ranges):
                     names.append(k + "[" + ",".join(str(n)  for n in r) + "]")
                 df_summary.append(pd.DataFrame(dict(
                     params = names,
-                    mean = d.flatten()
+                    mean = d.flatten(),
                 )))
             df_summary = pd.concat(df_summary).set_index("params")
         else:
@@ -213,12 +231,12 @@ def _run_model(file_loc, data, version,
                     )
         df_summary_csv.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}_{i}.csv")
         total_samples = post_samples["mu"].shape[0]
-        pred_idx = np.random.default_rng().choice(total_samples, predictive_n)
+        pred_idx = np.random.default_rng().choice(total_samples, predictive_n, replace=False)
         log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i} after {((time.perf_counter() - start_time_sampling)/60):.2f} mins")
         
         df_phi = df_summary.filter(like="phi_0",axis=0)[["mean"]].reset_index(names="idx")
         df_t = df_phi.idx.str.split("[", expand=True)[1].str.split(",", expand=True)
-        df_phi[["part_id", "phi_0"]] = df_t[[0,2]].astype(int)
+        df_phi[["part_id", "phi_0"]] = df_t[[0,2]]#.astype(int)
         df_phi = df_phi.pivot(index="part_id", columns="phi_0", values="mean")
         
         #df_init_state_all = pd.concat([pd.DataFrame(i_s.squeeze()).reset_index().rename(columns={"index":"part_id"}).melt(id_vars="part_id", var_name="state", value_name="value").assign(param_id = i)
@@ -259,11 +277,12 @@ def _run_model(file_loc, data, version,
         phi_0_samples = post_samples["phi_0"][pred_idx,...]
 
         post_pd_samples = ca.sample_post_pred_params(n_states=n_states, response_width=response_width, 
-                                                     delta=0.1,
+                                                     delta=delta,
                                                      measurement_prob=measurement_prob,
                                                     X=X, 
                                                     #X=None,
-                                                    data_samples=RT.shape,max_RT_sec = max_RT_sec,
+                                                    data_samples=RT.shape, 
+                                                    min_RT_sec = min_RT_sec, max_RT_sec = max_RT_sec,
                                                     drift_rate_samples=drift_rate_samples, diffusion_rate_samples=diffusion_rate_samples, 
                                                     phi_0_samples=phi_0_samples,
                                                     #RT=RT,
@@ -274,7 +293,7 @@ def _run_model(file_loc, data, version,
                                                     )
         df_post_pred_all = pd.concat([samples["Samples"] for samples in post_pd_samples])
         df_post_pred_all.to_csv(f"export/posterior_predictive_{name}_{model_type}_{version}_{i}.csv")
-
+        #arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
 
         with open(f'export/mcmc_samples_{name}_{model_type}_{version}_{i}.pkl', 'wb') as outp:
             pickle.dump(dict(
