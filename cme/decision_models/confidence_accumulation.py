@@ -636,6 +636,8 @@ def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transitio
     elif (np.unique(RA).shape[0] == 3):
         P_t_n = (Mn @ phi_t)
         P_t = npx.where(RA[...,None,None]==1, P_t_c, npx.where(RA[...,None,None]==-1, P_t_w, P_t_n))
+    else:
+        raise Exception("Unique RA values unexpected: ", np.unique(RA))
 
     if model_type == "Markov":
         #P_t_c = (Mc @ phi_t).sum(axis=(-2,-1))
