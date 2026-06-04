@@ -631,7 +631,7 @@ def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transitio
 
     P_t_c = (Mc @ phi_t)
     P_t_w = (Mw @ phi_t)
-    if (np.unique(RA).shape[0] == 2):
+    if (np.unique(RA).shape[0] <= 2):
         P_t = npx.where(RA[...,None,None]==1, P_t_c, P_t_w)
     elif (np.unique(RA).shape[0] == 3):
         P_t_n = (Mn @ phi_t)
