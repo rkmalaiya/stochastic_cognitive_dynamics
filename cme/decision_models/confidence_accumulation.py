@@ -611,8 +611,8 @@ def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn
     P_t = npx.where(npx.isnan(P_t), eps, P_t)
     P_t = npx.clip(P_t, eps, 1.0)
     P_t = npx.log(P_t)
-
-    return P_t.sum(axis=-1)
+    #pyro.deterministic("loglikl", P_t.sum(axis=-1))
+    return P_t#.sum(axis=-1) For LOO and other model comparison, I need trialvise log-likelihood.
 
 def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
 
