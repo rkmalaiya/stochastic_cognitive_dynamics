@@ -28,13 +28,14 @@ def collect_inference_data(file_pre, part_pre, file_post, data_mod_ver):
                 subfile_id = fl_az.split(str(version)+"_")[1].removesuffix(".nc")
                 fl_df=part_pre + d + file_post + f"_{m}_{version}_{subfile_id}.csv"
                 post_smpl.append(az.from_netcdf(fl_az))#.assign_coords({"part_id": pl.read_csv(fl_df)["0"].to_numpy()}).posterior)
-                obs_data.append(az.from_netcdf(fl_az))#.assign_coords({"part_id": pl.read_csv(fl_df)["0"].to_numpy()}).observed_data )
-                log_likl.append(az.from_netcdf(fl_az))#.assign_coords({"part_id": pl.read_csv(fl_df)["0"].to_numpy()}).log_likelihood )
-                sample_stats.append(az.from_netcdf(fl_az))#.assign_coords({"part_id": pl.read_csv(fl_df)["0"].to_numpy()}).sample_stats)
-                return_dict[d+"_"+m+"_"+version] = az.InferenceData(posterior=xa.concat(post_smpl, dim="part_id"),
-                                                observed_data=xa.concat(obs_data, dim="part_id"),
-                                                log_likelihood=xa.concat(log_likl, dim="part_id"),
-                                                sample_stats=xa.concat(sample_stats, dim="part_id"))
+                #obs_data.append(az.from_netcdf(fl_az))#.assign_coords({"part_id": pl.read_csv(fl_df)["0"].to_numpy()}).observed_data )
+                #log_likl.append(az.from_netcdf(fl_az))#.assign_coords({"part_id": pl.read_csv(fl_df)["0"].to_numpy()}).log_likelihood )
+                #sample_stats.append(az.from_netcdf(fl_az))#.assign_coords({"part_id": pl.read_csv(fl_df)["0"].to_numpy()}).sample_stats)
+            return_dict[d+"_"+m] = xa.concat(post_smpl, dim="part_id")
+                # az.InferenceData(posterior=xa.concat(post_smpl, dim="part_id"),
+                #                                 observed_data=xa.concat(obs_data, dim="part_id"),
+                #                                 log_likelihood=xa.concat(log_likl, dim="part_id"),
+                #                                 sample_stats=xa.concat(sample_stats, dim="part_id"))
     return return_dict
 
 def collect_dataframes(file_pre, file_post, data_mod_ver, size=None, batch_size=0, header=True, is_glob=False):

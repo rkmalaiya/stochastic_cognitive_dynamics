@@ -5,6 +5,7 @@ import jax.scipy as sci
 import numpyro as pyro
 import cme.decision_models.quantum_discrete as qd
 import cme.decision_models.diffusion_discrete as dd
+from numpyro.infer.initialization import init_to_median
 import jax
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, SA, HMCECS, Predictive, SVI, Trace_ELBO
@@ -55,29 +56,66 @@ def centralized_parameters(I):
 def non_centralized_parameters(model_type, I):
     """
     I: Number of participants
-    
+    Model-specific priors for improved numerical stability
     """
-    m = pyro.sample("m", dist.Normal(2,1))
-    s = pyro.sample("s", dist.HalfNormal(1))
+    m = pyro.sample("m", dist.Normal(0.1,0.1))
+    #m = pyro.deterministic("m", 0.1)
+    s = pyro.sample("s", dist.HalfNormal(0.1))
 
-    m_si = pyro.sample("m_si", dist.Normal(0,1))
-    s_si = pyro.sample("s_si", dist.HalfNormal(1))
+    # Quantum models need tighter prior control on sigma scale
+    if model_type == "Quantum":
+        m_si = pyro.sample("m_si", dist.Normal(0.5, 0.5))  # Shifted to ensure positive softplus output
+        s_si = pyro.sample("s_si", dist.HalfNormal(0.05))  # Tighter to prevent extreme values
+    else:  # Markov
+        m_si = pyro.sample("m_si", dist.Normal(0, 1))
+        s_si = pyro.sample("s_si", dist.HalfNormal(0.1))
 
     with pyro.plate('I3', I, dim=-2):
         if model_type == "Markov":
-            mu_r = pyro.sample("mu_r", dist.Normal(0,1)) # Drift Rate
+            mu_r = pyro.sample("mu_r", dist.Normal(0.1,1)) # Drift Rate
+            mu = pyro.deterministic("mu", m + s * mu_r)
         elif model_type == "Quantum":
-            mu_r = pyro.sample("mu_r", dist.Normal(0,1)) # Drift Rate
+            mu_r = pyro.sample("mu_r", dist.Normal(0.1,1)) # Drift Rate
+            mu = pyro.deterministic("mu", jax.nn.softplus(m + s * mu_r))
        
         if model_type == "Markov":
-            sigma_r = pyro.sample("sigma_r", dist.Normal(0,1)) # Diffusion Rate
+            sigma_r = pyro.sample("sigma_r", dist.Normal(0,0.1)) # Diffusion Rate
         elif model_type == "Quantum":
-            sigma_r = pyro.sample("sigma_r", dist.Normal(0,1)) # Diffusion Rate
+            sigma_r = pyro.sample("sigma_r", dist.Normal(0,0.1)) # Diffusion Rate
 
-        mu = pyro.deterministic("mu", m + s * mu_r)
-        sigma = pyro.deterministic("sigma", jax.nn.softplus(m_si + s_si * sigma_r)) # To avoid sigma from exploding
-        #sigma = sigma**2
+        
+        sigma_base = jax.nn.softplus(m_si + s_si * sigma_r)
+        
+        # Ensure minimum floor for numerical stability in Quantum likelihood
+        if model_type == "Quantum":
+            sigma = pyro.deterministic("sigma", npx.clip(sigma_base, 0.01, None))
+        else:
+            sigma = pyro.deterministic("sigma", sigma_base)
     
+    return mu, sigma
+
+def participant_parameters(model_type, I):
+    with pyro.plate("I3", I, dim=-2):
+
+        if model_type == "Markov":
+            # drift
+            mu = pyro.sample("mu", dist.Normal(2.0, 0.5))
+
+            # extra diffusion; model() will later do abs(mu) + sigma
+            sigma_raw = pyro.sample("sigma_raw", dist.Normal(-1.0, 0.5))
+            sigma = pyro.deterministic("sigma", jax.nn.softplus(sigma_raw))
+
+        elif model_type == "Quantum":
+            # quantum drift / Hamiltonian directional term
+            mu = pyro.sample("mu", dist.Normal(2.0, 0.5))
+
+            # quantum sigma is used directly, so keep tighter at first
+            sigma_raw = pyro.sample("sigma_raw", dist.Normal(-0.5, 0.4))
+            sigma = pyro.deterministic("sigma", jax.nn.softplus(sigma_raw))
+
+        else:
+            raise Exception(f"Please select one of {model_type}")
+
     return mu, sigma
 
 def non_centralized_parameters_VI_delete(I):
@@ -606,9 +644,15 @@ def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn
     # P_t = npx.log(P_t)
     # #pyro.deterministic("loglikl", P_t.sum(axis=-1)) #summing over trials
     # return P_t.sum(axis=-1)
-    eps = 1e-12
+    eps = 1e-15
+    eps_nan = 1e-12 # having two different eps for debugging purposes.
 
-    P_t = npx.where(npx.isnan(P_t), eps, P_t)
+    pyro.deterministic("P_min", npx.min(P_t))
+    pyro.deterministic("P_max", npx.max(P_t))
+    pyro.deterministic("P_clip_low", npx.mean(P_t <= eps))
+    pyro.deterministic("P_clip_high", npx.mean(P_t >= 1.0))
+
+    P_t = npx.where(npx.isnan(P_t), eps_nan, P_t)
     P_t = npx.clip(P_t, eps, 1.0)
     P_t = npx.log(P_t)
     #pyro.deterministic("loglikl", P_t.sum(axis=-1))
@@ -679,6 +723,8 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
         mu, sigma = centralized_parameters(I)
     elif params_type == "NonCentralized":
         mu, sigma = non_centralized_parameters(model_type, I)
+    elif params_type == "ParticipantLevel":
+        mu, sigma = participant_parameters(model_type, I)
     else:
         raise Exception(f"Please select one of {params_type}")
 
@@ -688,8 +734,10 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
         intensity_matrix = dd._buildK(n_states, mu, sigma, delta)
 
     elif model_type == "Quantum":
-        sigma = pyro.deterministic("sigma_final",sigma) # Sigma cannot be negative
-                # removed sigma**2 to allow stability in parameter estimates. Negative values are avoided through softplus now
+        # For Quantum: ensure sigma > 0 and has numerical stability
+        # Consider making sigma magnitude scale with mu for better parameter coupling
+        sigma_quantum = npx.clip(npx.abs(mu) * 0.5 + sigma, 0.01, None)
+        sigma = pyro.deterministic("sigma_final", sigma_quantum)
         intensity_matrix = qd._buildH(n_states, mu, sigma, delta)
     else:
         raise Exception(f"Please select one of {model_type}")
@@ -1046,8 +1094,13 @@ def sample_posterior_params(DT, X, n_states, start_width, response_width, delta,
     #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
     #mcmc_chain.run(cu.get_rng(), n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
 
-    kernel = NUTS(model, forward_mode_differentiation=False)
-    mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains, chain_method="vectorized" if jax.default_backend() == "gpu" else "parallel")
+    # Adaptive mass matrix and increased target_accept_prob for better convergence with non-centered params
+    kernel = NUTS(model, forward_mode_differentiation=False, adapt_mass_matrix=True, adapt_step_size = True, 
+                  dense_mass=True, init_strategy=init_to_median(num_samples=20),
+                  target_accept_prob=0.8 if model_type=="Quantum" else 0.9)
+    mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains, 
+                      chain_method="vectorized" if jax.default_backend() == "gpu" else "parallel",
+                      progress_bar=True, jit_model_args=False)
     mcmc_chain.run(cu.get_rng(), n_states, start_width, response_width, delta, X, DT, measurement_prob, 
                    params_type = params_type, transition_type=transition_type, 
                    likelihood_type=likelihood_type, model_type=model_type,

@@ -178,6 +178,13 @@ def _run_model(file_loc, data, version,
                                                     )
             
             post_samples = post_chain.get_samples()
+
+            # post_samples_chain = post_chain.get_samples(group_by_chain=True)
+
+            # for k in ["m", "s", "m_si", "s_si", "mu", "mu_r", "sigma", "sigma_r", "sigma_final"]:
+            #     if k in post_samples_chain:
+            #         print("******",k,": " ,post_samples_chain[k].shape)
+
             coords = {
                         "part_id": ID.squeeze(),
                     }
@@ -186,13 +193,18 @@ def _run_model(file_loc, data, version,
                         "sigma_r": ["part_id"],
                         "mu": ["part_id"],
                         "sigma_final": ["part_id"],
-                        "phi_0": ["part_id"]
+                        "phi_0": ["part_id"],
+                        "likl_rt": ["part_id"],
+                        "phi_conc": ["part_id"],
+                        "sigma": ["part_id"],
+                        "phi_init": ["part_id"],
+                        "likelihood": ["part_id"]
                     }
             arviz_data = az.from_numpyro(post_chain,
                                         coords=coords,
                                         dims=dims, log_likelihood=True)
             arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
-            df_summary = az.summary(arviz_data, var_names=["mu", "phi_0", "sigma_final"]) #"sigma_final", "likl_rt", 
+            df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"]) #"sigma_final", "likl_rt", using phi_init instead of phi_0 because phi_0 is padded with zeros for response states. If unpadded, the likelihood function gives a high likelihood for even 0 (or delta) response times.
             
             #df_summary = (df_summary.reset_index(names="params")
                             #.assign(param_name = lambda df: df.params.str.split("[",expand=True)[0])
@@ -234,9 +246,13 @@ def _run_model(file_loc, data, version,
         pred_idx = np.random.default_rng().choice(total_samples, predictive_n, replace=False)
         log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i} after {((time.perf_counter() - start_time_sampling)/60):.2f} mins")
         
-        df_phi = df_summary.filter(like="phi_0",axis=0)[["mean"]].reset_index(names="idx")
-        df_t = df_phi.idx.str.split("[", expand=True)[1].str.split(",", expand=True)
-        df_phi[["part_id", "phi_0"]] = df_t[[0,2]]#.astype(int)
+        df_phi = df_summary.filter(like="phi_init",axis=0)[["mean"]].reset_index(names="idx")
+        try:
+            df_t = df_phi.idx.str.split("[", expand=True).loc[:,1].str.split(",", expand=True)
+        except:
+            print(df_phi.idx.str.split("[", expand=True))
+
+        df_phi[["part_id", "phi_0"]] = df_t[[0,3]]#.astype(int)
         df_phi = df_phi.pivot(index="part_id", columns="phi_0", values="mean")
         
         #df_init_state_all = pd.concat([pd.DataFrame(i_s.squeeze()).reset_index().rename(columns={"index":"part_id"}).melt(id_vars="part_id", var_name="state", value_name="value").assign(param_id = i)
