@@ -1,0 +1,9 @@
+README.md
+setup.py
+Stochastic_Cognitive_Dynamics.egg-info/PKG-INFO
+Stochastic_Cognitive_Dynamics.egg-info/SOURCES.txt
+Stochastic_Cognitive_Dynamics.egg-info/dependency_links.txt
+Stochastic_Cognitive_Dynamics.egg-info/not-zip-safe
+Stochastic_Cognitive_Dynamics.egg-info/top_level.txt
+cme/__init__.py
+test/test_confidence_accumulation.py
