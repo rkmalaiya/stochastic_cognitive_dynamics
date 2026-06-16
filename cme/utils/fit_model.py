@@ -2,8 +2,8 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0" # "0" "1"
 
 #from pyexpat import model
-from attr import dataclass
-#from dataclasses import dataclass, fields
+from dataclasses import dataclass, field
+#from attr import dataclass  # Removed external dependency
 import cme.decision_models.confidence_accumulation as ca
 import cme.decision_models.diffusion_discrete as dd
 import cme.decision_models.quantum_discrete as qd
@@ -39,7 +39,7 @@ class ModelDetails:
 
     folder:str = "data"
     file_pre:str = ""
-    data:dict = {} #key,(RT,X) 
+    data:dict = field(default_factory=dict) #key,(RT,X) 
     version:float = 0.1
     n_states:int = 11
     start_width:int = None # None value will be automatically calculated.
@@ -50,15 +50,17 @@ class ModelDetails:
     samples_n: int = 50
     predictive_n: int = None
     batch_size: int = None
+    subsample_size: int = None  # NEW: For MCMC subsampling in large datasets
+    use_hmcecs: bool = True  # NEW: Use HMCECS kernel instead of NUTS
     params_type:str = "Centralized|NonCentralized"
-    model_type:list = ["Markov","Quantum"]
+    model_type:list = field(default_factory=lambda: ["Markov","Quantum"])
     transition_type:str = "RT|TIMESTEP"
     likelihood_type:str = "SINGLE" #|JOINT
     sampling_type:str = "GEN"
     estimation_type:str = "MCMC|VI"
     execution_type:str = "Both" #Posterior|Predictive|Both
     scale: str = None #"None|Log|SQRT"
-    conf_scale: list = [None,None] #"None|(add_scale, mul_scale)"
+    conf_scale: list = field(default_factory=lambda: [None,None]) #"None|(add_scale, mul_scale)"
     csv_header:bool = False
     is_test:bool = False
     is_parallel:bool=False
@@ -84,7 +86,8 @@ def fit_model(model: ModelDetails):
                                     model.params_type, model_type, model.transition_type, model.likelihood_type, 
                                     model.sampling_type, model.estimation_type, model.execution_type,
                                     model.num_warmup, model.samples_n, model.predictive_n, model.batch_size, model.is_test, 
-                                    model.scale, conf_scale, model.csv_header, model.is_parallel) 
+                                    model.scale, conf_scale, model.csv_header, model.is_parallel,
+                                    model.subsample_size, model.use_hmcecs)  # NEW parameters
                                                 
                                     for data, (model_type, n_states, response_width, conf_scale) in iter.product(model.data, zip(model.model_type, model.n_states, model.response_width, model.conf_scale)))
     log.info(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
@@ -92,8 +95,9 @@ def fit_model(model: ModelDetails):
 
 def _run_model(file_loc, data, version, 
             n_states, start_width, response_width, delta, measurement_prob, 
-            params_type, model_type, transition_type, likelihood_type, sampling_type, estimation_type,execution_type,
-            num_warmup, samples_n, predictive_n, batch_size, is_test, scale, conf_scale, csv_header, is_parallel):
+            params_type, model_type, transition_type, likelihood_type, sampling_type, estimation_type, execution_type,
+            num_warmup, samples_n, predictive_n, batch_size, is_test, scale, conf_scale, csv_header, is_parallel,
+            subsample_size=None, use_hmcecs=True):  # NEW parameters
     
     start_width1 = (n_states-2*response_width)//2
     if start_width == None or start_width == 0:
@@ -171,11 +175,11 @@ def _run_model(file_loc, data, version,
         
         if estimation_type == "MCMC":
             post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
-                                                    delta=delta,measurement_prob=measurement_prob,
+                                                    delta=delta, measurement_prob=measurement_prob,
                                                     num_warmup=num_warmup, samples_n=samples_n,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
-                                                    likelihood_type=likelihood_type, num_chains=4 
-                                                    )
+                                                    likelihood_type=likelihood_type, num_chains=4,
+                                                    subsample_size=subsample_size, use_hmcecs=use_hmcecs)  # NEW parameters
             
             post_samples = post_chain.get_samples()
             coords = {

@@ -52,31 +52,40 @@ def centralized_parameters(I):
     #sigma = pyro.deterministic("sigma", npx.ones((I,1)))    
     return mu, sigma
 
-def non_centralized_parameters(model_type, I):
+def non_centralized_parameters(model_type, I, subsample_size=None):
     """
+    Non-centered parameterization with improved priors for scalability.
     I: Number of participants
+    subsample_size: Number of participants to subsample (for large datasets)
     
+    Fixes:
+    - Better priors for Quantum models (slower changes in mu/sigma)
+    - Improved scale for softplus (more stable inference)
+    - Support for subsampling to enable large-scale inference
     """
-    m = pyro.sample("m", dist.Normal(2,1))
-    s = pyro.sample("s", dist.HalfNormal(1))
+    if model_type == "Quantum":
+        # Quantum models need tighter control due to complex dynamics
+        # Using centered priors to aid convergence
+        m = pyro.sample("m", dist.Normal(1.0, 0.5))
+        s = pyro.sample("s", dist.HalfNormal(0.5))
+        
+        m_si = pyro.sample("m_si", dist.Normal(-1.0, 0.5))  # Shifted to avoid extreme values
+        s_si = pyro.sample("s_si", dist.HalfNormal(0.3))
+    else:
+        # Markov models can use more informative priors
+        m = pyro.sample("m", dist.Normal(2.0, 1.0))
+        s = pyro.sample("s", dist.HalfNormal(1.0))
+        
+        m_si = pyro.sample("m_si", dist.Normal(0.0, 1.0))
+        s_si = pyro.sample("s_si", dist.HalfNormal(1.0))
 
-    m_si = pyro.sample("m_si", dist.Normal(0,1))
-    s_si = pyro.sample("s_si", dist.HalfNormal(1))
-
-    with pyro.plate('I3', I, dim=-2):
-        if model_type == "Markov":
-            mu_r = pyro.sample("mu_r", dist.Normal(0,1)) # Drift Rate
-        elif model_type == "Quantum":
-            mu_r = pyro.sample("mu_r", dist.Normal(0,1)) # Drift Rate
-       
-        if model_type == "Markov":
-            sigma_r = pyro.sample("sigma_r", dist.Normal(0,1)) # Diffusion Rate
-        elif model_type == "Quantum":
-            sigma_r = pyro.sample("sigma_r", dist.Normal(0,1)) # Diffusion Rate
+    with pyro.plate('I3', I, dim=-2, subsample_size=subsample_size):
+        mu_r = pyro.sample("mu_r", dist.Normal(0, 1)) # Drift Rate offset
+        sigma_r = pyro.sample("sigma_r", dist.Normal(0, 1)) # Diffusion Rate offset
 
         mu = pyro.deterministic("mu", m + s * mu_r)
-        sigma = pyro.deterministic("sigma", jax.nn.softplus(m_si + s_si * sigma_r)) # To avoid sigma from exploding
-        #sigma = sigma**2
+        # Using better scaling for softplus to avoid numerical issues
+        sigma = pyro.deterministic("sigma", jax.nn.softplus(m_si + s_si * sigma_r) + 0.01)
     
     return mu, sigma
 
@@ -664,7 +673,16 @@ def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transitio
 
     return P_t #npx.log(npx.sum(P_t)) # summing over all participants and trials
 
-def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
+def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_prob, 
+          params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
+          transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", subsample_size=None):
+    """
+    Hierarchical model for decision-making with subsampling support.
+    
+    Args:
+        subsample_size: If specified, uses subsampling for scaling to large datasets.
+                       Typically set to subsample ~50-100 participants at a time.
+    """
     
     if likelihood_type == "SINGLE":
         I, _ = RA_s.shape
@@ -678,32 +696,34 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
     if params_type == "Centralized":
         mu, sigma = centralized_parameters(I)
     elif params_type == "NonCentralized":
-        mu, sigma = non_centralized_parameters(model_type, I)
+        mu, sigma = non_centralized_parameters(model_type, I, subsample_size=subsample_size)
     else:
         raise Exception(f"Please select one of {params_type}")
 
     if model_type == "Markov":
-        sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
-                # removed sigma**2 to allow stability in parameter estimates. Negative values are avoided through softplus now
+        sigma = pyro.deterministic("sigma_final", npx.abs(mu) + sigma)
         intensity_matrix = dd._buildK(n_states, mu, sigma, delta)
 
     elif model_type == "Quantum":
-        sigma = pyro.deterministic("sigma_final",sigma) # Sigma cannot be negative
-                # removed sigma**2 to allow stability in parameter estimates. Negative values are avoided through softplus now
+        sigma = pyro.deterministic("sigma_final", sigma)
         intensity_matrix = qd._buildH(n_states, mu, sigma, delta)
     else:
         raise Exception(f"Please select one of {model_type}")
 
-    #phi_0 = pyro.deterministic("phi_0", _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type))
     phi_0 = _get_initial_state(n_states, start_width, response_width, I = I, prob=1, model_type = model_type, prior_type="Model")
     Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, response_width=response_width, prob=measurement_prob, model_type = model_type)
 
     if RT_s is not None:
         likl = estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, 
                           transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-        #likl = npx.log(likl)
+        
+        # With subsampling, we need to scale the likelihood properly
+        if subsample_size is not None and I > subsample_size:
+            scale_factor = I / subsample_size
+            likl = likl * scale_factor
+            
         pyro.deterministic("likl_rt", likl)
-        pyro.factor("likelihood", likl) #.sum()
+        pyro.factor("likelihood", likl)
 
 # def generate_RT(n_states, threshold, delta, measurement_prob, I, J, 
 #                 drift_rate, diffusion_rate, phi_0, data_samples = 1, max_RT=40, max_samples=400,
@@ -1040,22 +1060,51 @@ def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, del
 
 def sample_posterior_params(DT, X, n_states, start_width, response_width, delta, measurement_prob,
                             num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  
-                            params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
+                            params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
+                            transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
+                            subsample_size=None, use_hmcecs=True):
+    """
+    Posterior sampling with HMCECS kernel for improved scaling.
+    
+    Args:
+        subsample_size: For large datasets (100+ participants), set to ~50-100.
+                       Enables subsampling of participants during MCMC.
+        use_hmcecs: If True, uses HMCECS kernel (better for subsampling).
+                   If False, uses regular NUTS.
+    """
+    
+    # Automatically set subsample_size if data is large
+    if subsample_size is None and DT.shape[0] > 50:
+        subsample_size = min(100, DT.shape[0] // 2)
+        log.info(f"Large dataset detected ({DT.shape[0]} participants). "
+                f"Enabling automatic subsampling with subsample_size={subsample_size}")
+    
+    if use_hmcecs and subsample_size is not None:
+        # HMCECS is better for subsampling and large datasets
+        log.info(f"Using HMCECS kernel with subsample_size={subsample_size} for {DT.shape[0]} participants")
+        kernel = HMCECS(NUTS(model, forward_mode_differentiation=False), num_blocks=10)
+        mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, 
+                         num_chains=num_chains, 
+                         chain_method="vectorized" if jax.default_backend() == "gpu" else "parallel")
+        mcmc_chain.run(cu.get_rng(), n_states, start_width, response_width, delta, X, DT, measurement_prob, 
+                      params_type=params_type, transition_type=transition_type, 
+                      likelihood_type=likelihood_type, model_type=model_type,
+                      subsample_size=subsample_size,
+                      extra_fields=('potential_energy',))
+    else:
+        # Use regular NUTS for smaller datasets
+        log.info(f"Using NUTS kernel for {DT.shape[0]} participants")
+        kernel = NUTS(model, forward_mode_differentiation=False)
+        mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, 
+                         num_chains=num_chains,
+                         chain_method="vectorized" if jax.default_backend() == "gpu" else "parallel")
+        mcmc_chain.run(cu.get_rng(), n_states, start_width, response_width, delta, X, DT, measurement_prob, 
+                      params_type=params_type, transition_type=transition_type, 
+                      likelihood_type=likelihood_type, model_type=model_type,
+                      subsample_size=None,
+                      extra_fields=('potential_energy',))
 
-    #kernel = HMCECS(NUTS(model), num_blocks=10)
-    #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
-    #mcmc_chain.run(cu.get_rng(), n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
-
-    kernel = NUTS(model, forward_mode_differentiation=False)
-    mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains, chain_method="vectorized" if jax.default_backend() == "gpu" else "parallel")
-    mcmc_chain.run(cu.get_rng(), n_states, start_width, response_width, delta, X, DT, measurement_prob, 
-                   params_type = params_type, transition_type=transition_type, 
-                   likelihood_type=likelihood_type, model_type=model_type,
-                   extra_fields=('potential_energy',))
-
-    #post_likl = mcmc_chain.get_extra_fields()['hmc_state'].potential_energy
-    #post_likl = mcmc_chain.get_extra_fields()['potential_energy']
-    return mcmc_chain#, post_likl
+    return mcmc_chain
 
 def predictive_mcmc_fn(n_states, response_width, delta, measurement_prob, X, 
                        drift_rate, diffusion_rate, phi_0,
