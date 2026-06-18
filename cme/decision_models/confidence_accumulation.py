@@ -53,46 +53,87 @@ def centralized_parameters(I):
     #sigma = pyro.deterministic("sigma", npx.ones((I,1)))    
     return mu, sigma
 
-def non_centralized_parameters(model_type, I):
-    """
-    I: Number of participants
-    Model-specific priors for improved numerical stability
-    """
-    m = pyro.sample("m", dist.Normal(0.1,0.1))
-    #m = pyro.deterministic("m", 0.1)
-    s = pyro.sample("s", dist.HalfNormal(0.1))
+# def non_centralized_parameters(model_type, I):
+#     """
+#     I: Number of participants
+#     Model-specific priors for improved numerical stability
+#     """
+#     m = pyro.sample("m", dist.Normal(0.1,0.1))
+#     #m = pyro.deterministic("m", 0.1)
+#     s = pyro.sample("s", dist.HalfNormal(0.1))
 
-    # Quantum models need tighter prior control on sigma scale
-    if model_type == "Quantum":
-        m_si = pyro.sample("m_si", dist.Normal(0.5, 0.5))  # Shifted to ensure positive softplus output
-        s_si = pyro.sample("s_si", dist.HalfNormal(0.05))  # Tighter to prevent extreme values
-    else:  # Markov
-        m_si = pyro.sample("m_si", dist.Normal(0, 1))
-        s_si = pyro.sample("s_si", dist.HalfNormal(0.1))
+#     # Quantum models need tighter prior control on sigma scale
+#     if model_type == "Quantum":
+#         m_si = pyro.sample("m_si", dist.Normal(0.5, 0.5))  # Shifted to ensure positive softplus output
+#         s_si = pyro.sample("s_si", dist.HalfNormal(0.05))  # Tighter to prevent extreme values
+#     else:  # Markov
+#         m_si = pyro.sample("m_si", dist.Normal(0, 1))
+#         s_si = pyro.sample("s_si", dist.HalfNormal(0.1))
 
-    with pyro.plate('I3', I, dim=-2):
-        if model_type == "Markov":
-            mu_r = pyro.sample("mu_r", dist.Normal(0.1,1)) # Drift Rate
-            mu = pyro.deterministic("mu", m + s * mu_r)
-        elif model_type == "Quantum":
-            mu_r = pyro.sample("mu_r", dist.Normal(0.1,1)) # Drift Rate
-            mu = pyro.deterministic("mu", jax.nn.softplus(m + s * mu_r))
+#     with pyro.plate('I3', I, dim=-2):
+#         if model_type == "Markov":
+#             mu_r = pyro.sample("mu_r", dist.Normal(0.1,1)) # Drift Rate
+#             mu = pyro.deterministic("mu", m + s * mu_r)
+#         elif model_type == "Quantum":
+#             mu_r = pyro.sample("mu_r", dist.Normal(0.1,1)) # Drift Rate
+#             mu = pyro.deterministic("mu", jax.nn.softplus(m + s * mu_r))
        
-        if model_type == "Markov":
-            sigma_r = pyro.sample("sigma_r", dist.Normal(0,0.1)) # Diffusion Rate
-        elif model_type == "Quantum":
-            sigma_r = pyro.sample("sigma_r", dist.Normal(0,0.1)) # Diffusion Rate
+#         if model_type == "Markov":
+#             sigma_r = pyro.sample("sigma_r", dist.Normal(0,0.1)) # Diffusion Rate
+#         elif model_type == "Quantum":
+#             sigma_r = pyro.sample("sigma_r", dist.Normal(0,0.1)) # Diffusion Rate
 
         
-        sigma_base = jax.nn.softplus(m_si + s_si * sigma_r)
+#         sigma_base = jax.nn.softplus(m_si + s_si * sigma_r)
         
-        # Ensure minimum floor for numerical stability in Quantum likelihood
+#         # Ensure minimum floor for numerical stability in Quantum likelihood
+#         if model_type == "Quantum":
+#             sigma = pyro.deterministic("sigma", npx.clip(sigma_base, 0.01, None))
+#         else:
+#             sigma = pyro.deterministic("sigma", sigma_base)
+    
+#     return mu, sigma
+
+
+def non_centralized_parameters(model_type, I):
+    # Fixed prior location/scale for drift
+    m = pyro.deterministic("m", npx.asarray(0.1))
+    s = pyro.deterministic("s", npx.asarray(0.1))
+
+    # Fixed prior location/scale for sigma
+    if model_type == "Quantum":
+        m_si = pyro.deterministic("m_si", npx.asarray(0.5))
+        s_si = pyro.deterministic("s_si", npx.asarray(0.05))
+    else:  # Markov
+        m_si = pyro.deterministic("m_si", npx.asarray(0.0))
+        s_si = pyro.deterministic("s_si", npx.asarray(0.1))
+
+    with pyro.plate("I3", I, dim=-2):
+
+        # Drift
+        if model_type == "Markov":
+            mu_r = pyro.sample("mu_r", dist.Normal(0.1, 1.0))
+            mu = pyro.deterministic("mu", m + s * mu_r)
+
+        elif model_type == "Quantum":
+            mu_r = pyro.sample("mu_r", dist.Normal(0.1, 1.0))
+            mu = pyro.deterministic("mu", jax.nn.softplus(m + s * mu_r))
+
+        else:
+            raise Exception(f"Please select one of {model_type}")
+
+        # Diffusion
+        sigma_r = pyro.sample("sigma_r", dist.Normal(0.0, 0.1))
+
+        sigma_base = jax.nn.softplus(m_si + s_si * sigma_r)
+
         if model_type == "Quantum":
             sigma = pyro.deterministic("sigma", npx.clip(sigma_base, 0.01, None))
         else:
             sigma = pyro.deterministic("sigma", sigma_base)
-    
+
     return mu, sigma
+
 
 def participant_parameters(model_type, I):
     with pyro.plate("I3", I, dim=-2):

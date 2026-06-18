@@ -156,9 +156,19 @@ def _get_initial_state(n_states, response_width, I=1, prob=1,sub_sample_size=Non
     #    phi_0 = npy.sample("phi_0", dist.Dirichlet((npx.ones(n_states)[:,None])/n_states)) # Initial State
 
     
-    with npy.plate('I1', I, dim=-4,subsample_size=sub_sample_size):
-        with npy.plate('S', n_states - 2*response_width, dim=-1):
-            conc = npy.sample("phi_conc", dist.Beta(5,5))+0.5 #to avoid 0
+    # with npy.plate('I1', I, dim=-4,subsample_size=sub_sample_size):
+    #     with npy.plate('S', n_states - 2*response_width, dim=-1):
+    #         conc = npy.sample("phi_conc", dist.Beta(5,5))+1 #to avoid 0
+
+    n_inner = n_states - 2 * response_width
+
+    # fixed concentration, but still saved as "phi_conc"
+    conc = npy.deterministic(
+        "phi_conc",
+        npx.ones((I, 1, 1, n_inner))
+    )
+
+    #conc = npx.ones((I,1,1,n_states - 2 * response_width))
 
     with npy.plate('I2', I, dim=-3,subsample_size=sub_sample_size):
         p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State

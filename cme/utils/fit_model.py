@@ -186,7 +186,7 @@ def _run_model(file_loc, data, version,
             #         print("******",k,": " ,post_samples_chain[k].shape)
 
             coords = {
-                        "part_id": ID.squeeze(),
+                        "part_id": ID.reshape(-1),#.squeeze(),
                     }
             dims = {
                         "mu_r": ["part_id"],
@@ -198,12 +198,15 @@ def _run_model(file_loc, data, version,
                         "phi_conc": ["part_id"],
                         "sigma": ["part_id"],
                         "phi_init": ["part_id"],
-                        "likelihood": ["part_id"]
+                        "likelihood": ["part_id"],
+                        "RT":["part_id"]
                     }
             arviz_data = az.from_numpyro(post_chain,
                                         coords=coords,
                                         dims=dims, log_likelihood=True)
-            arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
+            
+            obs_idata = az.from_dict({"observed_data": {"RT": RT}}, coords=coords, dims=dims)
+            arviz_data["observed_data"] = obs_idata["observed_data"]
             df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"]) #"sigma_final", "likl_rt", using phi_init instead of phi_0 because phi_0 is padded with zeros for response states. If unpadded, the likelihood function gives a high likelihood for even 0 (or delta) response times.
             
             #df_summary = (df_summary.reset_index(names="params")
@@ -242,7 +245,7 @@ def _run_model(file_loc, data, version,
                             .assign(dims = lambda df:df.params.str.split("[", expand=True)[1].str.removesuffix("]")) 
                     )
         df_summary_csv.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}_{i}.csv")
-        total_samples = post_samples["mu"].shape[0]
+        total_samples = post_samples["mu"].shape[0] # Numpyro merges the chain and draws dimensions
         pred_idx = np.random.default_rng().choice(total_samples, predictive_n, replace=False)
         log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i} after {((time.perf_counter() - start_time_sampling)/60):.2f} mins")
         
@@ -284,6 +287,7 @@ def _run_model(file_loc, data, version,
         pd.DataFrame(mean_resp_conf[...,0,0]).reset_index(names="part_id").to_csv(f"export/mean_resp_conf_{name}_{model_type}_{version}_{i}.csv")
         
         if execution_type == "Posterior":
+            arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
             return None
 
         log.info(f"Starting Posterior Predictive Sampling_{name}_{model_type}_{version}_{i}")
@@ -309,7 +313,11 @@ def _run_model(file_loc, data, version,
                                                     )
         df_post_pred_all = pd.concat([samples["Samples"] for samples in post_pd_samples])
         df_post_pred_all.to_csv(f"export/posterior_predictive_{name}_{model_type}_{version}_{i}.csv")
-        #arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
+        pp_rt = np.array([s["Samples"]["RT"].values for s in post_pd_samples])
+        
+        pp_idata = az.from_dict({"posterior_predictive": {"RT": pp_rt.reshape((-1,*RT.shape))[np.newaxis, ...]}}, coords=coords, dims=dims)
+        arviz_data["posterior_predictive"] = pp_idata["posterior_predictive"]
+        arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
 
         with open(f'export/mcmc_samples_{name}_{model_type}_{version}_{i}.pkl', 'wb') as outp:
             pickle.dump(dict(

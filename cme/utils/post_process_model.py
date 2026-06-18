@@ -71,7 +71,7 @@ def collect_dataframes(file_pre, file_post, data_mod_ver, size=None, batch_size=
 def collect_response_from_model_output(folder, data_mod_ver, batch_size=0):
     def make_dataframe(arr, indicator, folder, dataset, model, version):
 
-        return (pd.DataFrame(arr.squeeze())
+        return (pd.DataFrame(np.atleast_1d(arr.squeeze()))
                 .assign(dataset = dataset, model = model,
                         file = indicator.replace(folder+"/mcmc_samples_","").removesuffix(".pkl"),
                         subfile_id = indicator.split(f"{version}_")[1].removesuffix(".pkl")
