@@ -9,3 +9,4 @@ examples/export
 *.pkl
 *checkpoint*
 *.gif
+*.venv_ds*
