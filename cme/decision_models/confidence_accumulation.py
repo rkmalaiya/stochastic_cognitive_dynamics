@@ -11,6 +11,7 @@ import numpyro.infer.autoguide as ag
 from jax import lax
 import arviz as az 
 from numpyro.distributions import constraints
+from numpyro.infer.initialization import init_to_median
 
 import numpy as np 
 import pandas as pd
@@ -568,14 +569,14 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
     if model_type == "Markov":
         sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
                 # removed sigma**2 to allow stability in parameter estimates. Negative values are avoided through softplus now
-        intensity_matrix = dd._buildK(n_states, mu, sigma, delta)
+        intensity_matrix = diffusion_buildK(n_states, mu, sigma, delta)
 
     elif model_type == "Quantum":
         # For Quantum: ensure sigma > 0 and has numerical stability
         # Consider making sigma magnitude scale with mu for better parameter coupling
         sigma_quantum = npx.clip(npx.abs(mu) * 0.5 + sigma, 0.01, None)
         sigma = pyro.deterministic("sigma_final", sigma_quantum)
-        intensity_matrix = qd._buildH(n_states, mu, sigma, delta)
+        intensity_matrix = quantum_buildH(n_states, mu, sigma, delta)
     else:
         raise Exception(f"Please select one of {model_type}")
 
