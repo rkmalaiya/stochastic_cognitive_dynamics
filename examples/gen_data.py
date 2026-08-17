@@ -1,4 +1,10 @@
 # %%
+import os
+import sys
+
+current_directory = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(current_directory))
+
 from cme.simulators import diffusion_random_walk as rw
 from numpy import *
 from scipy.stats import *
@@ -7,8 +13,12 @@ from matplotlib import pyplot as plt
 from joblib import Parallel, delayed
 import numpy as np
 
+data_folder = f"{current_directory}/data"
+os.makedirs(data_folder, exist_ok=True)
+
 # Here theta is the number of states being modeled.
-theta, alpha, tau, sigma, Is, J = 10, 1.5, 0.01, 1, (10,), 30#(50,100,200)#,1000) 
+theta, alpha, tau, sigma, I, J = 10, 1.5, 0.01, 1, 2, 5#(50,100,200)#,1000)
+Is = (I//2,)
 # RT_variability
 v_p_s = {#"0_2":asarray([0.02]),
        #"0_5":asarray([0.05]),
@@ -68,14 +78,14 @@ v_i_s = asarray([1]) # No Effect
 def sim_data(v_i_s, k, v_p, I):
     print(f"********* Starting process {k} for sample {I}")
     #RT, X, v_arr = rw.gen_RT_X_mat(theta, alpha, tau, sigma, v_p, v_i_s, I=I,J=10, process="Wiener", initial="Any", njobs=60)  
-    RT, X, v_arr, tr_arr = rw.gen_RT_X_mat(theta, alpha, tau, sigma, v_p, I=I,J=J, process="Wiener", initial="Any", njobs=60)  
+    RT, X, v_arr, tr_arr = rw.gen_RT_X_mat(theta, alpha, tau, sigma, v_p, I=I,J=J, process="Wiener", initial="Any", njobs=1)
     RT = RT + lognorm(0.01).rvs(1)[0]
-    savetxt(f"data/sim_{k}_{I}_rt.csv", RT, delimiter=",")
-    savetxt(f"data/sim_{k}_{I}_ra.csv", X, delimiter=",")
+    savetxt(f"{data_folder}/sim_{k}_{I}_rt.csv", RT, delimiter=",")
+    savetxt(f"{data_folder}/sim_{k}_{I}_ra.csv", X, delimiter=",")
     if(len(asarray(v_arr).squeeze().shape)> 2):
-        savetxt(f"data/sim_{k}_{I}_drift.csv", asarray(v_arr).squeeze().mean(axis=-1), delimiter=",")
+        savetxt(f"{data_folder}/sim_{k}_{I}_drift.csv", asarray(v_arr).squeeze().mean(axis=-1), delimiter=",")
     else: 
-        savetxt(f"data/sim_{k}_{I}_drift.csv", asarray(v_arr).squeeze(), delimiter=",")
+        savetxt(f"{data_folder}/sim_{k}_{I}_drift.csv", atleast_1d(asarray(v_arr).squeeze()), delimiter=",")
     
     
 
@@ -89,16 +99,16 @@ def sim_data(v_i_s, k, v_p, I):
 import itertools
 for I in Is:
        for k1,k2 in itertools.islice(itertools.pairwise(v_p_s.keys()),0, None, 2):
-              rt1 = loadtxt(f"data/sim_{k1}_{I}_rt.csv", delimiter=",")
-              rt2 = loadtxt(f"data/sim_{k2}_{I}_rt.csv", delimiter=",")
+              rt1 = loadtxt(f"{data_folder}/sim_{k1}_{I}_rt.csv", delimiter=",", ndmin=2)
+              rt2 = loadtxt(f"{data_folder}/sim_{k2}_{I}_rt.csv", delimiter=",", ndmin=2)
               rt = concatenate((rt1, rt2))
-              savetxt(f"data/sim_{k1}_{I+I}_rt.csv", rt, delimiter=",")
+              savetxt(f"{data_folder}/sim_{k1}_{I+I}_rt.csv", rt, delimiter=",")
               print(rt.shape)
 
-              x1 = loadtxt(f"data/sim_{k1}_{I}_ra.csv", delimiter=",")
-              x2 = loadtxt(f"data/sim_{k2}_{I}_ra.csv", delimiter=",")
+              x1 = loadtxt(f"{data_folder}/sim_{k1}_{I}_ra.csv", delimiter=",", ndmin=2)
+              x2 = loadtxt(f"{data_folder}/sim_{k2}_{I}_ra.csv", delimiter=",", ndmin=2)
               x = concatenate((x1, x2))
-              savetxt(f"data/sim_{k1}_{I+I}_ra.csv", x, delimiter=",")
+              savetxt(f"{data_folder}/sim_{k1}_{I+I}_ra.csv", x, delimiter=",")
               print(x.shape)
        
        

@@ -114,7 +114,7 @@ def quantum_constant_matrix():
 
 @pytest.fixture
 def data_shape():
-    return namedtuple("Data_Shape", ["I", "J"])(I=4, J=7)
+    return namedtuple("Data_Shape", ["I", "J"])(I=2, J=5)
 
 
 @pytest.fixture
@@ -191,8 +191,8 @@ def get_quantum_matrix(model_constants):
 
 @pytest.fixture
 def data_sim(data_shape):
-    X = stats.bernoulli(0.5).rvs(size=(data_shape.I,data_shape.J))
-    RT = stats.lognorm(1,1).rvs(size=(data_shape.I,data_shape.J))
+    X = stats.bernoulli(0.5).rvs(size=(data_shape.I,data_shape.J), random_state=1)
+    RT = np.ceil(stats.lognorm(1,1).rvs(size=(data_shape.I,data_shape.J), random_state=1))
     return namedtuple("Data", ["X", "RT"])(X=X, RT=RT)
 
 
@@ -209,6 +209,22 @@ def data_sim(data_shape):
 #                                                 likelihood_type="SINGLE" 
 #                         )
 #     print(post_chain.keys())
+
+def test_MCMC(data_sim, model_constants):
+    post_chain = ca.sample_posterior_params( data_sim.RT, data_sim.X,
+                                                n_states=model_constants.n_states,
+                                                start_width=model_constants.start_width,
+                                                response_width=model_constants.response_width,
+                                                delta=model_constants.delta,
+                                                measurement_prob=model_constants.measurement_prob,
+                                                num_warmup=10, samples_n=10, num_chains=1,
+                                                params_type="Centralized",
+                                                model_type="Quantum", transition_type="TIMESTEP",
+                                                likelihood_type="SINGLE"
+                        )
+    post_samples = post_chain.get_samples()
+    assert npx.all(npx.asarray([key in post_samples for key in ["mu", "sigma_final", "phi_0"]])), "MCMC parameters missing"
+    assert post_samples["mu"].shape == (10, data_sim.X.shape[0], 1), "MCMC samples not as expected"
 
 class Test_Configuration:
     def test_transition_matrix_markov(self, model_constants, markov_constant_matrix):
