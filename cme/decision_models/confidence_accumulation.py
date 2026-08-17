@@ -213,79 +213,48 @@ def non_centralized_parameters(model_type, I):
     return mu, sigma
 
 
-def participant_parameters(model_type, I):
-    with pyro.plate("I3", I, dim=-2):
-
-        if model_type == "Markov":
-            # drift
-            mu = pyro.sample("mu", dist.Normal(2.0, 0.5))
-
-            # extra diffusion; model() will later do abs(mu) + sigma
-            sigma_raw = pyro.sample("sigma_raw", dist.Normal(-1.0, 0.5))
-            sigma = pyro.deterministic("sigma", jax.nn.softplus(sigma_raw))
-
-        elif model_type == "Quantum":
-            # quantum drift / Hamiltonian directional term
-            mu = pyro.sample("mu", dist.Normal(2.0, 0.5))
-
-            # quantum sigma is used directly, so keep tighter at first
-            sigma_raw = pyro.sample("sigma_raw", dist.Normal(-0.5, 0.4))
-            sigma = pyro.deterministic("sigma", jax.nn.softplus(sigma_raw))
-
-        else:
-            raise Exception(f"Please select one of {model_type}")
-
-    return mu, sigma
-
-def non_centralized_parameters_VI_delete(I):
-    """
-    I: Number of participants
-    
-#     """
-#     m_m = pyro.param("m_m", 0, constraint=constraints.positive)
-#     m_s = pyro.param("m_s", 1, constraint=constraints.positive)
-#     m = pyro.sample("m", dist.Normal(m_m,m_s))
-#     s = pyro.sample("s", dist.HalfNormal(m_s))
-
-#     with pyro.plate('I4', I, dim=-2):
-#         mu_r_m = pyro.param("m_m", 2, constraint=constraints.positive)
-#         mu_r_s = pyro.param("m_m", 1, constraint=constraints.positive)
-        
-#         mu_r = pyro.sample("mu_r", dist.Normal(mu_r_m,mu_r_s)) # Drift Rate
-#         sigma_r = pyro.sample("sigma_r", dist.Normal(1,1)) # Diffusion Rate
-
-#         mu = pyro.deterministic("mu", m + s * mu_r)
-#         sigma = pyro.deterministic("sigma", m + s * sigma_r) 
-    
-#     return mu, sigma
-
-# def _get_initial_state_VI(n_states, start_width, I=1, prob=1,sub_sample_size=None):
-
-#     with pyro.plate('I2', I, dim=-4,subsample_size=sub_sample_size):
-#         with pyro.plate('S', n_states, dim=-1):
-#             conc = pyro.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
-
-#     with pyro.plate('I3', I, dim=-3,subsample_size=sub_sample_size):
-#         p_0 = pyro.sample("phi_init", dist.Dirichlet(conc)) # Initial State
-                 
-#     p_0 = pyro.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)
-
-#     return p_0 #s_0
-
-
 def _timestep_transition_matrix(n, T_delta, Mn):
+    """
+    n: I x J
+    T_delta: I x 1 x S x S
+    Mn: S x S
+    T_step: I x 1 x S x S
+    T_i before trial selection: K x I x 1 x S x S
+    T_i after trial selection: I x J x S x S
+    """
+    # T_i = []
+    # for n_i, T_delta_i in zip(n, T_delta):
+    #     T_i_j = []
+    #     for n_i_j in n_i:
+    #         #T_delta_i_j = T_delta_i[j,...]
+    #         T_nt = npx.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1) # we need to vectorize this function
+    #         T_i_j.append(T_nt)
+    #
+    #     T_i.append(T_i_j)
+    #
+    # T_t = T_delta @ npx.asarray(T_i)
+    # #T_t = npx.asarray(T_i) # uncomment to include all response time
+    # return T_t
 
-    T_i = []
-    for n_i, T_delta_i in zip(n, T_delta):
-        T_i_j = []
-        for n_i_j in n_i:
-            #T_delta_i_j = T_delta_i[j,...]
-            T_nt = npx.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1) # we need to vectorize this function
-            T_i_j.append(T_nt)
-        
-        T_i.append(T_i_j)
-    
-    T_t = T_delta @ npx.asarray(T_i) 
+    n = n.astype(int)
+    if np.any(n < 1):
+        raise ValueError("timestep counts must be at least one")
+
+    T_step = Mn @ T_delta
+    T_identity = npx.broadcast_to(npx.eye(T_step.shape[-1], dtype=T_step.dtype), T_step.shape)
+
+    def _matrix_power(T_nt, _):
+        T_nt = T_nt @ T_step
+        return T_nt, T_nt
+
+    _, T_i = lax.scan(_matrix_power, T_identity, None, length=int(n.max().item()) - 1)
+    T_i = npx.concatenate((T_identity[None,...], T_i), axis=0)
+    T_n = n - 1 # I x J, containing K-axis indices
+    T_participant = npx.arange(n.shape[0])[:,None] # I x 1, containing I-axis indices
+    T_participant = npx.broadcast_to(T_participant, n.shape) # I x J, containing I-axis indices
+    T_i = T_i[T_n, T_participant, 0, ...] # I x J x S x S
+
+    T_t = T_delta @ T_i
     #T_t = npx.asarray(T_i) # uncomment to include all response time
     return T_t
 

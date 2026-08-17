@@ -227,6 +227,25 @@ def test_MCMC(data_sim, model_constants):
     assert post_samples["mu"].shape == (10, data_sim.X.shape[0], 1), "MCMC samples not as expected"
 
 class Test_Configuration:
+    def test_timestep_transition_matrix(self):
+        n = npx.asarray([[1, 2, 3, 1, 2, 5, 4, 1, 3],
+                         [7, 8, 10, 15, 11, 12, 16, 10, 18]])
+        T_delta = npx.asarray([[[[0.8, 0.2],
+                                  [0.1, 0.9]]],
+                               [[[0.7, 0.3],
+                                  [0.2, 0.8]]]])
+        Mn = npx.asarray([[0.9, 0.0],
+                          [0.0, 0.8]])
+
+        T_t = ca._timestep_transition_matrix(n, T_delta, Mn)
+        T_expected = npx.asarray([[T_delta_i[0,...] @ np.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j - 1)
+                                   for n_i_j in n_i]
+                                  for n_i, T_delta_i in zip(np.asarray(n), np.asarray(T_delta))])
+        T_shared = T_delta[1,0,...] @ np.linalg.matrix_power(Mn @ T_delta[0,0,...], int(n[1,0].item()) - 1)
+
+        assert npx.allclose(T_t, T_expected), "Timestep transition matrix not as expected"
+        assert not npx.allclose(T_t[1,0,...], T_shared), "T_delta unexpectedly shared between participants"
+
     def test_transition_matrix_markov(self, model_constants, markov_constant_matrix):
         log.debug("Constant Drift Rate - Mean Confidence 1")
 
