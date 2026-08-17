@@ -5,6 +5,6 @@
 		}
 	],
 	"settings": {
-		"python.defaultInterpreterPath": "/home/rkmalaiya/miniconda3/envs/ds1/bin/python"
+		"python.defaultInterpreterPath": "${workspaceFolder}/.venv_ds/Scripts/python.exe"
 	}
 }
