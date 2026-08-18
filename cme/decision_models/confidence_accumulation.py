@@ -842,7 +842,8 @@ def sample_prior_pred_params(n_states, start_width, response_width, delta, measu
                                     )
     else:
         predictive_samples = dict(drift_rate = drift_rate_samples, diffusion_rate = diffusion_rate_samples, phi_0 = phi_0_samples)
-    return predictive_samples
+    #return predictive_samples
+    return prior_samples, predictive_samples
 
 def sample_post_pred_params(n_states, response_width, delta, measurement_prob, X,
                             drift_rate_samples, diffusion_rate_samples, phi_0_samples, RT=None, 

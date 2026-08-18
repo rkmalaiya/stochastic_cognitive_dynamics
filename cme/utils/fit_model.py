@@ -64,6 +64,19 @@ class ModelDetails:
     is_parallel:bool=False
 
 
+def _add_prior_to_arviz_data(arviz_data, prior_samples, prior_pd_samples, RT, coords, dims):
+    prior_rt = np.asarray([samples["Samples"]["RT"].values for samples in prior_pd_samples]) # predictive_n x I x J when reshaped below
+    prior_rt = prior_rt.reshape((-1,*RT.shape)) # predictive_n x I x J
+    prior_samples_arviz = {key:np.asarray(samples)[None,...] for key, samples in prior_samples.items()} # 1 x predictive_n x ... (chain x draw x ...)
+    prior_idata = az.from_dict(prior=prior_samples_arviz,
+                               prior_predictive={"RT":prior_rt[None,...]}, # 1 x predictive_n x I x J (chain x draw x participant x trial)
+                               coords=coords, dims=dims)
+
+    arviz_data["prior"] = prior_idata["prior"]
+    arviz_data["prior_predictive"] = prior_idata["prior_predictive"]
+    return arviz_data
+
+
 
 #folder, file_pre, file_posts, version, n_states, start_width, delta, measurement_prob, params_type, model_type, transition_type, likelihood_type, sampling_type
 def fit_model(model: ModelDetails):
@@ -154,7 +167,7 @@ def _run_model(file_loc, data, version,
         min_RT_sec = np.clip(RT.mean() - 3*RT.std(), a_min=delta, a_max=None)
         max_RT_sec = RT.mean() + 3*RT.std()
         log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {min_RT_sec} to {max_RT_sec} secs")
-        prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
+        prior_samples, prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
                                                         delta=delta, data_samples=RT.shape, min_RT_sec = min_RT_sec, max_RT_sec = max_RT_sec,
                                                         measurement_prob=measurement_prob, X=X, RT=None, n_samples=predictive_n,
                                                         params_type=params_type, model_type=model_type, transition_type=transition_type, 
@@ -204,6 +217,7 @@ def _run_model(file_loc, data, version,
             arviz_data = az.from_numpyro(post_chain,
                                         coords=coords,
                                         dims=dims, log_likelihood=True)
+            arviz_data = _add_prior_to_arviz_data(arviz_data, prior_samples, prior_pd_samples, RT, coords, dims)
             
             obs_idata = az.from_dict({"observed_data": {"RT": RT}}, coords=coords, dims=dims)
             arviz_data["observed_data"] = obs_idata["observed_data"]
