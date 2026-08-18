@@ -11,7 +11,7 @@ import cme.decision_models.quantum_discrete as qd
 import arviz as az
 import xarray as xa
 import polars as pl
-log = cm_log.get_logger()
+log = cm_log.get_logger("post_process_model")
 import itertools as iter
 
 def collect_inference_data(file_pre, part_pre, file_post, data_mod_ver):

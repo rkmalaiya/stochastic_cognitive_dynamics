@@ -16,6 +16,7 @@ def get_logger(lib_name = None):
         #hdlr.setLevel(logging.DEBUG)
         log.setLevel(logging.DEBUG)
         log.addHandler(hdlr)
+    log.propagate = False
     return log
 
 if __name__ == "__main__":

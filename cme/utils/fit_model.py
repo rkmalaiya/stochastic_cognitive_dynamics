@@ -132,7 +132,7 @@ def _run_model(file_loc, data, version,
     RTs = df_RT.values
     IDs = df_ID.values
     
-    log.info(f"Received participant size: {RTs.shape}")
+    log.info(f"Received participant size: {RTs.shape} for data {data if isinstance(data, str) else data[0]} and {model_type}")
 
     if scale == "Log":
         RTs = np.log(RTs)
@@ -151,8 +151,10 @@ def _run_model(file_loc, data, version,
     
     def run_half_model(i, X, RT, ID):
         
-        min_RT_sec = np.clip(RT.mean() - 3*RT.std(), a_min=delta, a_max=None)
-        max_RT_sec = RT.mean() + 3*RT.std()
+        #min_RT_sec = np.clip(RT.mean() - 3*RT.std(), a_min=delta, a_max=None)
+        #max_RT_sec = RT.mean() + 3*RT.std()
+        min_RT_sec = np.clip(RT.min(), a_min=delta*2, a_max=None)
+        max_RT_sec = RT.max()
         log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {min_RT_sec} to {max_RT_sec} secs")
         prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
                                                         delta=delta, data_samples=RT.shape, min_RT_sec = min_RT_sec, max_RT_sec = max_RT_sec,
@@ -344,7 +346,7 @@ def _run_model(file_loc, data, version,
     
     start_time = time.perf_counter()
     n_jobs1=min(3,batch_n) if not is_test and is_parallel and jax.default_backend() != "gpu"  else 1
-    log.info(f"Starting {n_jobs1} jobs for sub-batch of participants")
+    log.info(f"Starting {n_jobs1} jobs for sub-batch of participants in {data if isinstance(data, str) else data[0]} and {model_type}")
     Parallel(n_jobs=n_jobs1, prefer="processes", backend = "loky")(f for f in fn)
     
     log.info(f"Job successfully completed for {name}, {model_type}, {version} after {((time.perf_counter() - start_time)/60):.2f} mins")
