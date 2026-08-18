@@ -229,16 +229,16 @@ def _timestep_transition_matrix(n, T_delta, Mn):
     #         #T_delta_i_j = T_delta_i[j,...]
     #         T_nt = npx.linalg.matrix_power(Mn @ T_delta_i[0,...], n_i_j.astype(int).item() - 1) # we need to vectorize this function
     #         T_i_j.append(T_nt)
-    #
+    
     #     T_i.append(T_i_j)
-    #
+    
     # T_t = T_delta @ npx.asarray(T_i)
     # #T_t = npx.asarray(T_i) # uncomment to include all response time
     # return T_t
 
     n = n.astype(int)
     if np.any(n < 1):
-        raise ValueError("timestep counts must be at least one")
+        raise ValueError("timestep counts must be at least one", n)
 
     T_step = Mn @ T_delta
     T_identity = npx.broadcast_to(npx.eye(T_step.shape[-1], dtype=T_step.dtype), T_step.shape)
@@ -530,8 +530,8 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
         mu, sigma = centralized_parameters(I)
     elif params_type == "NonCentralized":
         mu, sigma = non_centralized_parameters(model_type, I)
-    elif params_type == "ParticipantLevel":
-        mu, sigma = participant_parameters(model_type, I)
+    #elif params_type == "ParticipantLevel":
+    #    mu, sigma = participant_parameters(model_type, I)
     else:
         raise Exception(f"Please select one of {params_type}")
 
