@@ -36,6 +36,8 @@ model_details = fm.ModelDetails(folder=folder,
                  batch_size=2, #25
                  num_warmup = 10,
                  samples_n = 10,
+                 num_chains = 1,
+                 max_tree_depth = 10,
                  params_type="Centralized",
                  model_type=["Markov","Quantum"],
                  transition_type="TIMESTEP",

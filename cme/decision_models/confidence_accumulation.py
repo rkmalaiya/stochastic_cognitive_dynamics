@@ -258,6 +258,45 @@ def _timestep_transition_matrix(n, T_delta, Mn):
     #T_t = npx.asarray(T_i) # uncomment to include all response time
     return T_t
 
+def _timestep_transition_state(n, T_delta, Mn, phi_0):
+    """
+    n: I x J
+    T_delta: I x 1 x S x S
+    Mn: S x S
+    phi_0: I x 1 x S x 1 or I x J x S x 1
+    T_step: I x 1 x S x S
+    phi_i before trial selection: K x I x 1 x S x 1 or K x I x J x S x 1
+    phi_i after trial selection: I x J x S x 1
+    phi_t: I x J x S x 1
+
+    This calculates the same equation as _timestep_transition_matrix:
+    T_delta @ matrix_power(Mn @ T_delta, n-1) @ phi_0.
+    """
+    n = n.astype(int)
+    if np.any(n < 1):
+        raise ValueError("timestep counts must be at least one", n)
+
+    T_step = Mn @ T_delta # I x 1 x S x S
+    phi_0 = phi_0.astype(npx.result_type(T_step, phi_0)) # I x 1 x S x 1 or I x J x S x 1
+
+    def _state_transition(phi_i, _):
+        phi_i = T_step @ phi_i # I x 1 x S x 1 or I x J x S x 1
+        return phi_i, phi_i
+
+    _, phi_i = lax.scan(_state_transition, phi_0, None, length=int(n.max().item()) - 1)
+    phi_i = npx.concatenate((phi_0[None,...], phi_i), axis=0) # K x I x 1 x S x 1 or K x I x J x S x 1
+    T_n = n - 1 # I x J, containing K-axis indices
+    T_participant = npx.arange(n.shape[0])[:,None] # I x 1, containing I-axis indices
+    T_participant = npx.broadcast_to(T_participant, n.shape) # I x J, containing I-axis indices
+    T_trial = npx.zeros(n.shape, dtype=int) # I x J, containing the shared J-axis index
+    if phi_0.shape[1] != 1:
+        T_trial = npx.arange(n.shape[1])[None,:] # 1 x J, containing J-axis indices
+        T_trial = npx.broadcast_to(T_trial, n.shape) # I x J, containing J-axis indices
+    phi_i = phi_i[T_n, T_participant, T_trial, ...] # I x J x S x 1
+
+    phi_t = T_delta @ phi_i # I x J x S x 1
+    return phi_t
+
 def _get_transition_matrix(intensity_matrix, RT, delta=None, Mn = None, transition_type="RT|TIMESTEP"):
    
     if transition_type == "RT":
@@ -357,25 +396,75 @@ def _get_initial_state(n_states, start_width, response_width, I = 1, prob=1, mod
     return phi_0   
 
 def perform_state_transition(intensity_matrix, RT_s, RA_s, Mc, Mw, Mn, phi_0, delta, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
-        
-    if likelihood_type=="SINGLE":
-        RT=RT_s
-        T_t = _get_transition_matrix(intensity_matrix, RT=RT, delta=delta, Mn=Mn, transition_type=transition_type)
-        
-    elif likelihood_type=="JOINT":
-        RT_1 = RT_s[0]
-        T_t_1 = _get_transition_matrix(intensity_matrix, RT=RT_1, delta=delta, Mn=Mn, transition_type=transition_type)
+    # Previous full transition-matrix calculation retained for reference:
+    # if likelihood_type=="SINGLE":
+    #     RT=RT_s
+    #     T_t = _get_transition_matrix(intensity_matrix, RT=RT, delta=delta, Mn=Mn, transition_type=transition_type)
+    #
+    # elif likelihood_type=="JOINT":
+    #     RT_1 = RT_s[0]
+    #     T_t_1 = _get_transition_matrix(intensity_matrix, RT=RT_1, delta=delta, Mn=Mn, transition_type=transition_type)
+    #
+    #     RT_2 = RT_s[1]
+    #     T_t_2 = _get_transition_matrix(intensity_matrix, RT=RT_2, delta=delta, Mn=Mn, transition_type=transition_type)
+    #
+    #     phi_t_1_c = T_t_2 @ Mc @ T_t_1
+    #     phi_t_1_w = T_t_2 @ Mw @ T_t_1
+    #
+    #     RA_1 = RA_s[0]
+    #     T_t = npx.where(RA_1[..., None, None]==1, phi_t_1_c, phi_t_1_w) # I x J x S x S
+    #
+    # phi_t = T_t @ phi_0 # I x J x S x 1
 
-        RT_2 = RT_s[1]
-        T_t_2 = _get_transition_matrix(intensity_matrix, RT=RT_2, delta=delta, Mn=Mn, transition_type=transition_type)
+    if transition_type == "TIMESTEP":
+        T_delta = sci.linalg.expm(intensity_matrix * delta) # I x 1 x S x S
 
-        phi_t_1_c = T_t_2 @ Mc @ T_t_1 
-        phi_t_1_w = T_t_2 @ Mw @ T_t_1 
-        
-        RA_1 = RA_s[0]
-        T_t = npx.where(RA_1[..., None, None]==1, phi_t_1_c, phi_t_1_w)
-        
-    phi_t = T_t @ phi_0
+        if likelihood_type=="SINGLE":
+            RT=RT_s
+            ns = np.round(RT/delta) # I x J
+            phi_t = _timestep_transition_state(ns, T_delta, Mn, phi_0) # I x J x S x 1
+
+        elif likelihood_type=="JOINT":
+            RT_1 = RT_s[0]
+            ns_1 = np.round(RT_1/delta) # I x J
+            phi_t_1 = _timestep_transition_state(ns_1, T_delta, Mn, phi_0) # I x J x S x 1
+
+            phi_t_1_c = Mc @ phi_t_1 # I x J x S x 1
+            phi_t_1_w = Mw @ phi_t_1 # I x J x S x 1
+
+            RA_1 = RA_s[0]
+            phi_t_1 = npx.where(RA_1[..., None, None]==1, phi_t_1_c, phi_t_1_w) # I x J x S x 1
+
+            RT_2 = RT_s[1]
+            ns_2 = np.round(RT_2/delta) # I x J
+            phi_t = _timestep_transition_state(ns_2, T_delta, Mn, phi_t_1) # I x J x S x 1
+        else:
+            raise Exception(f"Please select one of {likelihood_type}")
+
+    elif transition_type == "RT":
+        if likelihood_type=="SINGLE":
+            RT=RT_s
+            T_t = _get_transition_matrix(intensity_matrix, RT=RT, delta=delta, Mn=Mn, transition_type=transition_type) # I x J x S x S
+
+        elif likelihood_type=="JOINT":
+            RT_1 = RT_s[0]
+            T_t_1 = _get_transition_matrix(intensity_matrix, RT=RT_1, delta=delta, Mn=Mn, transition_type=transition_type) # I x J x S x S
+
+            RT_2 = RT_s[1]
+            T_t_2 = _get_transition_matrix(intensity_matrix, RT=RT_2, delta=delta, Mn=Mn, transition_type=transition_type) # I x J x S x S
+
+            phi_t_1_c = T_t_2 @ Mc @ T_t_1 # I x J x S x S
+            phi_t_1_w = T_t_2 @ Mw @ T_t_1 # I x J x S x S
+
+            RA_1 = RA_s[0]
+            T_t = npx.where(RA_1[..., None, None]==1, phi_t_1_c, phi_t_1_w) # I x J x S x S
+        else:
+            raise Exception(f"Please select one of {likelihood_type}")
+
+        phi_t = T_t @ phi_0 # I x J x S x 1
+    else:
+        raise Exception(f"Please select one of {transition_type}")
+
     return phi_t
 
 def get_mean_init_confidence(n_states, phi_0, model_type = "Markov|Quantum"):
@@ -755,7 +844,7 @@ def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, del
 
 
 def sample_posterior_params(DT, X, n_states, start_width, response_width, delta, measurement_prob,
-                            num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  
+                            num_warmup=100, samples_n=500, num_chains=4, batch_size=2, max_tree_depth=10,
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
 
     #kernel = HMCECS(NUTS(model), num_blocks=10)
@@ -763,16 +852,31 @@ def sample_posterior_params(DT, X, n_states, start_width, response_width, delta,
     #mcmc_chain.run(cu.get_rng(), n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
 
     # Adaptive mass matrix and increased target_accept_prob for better convergence with non-centered params
-    kernel = NUTS(model, forward_mode_differentiation=False, adapt_mass_matrix=True, adapt_step_size = True, 
+    # Previous NUTS configuration retained for reference:
+    # kernel = NUTS(model, forward_mode_differentiation=False, adapt_mass_matrix=True, adapt_step_size = True,
+    #               dense_mass=True, init_strategy=init_to_median(num_samples=20),
+    #               target_accept_prob=0.8 if model_type=="Quantum" else 0.9)
+    # mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains,
+    #                   chain_method="vectorized" if jax.default_backend() == "gpu" else "parallel",
+    #                   progress_bar=True, jit_model_args=False)
+
+    kernel = NUTS(model, forward_mode_differentiation=False, adapt_mass_matrix=True, adapt_step_size = True,
                   dense_mass=True, init_strategy=init_to_median(num_samples=20),
-                  target_accept_prob=0.8 if model_type=="Quantum" else 0.9)
-    mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains, 
-                      chain_method="vectorized" if jax.default_backend() == "gpu" else "parallel",
-                      progress_bar=True, jit_model_args=False)
+                  target_accept_prob=0.8 if model_type=="Quantum" else 0.9,
+                  max_tree_depth=max_tree_depth)
+    chain_method = "sequential" if num_chains == 1 else ("vectorized" if jax.default_backend() == "gpu" else "parallel")
+    mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains,
+                      chain_method=chain_method, progress_bar=True, jit_model_args=False)
     mcmc_chain.run(cu.get_rng(), n_states, start_width, response_width, delta, X, DT, measurement_prob, 
                    params_type = params_type, transition_type=transition_type, 
                    likelihood_type=likelihood_type, model_type=model_type,
-                   extra_fields=('potential_energy',))
+                   # extra_fields=('potential_energy',)
+                   extra_fields=('potential_energy', 'num_steps', 'accept_prob', 'diverging', 'adapt_state.step_size'))
+
+    mcmc_diagnostics = mcmc_chain.get_extra_fields()
+    num_steps = np.asarray(mcmc_diagnostics["num_steps"]) # num_chains*samples_n
+    divergences = np.asarray(mcmc_diagnostics["diverging"]) # num_chains*samples_n
+    log.info(f"NUTS diagnostics - chains: {num_chains}, mean steps: {num_steps.mean():.2f}, max steps: {num_steps.max()}, divergences: {divergences.sum()}")
 
     return mcmc_chain#, post_likl
 

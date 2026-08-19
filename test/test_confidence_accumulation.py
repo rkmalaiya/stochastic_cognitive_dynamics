@@ -1,7 +1,9 @@
 import pytest
+import arviz as az
 import cme.decision_models.confidence_accumulation as ca
 import scipy.stats as stats
 from collections import namedtuple
+import jax
 import jax.numpy as npx
 import numpy as np
 from cme.utils import common_logging as cl
@@ -223,8 +225,13 @@ def test_MCMC(data_sim, model_constants):
                                                 likelihood_type="SINGLE"
                         )
     post_samples = post_chain.get_samples()
+    mcmc_diagnostics = post_chain.get_extra_fields()
+    arviz_data = az.from_numpyro(post_chain)
     assert npx.all(npx.asarray([key in post_samples for key in ["mu", "sigma_final", "phi_0"]])), "MCMC parameters missing"
     assert post_samples["mu"].shape == (10, data_sim.X.shape[0], 1), "MCMC samples not as expected"
+    assert npx.all(npx.asarray([key in mcmc_diagnostics for key in ["num_steps", "accept_prob", "diverging", "adapt_state.step_size"]])), "MCMC diagnostics missing"
+    assert npx.all(npx.asarray([key in arviz_data.sample_stats for key in ["n_steps", "acceptance_rate", "diverging", "step_size"]])), "MCMC diagnostics missing from ArviZ data"
+    assert arviz_data.sample_stats["n_steps"].shape == (1,10), "ArviZ MCMC diagnostic shape not as expected" # num_chains x samples_n
 
 class Test_Configuration:
     def test_timestep_transition_matrix(self):
@@ -245,6 +252,80 @@ class Test_Configuration:
 
         assert npx.allclose(T_t, T_expected), "Timestep transition matrix not as expected"
         assert not npx.allclose(T_t[1,0,...], T_shared), "T_delta unexpectedly shared between participants"
+
+    def test_timestep_transition_state(self):
+        n = npx.asarray([[1, 2, 3, 1],
+                         [2, 4, 1, 3]]) # I x J
+        T_delta = npx.asarray([[[[0.8, 0.2],
+                                  [0.1, 0.9]]],
+                               [[[0.7, 0.3],
+                                  [0.2, 0.8]]]]) # I x 1 x S x S
+        Mn = npx.asarray([[0.9, 0.0],
+                          [0.0, 0.8]]) # S x S
+        phi_0 = npx.asarray([[[[0.7],
+                                [0.3]]],
+                             [[[0.2],
+                                [0.8]]]]) # I x 1 x S x 1
+
+        phi_t = ca._timestep_transition_state(n, T_delta, Mn, phi_0) # I x J x S x 1
+        T_t = ca._timestep_transition_matrix(n, T_delta, Mn) # I x J x S x S
+        phi_expected = T_t @ phi_0 # I x J x S x 1
+
+        def _matrix_loss(T_delta):
+            T_t = ca._timestep_transition_matrix(n, T_delta, Mn) # I x J x S x S
+            phi_t = T_t @ phi_0 # I x J x S x 1
+            return npx.sum(phi_t**2)
+
+        def _state_loss(T_delta):
+            phi_t = ca._timestep_transition_state(n, T_delta, Mn, phi_0) # I x J x S x 1
+            return npx.sum(phi_t**2)
+
+        matrix_grad = jax.grad(_matrix_loss)(T_delta) # I x 1 x S x S
+        state_grad = jax.grad(_state_loss)(T_delta) # I x 1 x S x S
+
+        assert npx.allclose(phi_t, phi_expected), "Timestep transition state not as expected"
+        assert npx.allclose(state_grad, matrix_grad), "Timestep transition state gradients not as expected"
+
+    def test_timestep_transition_state_quantum(self):
+        n = npx.asarray([[1, 2, 4]]) # I x J
+        T_delta = npx.asarray([[[[0.9+0.1j, 0.0+0.2j],
+                                  [0.0+0.2j, 0.9-0.1j]]]]) # I x 1 x S x S
+        Mn = npx.asarray([[0.9, 0.0],
+                          [0.0, 0.8]]) # S x S
+        phi_0 = npx.asarray([[[[npx.sqrt(0.6)+0.0j],
+                                [npx.sqrt(0.4)+0.0j]]]]) # I x 1 x S x 1
+
+        phi_t = ca._timestep_transition_state(n, T_delta, Mn, phi_0) # I x J x S x 1
+        T_t = ca._timestep_transition_matrix(n, T_delta, Mn) # I x J x S x S
+        phi_expected = T_t @ phi_0 # I x J x S x 1
+
+        assert npx.allclose(phi_t, phi_expected), "Quantum timestep transition state not as expected"
+
+    def test_timestep_transition_state_joint(self, model_constants, markov_constant_matrix, measurement_matrix_correct, measurement_matrix_incorrect, measurement_matrix_noresp):
+        phi_0 = ca._get_initial_state(model_constants.n_states, model_constants.start_width,
+                                      model_constants.response_width,
+                                      model_type="Markov", prior_type="Upper") # I x 1 x S x 1
+        RT = npx.asarray([[[2, 3]],
+                          [[4, 2]]]) # 2 x I x J
+        RA = npx.asarray([[[1, 0]],
+                          [[0, 1]]]) # 2 x I x J
+        intensity_matrix = markov_constant_matrix[None, None, ...] # I x 1 x S x S
+
+        phi_t = ca.perform_state_transition(intensity_matrix, RT_s=RT, RA_s=RA,
+                                            Mc=measurement_matrix_correct, Mw=measurement_matrix_incorrect,
+                                            Mn=measurement_matrix_noresp, phi_0=phi_0, delta=1,
+                                            transition_type="TIMESTEP", likelihood_type="JOINT") # I x J x S x 1
+
+        T_t_1 = ca._get_transition_matrix(intensity_matrix, RT=RT[0], delta=1,
+                                          Mn=measurement_matrix_noresp, transition_type="TIMESTEP") # I x J x S x S
+        T_t_2 = ca._get_transition_matrix(intensity_matrix, RT=RT[1], delta=1,
+                                          Mn=measurement_matrix_noresp, transition_type="TIMESTEP") # I x J x S x S
+        phi_t_1_c = T_t_2 @ measurement_matrix_correct @ T_t_1 # I x J x S x S
+        phi_t_1_w = T_t_2 @ measurement_matrix_incorrect @ T_t_1 # I x J x S x S
+        T_t = npx.where(RA[0,...,None,None]==1, phi_t_1_c, phi_t_1_w) # I x J x S x S
+        phi_expected = T_t @ phi_0 # I x J x S x 1
+
+        assert npx.allclose(phi_t, phi_expected), "Joint timestep transition state not as expected"
 
     def test_transition_matrix_markov(self, model_constants, markov_constant_matrix):
         log.debug("Constant Drift Rate - Mean Confidence 1")
@@ -281,7 +362,8 @@ class Test_Configuration:
     def test_Quantum_measurement_matrices(self, model_constants, measurement_matrix_correct, measurement_matrix_incorrect, measurement_matrix_noresp):
         q_Mc, q_Mw, q_Mn = ca._get_measurement_matrix(model_constants.n_states, model_constants.response_width, 
                                                       prob=model_constants.measurement_prob, model_type = "Quantum")
-        assert npx.all((q_Mc**2 == measurement_matrix_correct) & (q_Mw**2 == measurement_matrix_incorrect) & (q_Mn**2 == measurement_matrix_noresp)), "Mismatch in Quantum Response Measurement Matrix"
+        # assert npx.all((q_Mc**2 == measurement_matrix_correct) & (q_Mw**2 == measurement_matrix_incorrect) & (q_Mn**2 == measurement_matrix_noresp)), "Mismatch in Quantum Response Measurement Matrix"
+        assert npx.allclose(q_Mc**2, measurement_matrix_correct) & npx.allclose(q_Mw**2, measurement_matrix_incorrect) & npx.allclose(q_Mn**2, measurement_matrix_noresp), "Mismatch in Quantum Response Measurement Matrix"
 
 class Test_Confidence:
 
