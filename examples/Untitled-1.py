@@ -38,7 +38,9 @@ posterior_chain
 az.summary(posterior_chain)
 
 # %%
-az.plot_trace(posterior_chain, compact=True)
+# Previous ArViZ 0.x plotting call retained for reference:
+# az.plot_trace(posterior_chain, compact=True)
+az.plot_trace(posterior_chain)
 
 # %%
 v_c_ch = ut.get_chains_for_param(posterior_chain,"v_c")

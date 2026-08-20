@@ -241,7 +241,16 @@ if __name__ == "__main__":
     mcmc_chain = sample_posterior_params(rotation_RT_n, rotation_X_n, 1, rotation_RT_n.shape[1],
                                         num_warmup=300, samples_n=500, 
                                         n_states=11, start_width=3)
-    print(az.summary(mcmc_chain))
+    # Previous implicit Pyro conversion retained for reference:
+    # print(az.summary(mcmc_chain))
+    # Previous ArViZ auto-conversion attempt retained for reference:
+    # arviz_data = az.convert_to_datatree(mcmc_chain)
+    posterior_samples = {
+        name: values.detach().cpu().numpy()
+        for name, values in mcmc_chain.get_samples(group_by_chain=True).items()
+    } # chains x draws x ... for every posterior parameter
+    arviz_data = az.from_dict({"posterior":posterior_samples}, sample_dims=["chain", "draw"])
+    print(az.summary(arviz_data, round_to="none"))
     print("test 9")
 
 

@@ -128,12 +128,17 @@ def sample_predictive_dist(model, posterior_chain=None, mode="Prior|Posterior|Bo
         raise Exception("Either mode or posterior not provided")
     return pred_chain
 
-def post_process_posterior(posterior_chain, method = "None|WAIC|LOO", **kwargs):
+# Previous placeholder default retained for reference:
+# def post_process_posterior(posterior_chain, method = "None|WAIC|LOO", **kwargs):
+def post_process_posterior(posterior_chain, method=None, **kwargs):
     summ = ut.get_summary(posterior_chain)
     if method is not None:
         w = ut.relative_model_fit(posterior_chain, method, **kwargs)
-        print("***********", "w.elpd_waic", w.elpd_waic)
-        summ = summ.assign(elpd_waic=w.elpd_waic).assign(elpd_se = w.se).assign(p_waic = w.p_waic)
+        # Previous ArViZ 0.x WAIC output retained for reference:
+        # print("***********", "w.elpd_waic", w.elpd_waic)
+        # summ = summ.assign(elpd_waic=w.elpd_waic).assign(elpd_se = w.se).assign(p_waic = w.p_waic)
+        print("***********", "w.elpd_loo", w.elpd)
+        summ = summ.assign(elpd_loo=w.elpd).assign(elpd_se=w.se).assign(p_loo=w.p)
     return summ
 
 def _quick_test():

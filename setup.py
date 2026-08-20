@@ -10,4 +10,6 @@ setup(name='Stochastic Cognitive Dynamics',
       author_email='ritesh.malaiya@gmail.com',
       license='MIT',
       packages=['cme'],
+      python_requires='>=3.12',
+      install_requires=['arviz[h5netcdf,matplotlib]>=1.2,<2'],
       zip_safe=False)

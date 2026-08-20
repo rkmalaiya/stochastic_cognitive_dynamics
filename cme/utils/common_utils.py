@@ -63,14 +63,31 @@ def calculate_r_star(df_posterior, group_var, group_std_name, var_name, idx_name
     return df_rstar
 
 
-def relative_model_fit(posterior_chain, method="WAIC|LOO", **kwargs):
+# Previous ArviZ 0.x model-fit selector retained for reference:
+# def relative_model_fit(posterior_chain, method="WAIC|LOO", **kwargs):
+#     if method == "WAIC":
+#         var_name = kwargs["var_name"]
+#         return _calculate_waic(posterior_chain, var_name)
+
+def relative_model_fit(posterior_chain, method="LOO", **kwargs):
+    if method not in ("LOO", "WAIC"):
+        raise ValueError("method must be 'LOO' or 'WAIC'")
+    var_name = kwargs["var_name"]
+    if method == "LOO":
+        return _calculate_loo(posterior_chain, var_name)
     if method == "WAIC":
-        var_name = kwargs["var_name"]
         return _calculate_waic(posterior_chain, var_name)
 
+# Previous ArViZ 0.x WAIC calculation retained for reference:
+# def _calculate_waic(posterior_chain, var_name):
+#     w = az.waic(posterior_chain, var_name=var_name)#,scale='negative_log')
+#     return w
+
 def _calculate_waic(posterior_chain, var_name):
-    w = az.waic(posterior_chain, var_name=var_name)#,scale='negative_log')
-    return w
+    raise NotImplementedError("ArViZ 1.x removed WAIC; use method='LOO' or add a separately validated WAIC implementation.")
+
+def _calculate_loo(posterior_chain, var_name):
+    return az.loo(posterior_chain, var_name=var_name)
 
 def _sample_posterior_MH(model, samples_n, chains, tune, acceptance_rate, likelihood):
     with model:
@@ -192,7 +209,9 @@ def extract_var(posterior_chains, var="", axis=-2):
     return var_mat_c, var_mat_ic
 
 def get_summary(posterior_chain):
-    df = az.summary(posterior_chain)
+    # Previous display-oriented summary call retained for reference:
+    # df = az.summary(posterior_chain)
+    df = az.summary(posterior_chain, round_to="none")
     df.loc[:,["var_name", "var_idx"]] = df.loc[:,["r_hat"]].reset_index().loc[:,"index"].str.split("[",expand=True).values
     
     return df.reset_index(drop=True)

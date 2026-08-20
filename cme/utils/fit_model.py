@@ -70,12 +70,18 @@ def _add_prior_to_arviz_data(arviz_data, prior_samples, prior_pd_samples, RT, co
     prior_rt = np.asarray([samples["Samples"]["RT"].values for samples in prior_pd_samples]) # predictive_n x I x J when reshaped below
     prior_rt = prior_rt.reshape((-1,*RT.shape)) # predictive_n x I x J
     prior_samples_arviz = {key:np.asarray(samples)[None,...] for key, samples in prior_samples.items()} # 1 x predictive_n x ... (chain x draw x ...)
-    prior_idata = az.from_dict(prior=prior_samples_arviz,
-                               prior_predictive={"RT":prior_rt[None,...]}, # 1 x predictive_n x I x J (chain x draw x participant x trial)
-                               coords=coords, dims=dims)
+    # Previous version-specific construction retained for reference:
+    # prior_idata = az.from_dict(prior=prior_samples_arviz,
+    #                            prior_predictive={"RT":prior_rt[None,...]}, # 1 x predictive_n x I x J (chain x draw x participant x trial)
+    #                            coords=coords, dims=dims)
+    # arviz_data["prior"] = prior_idata["prior"]
+    # arviz_data["prior_predictive"] = prior_idata["prior_predictive"]
 
-    arviz_data["prior"] = prior_idata["prior"]
-    arviz_data["prior_predictive"] = prior_idata["prior_predictive"]
+    # Previous calls with implicit sample dimensions retained for reference:
+    # arviz_data["prior"] = az.dict_to_dataset(prior_samples_arviz, coords=coords, dims=dims) # 1 x predictive_n x ... (chain x draw x ...)
+    # arviz_data["prior_predictive"] = az.dict_to_dataset({"RT":prior_rt[None,...]}, coords=coords, dims=dims) # 1 x predictive_n x I x J (chain x draw x participant x trial)
+    arviz_data["prior"] = az.dict_to_dataset(prior_samples_arviz, sample_dims=["chain", "draw"], coords=coords, dims=dims) # 1 x predictive_n x ... (chain x draw x ...)
+    arviz_data["prior_predictive"] = az.dict_to_dataset({"RT":prior_rt[None,...]}, sample_dims=["chain", "draw"], coords=coords, dims=dims) # 1 x predictive_n x I x J (chain x draw x participant x trial)
     return arviz_data
 
 
@@ -233,9 +239,13 @@ def _run_model(file_loc, data, version,
                                         dims=dims, log_likelihood=True)
             arviz_data = _add_prior_to_arviz_data(arviz_data, prior_samples, prior_pd_samples, RT, coords, dims)
             
-            obs_idata = az.from_dict({"observed_data": {"RT": RT}}, coords=coords, dims=dims)
+            # Previous call with implicit observed-data dimensions retained for reference:
+            # obs_idata = az.from_dict({"observed_data": {"RT": RT}}, coords=coords, dims=dims)
+            obs_idata = az.from_dict({"observed_data": {"RT": RT}}, sample_dims=[], coords=coords, dims=dims) # I x J (participant x trial)
             arviz_data["observed_data"] = obs_idata["observed_data"]
-            df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"]) #"sigma_final", "likl_rt", using phi_init instead of phi_0 because phi_0 is padded with zeros for response states. If unpadded, the likelihood function gives a high likelihood for even 0 (or delta) response times.
+            # Previous display-oriented summary call retained for reference:
+            # df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"]) #"sigma_final", "likl_rt", using phi_init instead of phi_0 because phi_0 is padded with zeros for response states. If unpadded, the likelihood function gives a high likelihood for even 0 (or delta) response times.
+            df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"], round_to="none") # Keep raw numeric values for downstream calculations; phi_init is used because phi_0 is padded with zeros for response states.
             
             #df_summary = (df_summary.reset_index(names="params")
                             #.assign(param_name = lambda df: df.params.str.split("[",expand=True)[0])
@@ -343,7 +353,9 @@ def _run_model(file_loc, data, version,
         df_post_pred_all.to_csv(f"export/posterior_predictive_{name}_{model_type}_{version}_{i}.csv")
         pp_rt = np.array([s["Samples"]["RT"].values for s in post_pd_samples])
         
-        pp_idata = az.from_dict({"posterior_predictive": {"RT": pp_rt.reshape((-1,*RT.shape))[np.newaxis, ...]}}, coords=coords, dims=dims)
+        # Previous call with implicit sample dimensions retained for reference:
+        # pp_idata = az.from_dict({"posterior_predictive": {"RT": pp_rt.reshape((-1,*RT.shape))[np.newaxis, ...]}}, coords=coords, dims=dims)
+        pp_idata = az.from_dict({"posterior_predictive": {"RT": pp_rt.reshape((-1,*RT.shape))[np.newaxis, ...]}}, sample_dims=["chain", "draw"], coords=coords, dims=dims) # 1 x posterior_draws x I x J (chain x draw x participant x trial)
         arviz_data["posterior_predictive"] = pp_idata["posterior_predictive"]
         arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
 
