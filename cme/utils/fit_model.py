@@ -48,7 +48,7 @@ class ModelDetails:
     measurement_prob:float = 0.2
     num_warmup: int = 20 
     samples_n: int = 50
-    num_chains: int = 1
+    num_chains: int = 4
     max_tree_depth: int = 10
     predictive_n: int = None
     batch_size: int = None
