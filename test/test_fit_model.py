@@ -8,6 +8,62 @@ from cme.decision_models import qdiffusion as qd
 from cme.utils import fit_model as fm
 
 
+def test_slurm_process_partition_defaults_to_one_process(monkeypatch):
+    monkeypatch.delenv("SLURM_PROCID", raising=False)
+    monkeypatch.setenv("SLURM_NTASKS", "3")
+
+    assert fm._get_slurm_process_partition() == (0, 1)
+
+
+def test_slurm_process_partition_uses_srun_step(monkeypatch):
+    monkeypatch.setenv("SLURM_PROCID", "1")
+    monkeypatch.setenv("SLURM_NTASKS", "4")
+    monkeypatch.setenv("SLURM_STEP_NUM_TASKS", "3")
+
+    assert fm._get_slurm_process_partition() == (1, 3)
+
+
+def test_slurm_work_partition_assigns_round_robin_items():
+    work = list(range(10))
+
+    assert fm._partition_work_for_slurm(work, 0, 2) == [0, 2, 4, 6, 8]
+    assert fm._partition_work_for_slurm(work, 1, 2) == [1, 3, 5, 7, 9]
+
+
+@pytest.mark.parametrize(
+    ("estimation_type", "expected_data"),
+    [
+        ("VI", ["dataset_b"]),
+        ("MCMC", ["dataset_a", "dataset_b", "dataset_c"]),
+    ],
+)
+def test_fit_model_selects_parallel_level_for_slurm(
+    monkeypatch,
+    estimation_type,
+    expected_data,
+):
+    calls = []
+
+    monkeypatch.setenv("SLURM_PROCID", "1")
+    monkeypatch.setenv("SLURM_STEP_NUM_TASKS", "2")
+    monkeypatch.setattr(fm.jax, "default_backend", lambda: "gpu")
+    monkeypatch.setattr(fm.jax, "devices", lambda: ["gpu:0"])
+    monkeypatch.setattr(fm, "_run_model", lambda *args: calls.append(args))
+
+    model = fm.ModelDetails(
+        data=["dataset_a", "dataset_b", "dataset_c"],
+        model_type=["Markov"],
+        n_states=[11],
+        response_width=[1],
+        conf_scale=[None],
+        estimation_type=estimation_type,
+    )
+
+    fm.fit_model(model)
+
+    assert [args[1] for args in calls] == expected_data
+
+
 def test_add_prior_to_arviz_data(tmp_path):
     # Previous matching posterior/prior draw counts retained for reference:
     # predictive_n, I, J = 2, 2, 3

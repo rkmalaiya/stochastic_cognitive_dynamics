@@ -27,7 +27,9 @@ npy.enable_x64()
 log = cl.get_logger("diffusion_discrete")
 
 import jax
-jax.config.update('jax_platforms', 'cpu')
+# Original forced-CPU configuration retained for reference. JAX now uses the
+# device exposed by SLURM/CUDA_VISIBLE_DEVICES, with CPU as its normal fallback.
+# jax.config.update('jax_platforms', 'cpu')
 
 
 

@@ -1,5 +1,7 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0" # "0" "1"
+# Original fixed-GPU selection retained for reference. SLURM sets
+# CUDA_VISIBLE_DEVICES separately for every GPU task before Python starts.
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0" # "0" "1"
 
 #from pyexpat import model
 from attr import dataclass
@@ -22,6 +24,49 @@ from joblib import Parallel, delayed
 from cme.utils import common_logging as cl
 log = cl.get_logger("fit_model")
 import jax
+
+
+def _get_slurm_process_partition():
+    """Return this process's rank and the process count for an srun step."""
+    process_id = os.environ.get("SLURM_PROCID")
+
+    # A normal local run, or a batch script that did not use srun, is one
+    # process even when the surrounding allocation contains several tasks.
+    if process_id is None:
+        return 0, 1
+
+    process_count = os.environ.get(
+        "SLURM_STEP_NUM_TASKS",
+        os.environ.get("SLURM_NTASKS", "1"),
+    )
+
+    try:
+        process_id = int(process_id)
+        process_count = int(process_count)
+    except ValueError:
+        log.warning(
+            "Invalid SLURM process information: SLURM_PROCID=%r, "
+            "process count=%r. Running as one process.",
+            process_id,
+            process_count,
+        )
+        return 0, 1
+
+    if process_count < 1 or not 0 <= process_id < process_count:
+        log.warning(
+            "Inconsistent SLURM process information: rank=%s, count=%s. "
+            "Running as one process.",
+            process_id,
+            process_count,
+        )
+        return 0, 1
+
+    return process_id, process_count
+
+
+def _partition_work_for_slurm(work, process_id, process_count):
+    """Assign independent work items to this SLURM process."""
+    return work[process_id::process_count]
 
 #file_loc_X= "data/ad_X_"
 #file_loc_RT= "data/ad_rt_"
@@ -88,15 +133,62 @@ def _add_prior_to_arviz_data(arviz_data, prior_samples, prior_pd_samples, RT, co
 
 #folder, file_pre, file_posts, version, n_states, start_width, delta, measurement_prob, params_type, model_type, transition_type, likelihood_type, sampling_type
 def fit_model(model: ModelDetails):
-    
-    log.info(f"Compute devices: {jax.default_backend()}, {jax.devices()}")
+    process_id, process_count = _get_slurm_process_partition()
+    compute_backend = jax.default_backend()
+    compute_devices = jax.devices()
+    # Original compute-device logging retained for reference:
+    # log.info(f"Compute devices: {jax.default_backend()}, {jax.devices()}")
+    log.info(
+        "Compute process %s/%s: backend=%s, devices=%s, "
+        "CUDA_VISIBLE_DEVICES=%s",
+        process_id,
+        process_count,
+        compute_backend,
+        compute_devices,
+        os.environ.get("CUDA_VISIBLE_DEVICES", "not set"),
+    )
     file_loc = f"{model.folder}/{model.file_pre}"
     
     #file_post = 
     #version = 0.5
     #len(model.file_posts)
-    n_jobs = min(3, len(model.data) + len(model.model_type)) if not model.is_test and model.is_parallel and jax.default_backend() != "gpu" else 1
-    log.info(f"Received request for {n_jobs} files to be executed in parallel for {model.model_type}_version:{model.version}_states:{model.n_states}_resp_width:{model.response_width}!!")
+    model_jobs = list(iter.product(model.data, zip(model.model_type, model.n_states, model.response_width, model.conf_scale)))
+
+    if model.estimation_type == "VI" and process_count > 1:
+        assigned_model_jobs = _partition_work_for_slurm(model_jobs, process_id, process_count)
+    else:
+        assigned_model_jobs = model_jobs
+
+    # Original dataset/model-level parallelism retained for reference:
+    # n_jobs = min(3, len(model.data) + len(model.model_type)) if not model.is_test and model.is_parallel and jax.default_backend() != "gpu" else 1
+    if (
+        model.estimation_type == "VI"
+        and process_count == 1
+        and not model.is_test
+        and model.is_parallel
+        and compute_backend != "gpu"
+    ):
+        n_jobs = max(1, min(3, len(assigned_model_jobs)))
+    else:
+        n_jobs = 1
+
+    # Original dataset/model job logging retained for reference:
+    # log.info(f"Received request for {n_jobs} files to be executed in parallel for {model.model_type}_version:{model.version}_states:{model.n_states}_resp_width:{model.response_width}!!")
+    log.info(
+        "Process %s/%s received %s of %s dataset/model jobs; running %s "
+        "at a time for estimation type %s and model(s) %s_version:%s_"
+        "states:%s_resp_width:%s",
+        process_id,
+        process_count,
+        len(assigned_model_jobs),
+        len(model_jobs),
+        n_jobs,
+        model.estimation_type,
+        model.model_type,
+        model.version,
+        model.n_states,
+        model.response_width,
+    )
     
     Parallel(n_jobs=n_jobs, prefer="processes", backend = "loky")(delayed(_run_model)(
                                     
@@ -108,7 +200,9 @@ def fit_model(model: ModelDetails):
                                     model.predictive_n, model.batch_size, model.is_test,
                                     model.scale, conf_scale, model.csv_header, model.is_parallel) 
                                                 
-                                    for data, (model_type, n_states, response_width, conf_scale) in iter.product(model.data, zip(model.model_type, model.n_states, model.response_width, model.conf_scale)))
+                                    # Original unpartitioned dataset/model product retained for reference:
+                                    # for data, (model_type, n_states, response_width, conf_scale) in iter.product(model.data, zip(model.model_type, model.n_states, model.response_width, model.conf_scale)))
+                                    for data, (model_type, n_states, response_width, conf_scale) in assigned_model_jobs)
     log.info(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
 
 
@@ -374,17 +468,49 @@ def _run_model(file_loc, data, version,
 
     fn = []
 
-    batch_n = 0
-    for i, (X, RT, ID) in enumerate(zip(X_split, RT_split, ID_split)):
+    process_id, process_count = _get_slurm_process_partition()
+    all_batches = list(enumerate(zip(X_split, RT_split, ID_split)))
+
+    if estimation_type == "MCMC" and process_count > 1:
+        assigned_batches = _partition_work_for_slurm(all_batches, process_id, process_count)
+    else:
+        assigned_batches = all_batches
+
+    # Original unpartitioned batch scheduling retained for reference:
+    # batch_n = 0
+    # for i, (X, RT, ID) in enumerate(zip(X_split, RT_split, ID_split)):
+    #     fn.append(delayed(run_half_model)(i, X, RT, ID))
+    #     batch_n = batch_n + 1
+    for i, (X, RT, ID) in assigned_batches:
         fn.append(delayed(run_half_model)(i, X, RT, ID))
-        batch_n = batch_n + 1
+
+    batch_n = len(fn)
         #run_half_model()
         #if is_test:
         #    break
     
     start_time = time.perf_counter()
-    n_jobs1=min(3,batch_n) if not is_test and is_parallel and jax.default_backend() != "gpu"  else 1
-    log.info(f"Starting {n_jobs1} jobs for sub-batch of participants in {data if isinstance(data, str) else data[0]} and {model_type}")
+    # Original batch-level parallelism retained for reference:
+    # n_jobs1=min(3,batch_n) if not is_test and is_parallel and jax.default_backend() != "gpu"  else 1
+    if process_count > 1:
+        n_jobs1 = 1
+    elif estimation_type == "MCMC":
+        n_jobs1 = min(3, batch_n) if not is_test and is_parallel and jax.default_backend() != "gpu" else 1
+    else:
+        n_jobs1 = 1
+
+    # Original participant-batch job logging retained for reference:
+    # log.info(f"Starting {n_jobs1} jobs for sub-batch of participants in {data if isinstance(data, str) else data[0]} and {model_type}")
+    log.info(
+        "Process %s/%s received participant batches %s for %s and %s; "
+        "running %s at a time",
+        process_id,
+        process_count,
+        [i for i, _ in assigned_batches],
+        data if isinstance(data, str) else data[0],
+        model_type,
+        n_jobs1,
+    )
     Parallel(n_jobs=n_jobs1, prefer="processes", backend = "loky")(f for f in fn)
     
     log.info(f"Job successfully completed for {name}, {model_type}, {version} after {((time.perf_counter() - start_time)/60):.2f} mins")

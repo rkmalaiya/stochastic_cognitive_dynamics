@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(timeout 60 python test/test_fit_scalable.py)"
+    ]
+  }
+}
