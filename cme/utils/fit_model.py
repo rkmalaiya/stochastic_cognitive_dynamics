@@ -492,8 +492,17 @@ def _run_model(file_loc, data, version,
     start_time = time.perf_counter()
     # Original batch-level parallelism retained for reference:
     # n_jobs1=min(3,batch_n) if not is_test and is_parallel and jax.default_backend() != "gpu"  else 1
+    # Original single-worker SLURM behavior retained for reference:
+    # if process_count > 1:
+    #     n_jobs1 = 1
     if process_count > 1:
-        n_jobs1 = 1
+        cores_per_batch = int(os.environ.get("CME_CORES_PER_BATCH", "10"))
+        allocated_cores = int(os.environ.get(
+            "SLURM_CPUS_PER_TASK",
+            os.cpu_count() or 1,
+        ))
+        local_worker_limit = max(1, allocated_cores // cores_per_batch)
+        n_jobs1 = max(1, min(local_worker_limit, batch_n))
     elif estimation_type == "MCMC":
         n_jobs1 = min(3, batch_n) if not is_test and is_parallel and jax.default_backend() != "gpu" else 1
     else:
