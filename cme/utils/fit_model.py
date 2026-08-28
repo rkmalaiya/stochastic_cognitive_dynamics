@@ -1,4 +1,6 @@
 import os
+import gc
+import socket
 # Original fixed-GPU selection retained for reference. SLURM sets
 # CUDA_VISIBLE_DEVICES separately for every GPU task before Python starts.
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0" # "0" "1"
@@ -67,6 +69,95 @@ def _get_slurm_process_partition():
 def _partition_work_for_slurm(work, process_id, process_count):
     """Assign independent work items to this SLURM process."""
     return work[process_id::process_count]
+
+
+def _read_text_if_available(path):
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            return file.read().strip()
+    except (OSError, UnicodeError):
+        return None
+
+
+def _format_kib(value):
+    try:
+        return f"{int(value.split()[0]) / (1024 ** 2):.2f} GiB"
+    except (AttributeError, TypeError, ValueError):
+        return "unavailable"
+
+
+def _format_bytes(value):
+    if value in (None, "", "max"):
+        return value or "unavailable"
+    try:
+        return f"{int(value) / (1024 ** 3):.2f} GiB"
+    except ValueError:
+        return "unavailable"
+
+
+def _get_memory_diagnostics():
+    details = []
+
+    status = _read_text_if_available("/proc/self/status")
+    if status:
+        status_values = {}
+        for line in status.splitlines():
+            key, separator, value = line.partition(":")
+            if separator:
+                status_values[key] = value.strip()
+
+        details.extend([
+            f"process_rss={_format_kib(status_values.get('VmRSS'))}",
+            f"process_peak_rss={_format_kib(status_values.get('VmHWM'))}",
+            f"process_virtual={_format_kib(status_values.get('VmSize'))}",
+            f"process_peak_virtual={_format_kib(status_values.get('VmPeak'))}",
+            f"process_threads={status_values.get('Threads', 'unavailable')}",
+        ])
+
+    meminfo = _read_text_if_available("/proc/meminfo")
+    if meminfo:
+        for line in meminfo.splitlines():
+            if line.startswith("MemAvailable:"):
+                details.append(
+                    f"node_memory_available={_format_kib(line.partition(':')[2].strip())}"
+                )
+                break
+
+    cgroup = _read_text_if_available("/proc/self/cgroup")
+    if cgroup:
+        cgroup_base = None
+        current_name = None
+        limit_name = None
+
+        for line in cgroup.splitlines():
+            hierarchy, controllers, relative_path = line.split(":", 2)
+            if hierarchy == "0":  # cgroup v2
+                cgroup_base = os.path.join(
+                    "/sys/fs/cgroup", relative_path.lstrip("/")
+                )
+                current_name = "memory.current"
+                limit_name = "memory.max"
+                break
+            if "memory" in controllers.split(","):  # cgroup v1
+                cgroup_base = os.path.join(
+                    "/sys/fs/cgroup/memory", relative_path.lstrip("/")
+                )
+                current_name = "memory.usage_in_bytes"
+                limit_name = "memory.limit_in_bytes"
+                break
+
+        if cgroup_base:
+            current = _read_text_if_available(
+                os.path.join(cgroup_base, current_name)
+            )
+            limit = _read_text_if_available(
+                os.path.join(cgroup_base, limit_name)
+            )
+            details.append(
+                f"job_cgroup_memory={_format_bytes(current)}/{_format_bytes(limit)}"
+            )
+
+    return ", ".join(details) if details else "memory diagnostics unavailable"
 
 #file_loc_X= "data/ad_X_"
 #file_loc_RT= "data/ad_rt_"
@@ -205,7 +296,9 @@ def fit_model(model: ModelDetails):
                                     # Original unpartitioned dataset/model product retained for reference:
                                     # for data, (model_type, n_states, response_width, conf_scale) in iter.product(model.data, zip(model.model_type, model.n_states, model.response_width, model.conf_scale)))
                                     for data, (model_type, n_states, response_width, conf_scale) in assigned_model_jobs)
-    log.info(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
+    # Original unconditional overall success message retained for reference:
+    # log.info(f"All jobs successfully completed for {model.model_type}_{model.version}!!!!")
+    log.info(f"All assigned dataset/model job loops completed for {model.model_type}_{model.version}!!!!")
 
 
 def _run_model(file_loc, data, version, 
@@ -478,13 +571,72 @@ def _run_model(file_loc, data, version,
     else:
         assigned_batches = all_batches
 
+    def run_half_model_safely(i, X, RT, ID):
+        participant_ids = np.asarray(ID).reshape(-1).tolist()
+
+        log.info(
+            "PARTICIPANT_MEMORY_START: batch=%s, participant_ids=%s, "
+            "host=%s, pid=%s; memory: %s",
+            i,
+            participant_ids,
+            socket.gethostname(),
+            os.getpid(),
+            _get_memory_diagnostics(),
+        )
+
+        try:
+            run_half_model(i, X, RT, ID)
+            return True
+        except Exception as error:
+            log.exception(
+                "PARTICIPANT_FAILED_CONTINUING: batch=%s, participant_ids=%s, "
+                "dataset=%s, model=%s, version=%s, error_type=%s, error=%s, "
+                "host=%s, pid=%s, SLURM_JOB_ID=%s, SLURM_STEP_ID=%s, "
+                "SLURM_PROCID=%s/%s, SLURM_CPUS_PER_TASK=%s, "
+                "SLURM_MEM_PER_NODE=%s; memory_before_cleanup: %s",
+                i,
+                participant_ids,
+                name,
+                model_type,
+                version,
+                type(error).__name__,
+                error,
+                socket.gethostname(),
+                os.getpid(),
+                os.environ.get("SLURM_JOB_ID", "not set"),
+                os.environ.get("SLURM_STEP_ID", "not set"),
+                process_id,
+                process_count,
+                os.environ.get("SLURM_CPUS_PER_TASK", "not set"),
+                os.environ.get("SLURM_MEM_PER_NODE", "not set"),
+                _get_memory_diagnostics(),
+            )
+
+            try:
+                jax.clear_caches()
+                gc.collect()
+            except Exception:
+                pass
+
+            log.error(
+                "PARTICIPANT_SKIPPED: batch=%s, participant_ids=%s; "
+                "continuing with the next assigned participant; "
+                "memory_after_cleanup: %s",
+                i,
+                participant_ids,
+                _get_memory_diagnostics(),
+            )
+            return False
+
     # Original unpartitioned batch scheduling retained for reference:
     # batch_n = 0
     # for i, (X, RT, ID) in enumerate(zip(X_split, RT_split, ID_split)):
     #     fn.append(delayed(run_half_model)(i, X, RT, ID))
     #     batch_n = batch_n + 1
     for i, (X, RT, ID) in assigned_batches:
-        fn.append(delayed(run_half_model)(i, X, RT, ID))
+        # Original unguarded participant execution retained for reference:
+        # fn.append(delayed(run_half_model)(i, X, RT, ID))
+        fn.append(delayed(run_half_model_safely)(i, X, RT, ID))
 
     batch_n = len(fn)
         #run_half_model()
@@ -529,6 +681,19 @@ def _run_model(file_loc, data, version,
         model_type,
         n_jobs1,
     )
-    Parallel(n_jobs=n_jobs1, prefer="processes", backend = "loky")(f for f in fn)
+    # Original result-discarding execution retained for reference:
+    # Parallel(n_jobs=n_jobs1, prefer="processes", backend = "loky")(f for f in fn)
+    participant_results = Parallel(n_jobs=n_jobs1, prefer="processes", backend = "loky")(f for f in fn)
+    failed_batches = participant_results.count(False)
+    log.info(
+        "Participant loop finished for %s, %s, %s: completed=%s, failed=%s",
+        name,
+        model_type,
+        version,
+        len(participant_results) - failed_batches,
+        failed_batches,
+    )
     
-    log.info(f"Job successfully completed for {name}, {model_type}, {version} after {((time.perf_counter() - start_time)/60):.2f} mins")
+    # Original unconditional success message retained for reference:
+    # log.info(f"Job successfully completed for {name}, {model_type}, {version} after {((time.perf_counter() - start_time)/60):.2f} mins")
+    log.info(f"Job loop completed for {name}, {model_type}, {version} after {((time.perf_counter() - start_time)/60):.2f} mins")
