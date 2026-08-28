@@ -163,7 +163,9 @@ def fit_model(model: ModelDetails):
     # n_jobs = min(3, len(model.data) + len(model.model_type)) if not model.is_test and model.is_parallel and jax.default_backend() != "gpu" else 1
     if (
         model.estimation_type == "VI"
-        and process_count == 1
+        # Original single-process check retained for reference:
+        # and process_count == 1
+        and os.environ.get("SLURM_PROCID") is None
         and not model.is_test
         and model.is_parallel
         and compute_backend != "gpu"
@@ -495,14 +497,21 @@ def _run_model(file_loc, data, version,
     # Original single-worker SLURM behavior retained for reference:
     # if process_count > 1:
     #     n_jobs1 = 1
-    if process_count > 1:
-        cores_per_batch = int(os.environ.get("CME_CORES_PER_BATCH", "10"))
-        allocated_cores = int(os.environ.get(
-            "SLURM_CPUS_PER_TASK",
-            os.cpu_count() or 1,
-        ))
-        local_worker_limit = max(1, allocated_cores // cores_per_batch)
-        n_jobs1 = max(1, min(local_worker_limit, batch_n))
+    # Original multi-process SLURM check retained for reference:
+    # if process_count > 1:
+    if os.environ.get("SLURM_PROCID") is not None:
+        # Original cores-per-batch SLURM scheduling retained for reference:
+        # cores_per_batch = int(os.environ.get("CME_CORES_PER_BATCH", "10"))
+        # allocated_cores = int(os.environ.get(
+        #     "SLURM_CPUS_PER_TASK",
+        #     os.cpu_count() or 1,
+        # ))
+        # local_worker_limit = max(1, allocated_cores // cores_per_batch)
+        # n_jobs1 = max(1, min(local_worker_limit, batch_n))
+
+        # SLURM already distributes batches between nodes. Run one JAX
+        # process per node and let JAX/native math use the allocated cores.
+        n_jobs1 = 1
     elif estimation_type == "MCMC":
         n_jobs1 = min(3, batch_n) if not is_test and is_parallel and jax.default_backend() != "gpu" else 1
     else:

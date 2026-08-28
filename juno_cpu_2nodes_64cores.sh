@@ -19,16 +19,20 @@ module load miniconda
 source ~/.bashrc
 conda activate ds
 
-export CME_CORES_PER_BATCH=10
+# Original per-batch core budget retained for reference. SLURM now runs one
+# JAX process per node and does not start local Joblib children.
+# export CME_CORES_PER_BATCH=10
 
 # Original single-thread restrictions retained for reference:
 # export OMP_NUM_THREADS=1
 # export MKL_NUM_THREADS=1
 # export OPENBLAS_NUM_THREADS=1
 
-export OMP_NUM_THREADS="${CME_CORES_PER_BATCH}"
-export MKL_NUM_THREADS="${CME_CORES_PER_BATCH}"
-export OPENBLAS_NUM_THREADS="${CME_CORES_PER_BATCH}"
+# Original explicit thread limits retained for reference. JAX and the native
+# math libraries now use the CPUs made available by SLURM.
+# export OMP_NUM_THREADS="${CME_CORES_PER_BATCH}"
+# export MKL_NUM_THREADS="${CME_CORES_PER_BATCH}"
+# export OPENBLAS_NUM_THREADS="${CME_CORES_PER_BATCH}"
 
 cd "${SLURM_SUBMIT_DIR}"
 # Original example entry point retained for reference:
