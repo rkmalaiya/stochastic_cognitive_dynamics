@@ -11,6 +11,7 @@ import cme.decision_models.quantum_discrete as qd
 import arviz as az
 import xarray as xa
 import polars as pl
+from joblib import Parallel, delayed
 log = cm_log.get_logger("post_process_model")
 import itertools as iter
 
@@ -77,6 +78,23 @@ def collect_response_from_model_output(folder, data_mod_ver, batch_size=0):
                         subfile_id = indicator.split(f"{version}_")[1].removesuffix(".pkl")
                         ))
 
+    def process_file(file, dataset, model, version):
+        with open(file, "rb") as pkl:
+            model_out = pickle.load(pkl)
+
+        processed_values = {
+            key: make_dataframe(
+                model_out[key], file, folder, dataset, model, version
+            )
+            for key in keys_process
+        }
+        stored_values = {
+            key: model_out[key]
+            for key in keys
+            if key not in keys_process
+        }
+        return processed_values, stored_values
+
     #dataset = indicator.split("_")[3], 
     #size = indicator.split("_")[4], 
     #subfile_id = indicator.split(f"{version}_")[1]
@@ -92,14 +110,25 @@ def collect_response_from_model_output(folder, data_mod_ver, batch_size=0):
             pkl_file = f"{folder}/mcmc_samples_{dataset}_{model}_{version}_*.pkl"
             pkl_files = gl.glob(pkl_file)
 
-            for file in pkl_files: 
-                with open(file, "rb") as pkl:
-                        model_out = pickle.load(pkl)
-                        for key in keys:
-                            if key in keys_process:
-                                keys_process_dict[key].append(make_dataframe(model_out[key], file, folder, dataset, model, version))
-                            else:
-                                keys_dict[key].append(model_out[key])
+            # Original serial file processing retained for reference:
+            # for file in pkl_files:
+            #     with open(file, "rb") as pkl:
+            #             model_out = pickle.load(pkl)
+            #             for key in keys:
+            #                 if key in keys_process:
+            #                     keys_process_dict[key].append(make_dataframe(model_out[key], file, folder, dataset, model, version))
+            #                 else:
+            #                     keys_dict[key].append(model_out[key])
+            file_results = Parallel(n_jobs=6)(
+                delayed(process_file)(file, dataset, model, version)
+                for file in pkl_files
+            )
+
+            for processed_values, stored_values in file_results:
+                for key, value in processed_values.items():
+                    keys_process_dict[key].append(value)
+                for key, value in stored_values.items():
+                    keys_dict[key].append(value)
             dataset_dict[model+"_"+dataset] = keys_dict
     df_observed_rt = pd.concat(keys_process_dict["RT"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)
     df_observed_ra = pd.concat(keys_process_dict["X"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)      
