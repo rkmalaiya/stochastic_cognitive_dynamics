@@ -10,3 +10,4 @@ examples/export
 *checkpoint*
 *.gif
 *.venv_ds*
+*.png
