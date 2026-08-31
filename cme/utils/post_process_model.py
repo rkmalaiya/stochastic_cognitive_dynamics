@@ -78,23 +78,6 @@ def collect_response_from_model_output(folder, data_mod_ver, batch_size=0):
                         subfile_id = indicator.split(f"{version}_")[1].removesuffix(".pkl")
                         ))
 
-    def process_file(file, dataset, model, version):
-        with open(file, "rb") as pkl:
-            model_out = pickle.load(pkl)
-
-        processed_values = {
-            key: make_dataframe(
-                model_out[key], file, folder, dataset, model, version
-            )
-            for key in keys_process
-        }
-        stored_values = {
-            key: model_out[key]
-            for key in keys
-            if key not in keys_process
-        }
-        return processed_values, stored_values
-
     #dataset = indicator.split("_")[3], 
     #size = indicator.split("_")[4], 
     #subfile_id = indicator.split(f"{version}_")[1]
@@ -102,34 +85,69 @@ def collect_response_from_model_output(folder, data_mod_ver, batch_size=0):
     keys_process = ["RT", "X", "mean_init_conf", "mean_final_conf"]
     keys_process_dict = {key: [] for key in keys}
     dataset_dict = {}
-    for dataset, m_v in data_mod_ver.items():
-        for model, version in m_v:
 
+    def process_dataset(dataset, m_v):
+        dataset_processed_values = {key: [] for key in keys}
+        dataset_model_values = {}
+
+        for model, version in m_v:
             keys_dict = {key: [] for key in keys}
 
-            pkl_file = f"{folder}/mcmc_samples_{dataset}_{model}_{version}_*.pkl"
+            pkl_file = (
+                f"{folder}/mcmc_samples_"
+                f"{dataset}_{model}_{version}_*.pkl"
+            )
             pkl_files = gl.glob(pkl_file)
 
-            # Original serial file processing retained for reference:
-            # for file in pkl_files:
-            #     with open(file, "rb") as pkl:
-            #             model_out = pickle.load(pkl)
-            #             for key in keys:
-            #                 if key in keys_process:
-            #                     keys_process_dict[key].append(make_dataframe(model_out[key], file, folder, dataset, model, version))
-            #                 else:
-            #                     keys_dict[key].append(model_out[key])
-            file_results = Parallel(n_jobs=6)(
-                delayed(process_file)(file, dataset, model, version)
-                for file in pkl_files
-            )
+            for file in pkl_files:
+                with open(file, "rb") as pkl:
+                    model_out = pickle.load(pkl)
 
-            for processed_values, stored_values in file_results:
-                for key, value in processed_values.items():
-                    keys_process_dict[key].append(value)
-                for key, value in stored_values.items():
-                    keys_dict[key].append(value)
-            dataset_dict[model+"_"+dataset] = keys_dict
+                for key in keys:
+                    if key in keys_process:
+                        dataset_processed_values[key].append(
+                            make_dataframe(
+                                model_out[key],
+                                file,
+                                folder,
+                                dataset,
+                                model,
+                                version,
+                            )
+                        )
+                    else:
+                        keys_dict[key].append(model_out[key])
+
+            dataset_model_values[model + "_" + dataset] = keys_dict
+
+        return dataset_processed_values, dataset_model_values
+
+    # Original serial dataset/model/file processing retained for reference:
+    # for dataset, m_v in data_mod_ver.items():
+    #     for model, version in m_v:
+    #         keys_dict = {key: [] for key in keys}
+    #         pkl_file = f"{folder}/mcmc_samples_{dataset}_{model}_{version}_*.pkl"
+    #         pkl_files = gl.glob(pkl_file)
+    #         for file in pkl_files:
+    #             with open(file, "rb") as pkl:
+    #                     model_out = pickle.load(pkl)
+    #                     for key in keys:
+    #                         if key in keys_process:
+    #                             keys_process_dict[key].append(make_dataframe(model_out[key], file, folder, dataset, model, version))
+    #                         else:
+    #                             keys_dict[key].append(model_out[key])
+    #         dataset_dict[model+"_"+dataset] = keys_dict
+    dataset_results = Parallel(n_jobs=6)(
+        delayed(process_dataset)(dataset, m_v)
+        for dataset, m_v in data_mod_ver.items()
+    )
+
+    for dataset_processed_values, dataset_model_values in dataset_results:
+        for key in keys_process:
+            keys_process_dict[key].extend(dataset_processed_values[key])
+
+        dataset_dict.update(dataset_model_values)
+
     df_observed_rt = pd.concat(keys_process_dict["RT"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)
     df_observed_ra = pd.concat(keys_process_dict["X"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)      
     df_mean_init_conf = pd.concat(keys_process_dict["mean_init_conf"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)
