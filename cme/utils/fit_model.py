@@ -1,6 +1,8 @@
 import os
 import gc
 import socket
+import json
+from datetime import datetime
 # Original fixed-GPU selection retained for reference. SLURM sets
 # CUDA_VISIBLE_DEVICES separately for every GPU task before Python starts.
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0" # "0" "1"
@@ -159,6 +161,7 @@ def _get_memory_diagnostics():
 
     return ", ".join(details) if details else "memory diagnostics unavailable"
 
+
 #file_loc_X= "data/ad_X_"
 #file_loc_RT= "data/ad_rt_"
 
@@ -202,6 +205,77 @@ class ModelDetails:
     is_parallel:bool=False
 
 
+_FIT_CONFIGURATION_COLUMNS = [
+    "data",
+    "file_pre",
+    "version",
+    "model_type",
+    "n_states",
+    "start_width",
+    "response_width",
+    "delta",
+    "measurement_prob",
+    "params_type",
+    "transition_type",
+    "likelihood_type",
+    "sampling_type",
+    "estimation_type",
+    "execution_type",
+    "num_warmup",
+    "samples_n",
+    "num_chains",
+    "max_tree_depth",
+    "predictive_n",
+    "batch_size",
+]
+
+def _configuration_value(value):
+    if isinstance(value, dict):
+        value = list(value)
+    if isinstance(value, (list, tuple)):
+        return json.dumps(value, default=str)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _write_fit_configuration_csv(model):
+    process_id, _ = _get_slurm_process_partition()
+    if process_id != 0:
+        return
+
+    configuration = {
+        column: _configuration_value(getattr(model, column))
+        for column in _FIT_CONFIGURATION_COLUMNS
+    }
+
+    os.makedirs("export", exist_ok=True)
+    csv_path = os.path.join("export", "fit_model_configurations.csv")
+    columns = ["created_date", *_FIT_CONFIGURATION_COLUMNS]
+
+    if os.path.exists(csv_path):
+        configurations = pd.read_csv(
+            csv_path, dtype=str, keep_default_na=False
+        )
+        matching = pd.Series(True, index=configurations.index)
+        for column, value in configuration.items():
+            matching &= configurations[column].eq(value)
+
+        if matching.any():
+            return
+    else:
+        configurations = pd.DataFrame(columns=columns)
+
+    configuration["created_date"] = datetime.now().isoformat(
+        timespec="seconds"
+    )
+    configurations = pd.concat(
+        [configurations, pd.DataFrame([configuration])],
+        ignore_index=True,
+    )
+    configurations[columns].to_csv(csv_path, index=False)
+
+
 def _add_prior_to_arviz_data(arviz_data, prior_samples, prior_pd_samples, RT, coords, dims):
     prior_rt = np.asarray([samples["Samples"]["RT"].values for samples in prior_pd_samples]) # predictive_n x I x J when reshaped below
     prior_rt = prior_rt.reshape((-1,*RT.shape)) # predictive_n x I x J
@@ -225,6 +299,7 @@ def _add_prior_to_arviz_data(arviz_data, prior_samples, prior_pd_samples, RT, co
 #folder, file_pre, file_posts, version, n_states, start_width, delta, measurement_prob, params_type, model_type, transition_type, likelihood_type, sampling_type
 def fit_model(model: ModelDetails):
     process_id, process_count = _get_slurm_process_partition()
+    _write_fit_configuration_csv(model)
     compute_backend = jax.default_backend()
     compute_devices = jax.devices()
     # Original compute-device logging retained for reference:
