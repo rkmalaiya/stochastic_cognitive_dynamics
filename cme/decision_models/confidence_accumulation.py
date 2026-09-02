@@ -27,7 +27,7 @@ from cme.utils import common_utils as cu
 log = cl.get_logger("confidence_accumulation")
 
 #pyro.set_platform("cpu")
-pyro.set_host_device_count(64)
+# pyro.set_host_device_count(64)
 #pyro.enable_x64()
 
 def diffusion_buildK(n_states, mu, sigma=1, delta=0.01, boundary_type = "External"): 
@@ -991,4 +991,3 @@ def get_intensity_matrix(n_states, mu, sigma, model_type="Markov|Quantum"):
         return quantum_buildH(n_states, mu, sigma)
     else:
         raise Exception(f"Please select one of {model_type}")
-

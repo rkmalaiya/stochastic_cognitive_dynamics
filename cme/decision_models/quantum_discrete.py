@@ -26,7 +26,7 @@ import jax
 
 
 
-npy.set_host_device_count(64)
+# npy.set_host_device_count(64)
 _rng_key = random.PRNGKey(0)
 _rng_key, _rng_key_ = random.split(_rng_key)
 
@@ -940,6 +940,5 @@ if __name__ == "__main__":
 
 
        
-
 
 

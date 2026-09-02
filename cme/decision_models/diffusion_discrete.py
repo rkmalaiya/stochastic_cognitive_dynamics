@@ -18,7 +18,7 @@ import scipy.stats as stats
 from jax import lax
 
 #npy.set_platform("cpu")
-npy.set_host_device_count(64)
+# npy.set_host_device_count(64)
 npy.enable_x64()
 
 #from numpyro.contrib.tfp.mcmc import TFPKernel
@@ -33,7 +33,7 @@ import jax
 
 
 
-npy.set_host_device_count(64)
+# npy.set_host_device_count(64)
 _rng_key = random.PRNGKey(0)
 _rng_key, _rng_key_ = random.split(_rng_key)
 
