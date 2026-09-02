@@ -16,17 +16,12 @@ from numpyro.infer.initialization import init_to_median
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
-import sys
 import os
 import time
 from joblib import Parallel, delayed
 
 
 from numpyro import enable_validation
-# Validation adds distribution argument checks into every model trace. Useful while
-# developing the model, pure overhead once it is fixed. Flip back to True if a new
-# prior or distribution misbehaves.
-# Original always-on validation retained for reference:
 # enable_validation(True)
 enable_validation(False)
 
@@ -35,12 +30,6 @@ from cme.utils import common_utils as cu
 log = cl.get_logger("confidence_accumulation")
 
 #pyro.set_platform("cpu")
-# One XLA CPU device per MCMC chain. chain_method="parallel" maps one chain onto one
-# device, so this must be >= num_chains or numpyro cannot run the chains in parallel.
-# More devices than chains does nothing - the extra ones just sit idle. 64 devices on
-# a 10-core SLURM allocation was the oversubscription; commenting it out left only 1
-# device, which is what forced chain_method="vectorized".
-# Original 64-device configuration retained for reference:
 # pyro.set_host_device_count(64)
 pyro.set_host_device_count(4)
 #pyro.enable_x64()
@@ -879,21 +868,9 @@ def sample_posterior_params(DT, X, n_states, start_width, response_width, delta,
                   dense_mass=True, init_strategy=init_to_median(num_samples=20),
                   target_accept_prob=0.8 if model_type=="Quantum" else 0.9,
                   max_tree_depth=max_tree_depth)
-    # "vectorized" vmaps the chains, so NUTS's tree-building while_loop runs until the
-    # SLOWEST chain finishes - every chain pays the maximum tree depth of the group,
-    # every iteration. With mean ~473 steps and max 1023 that alone is ~2x waste, on top
-    # of losing the 4x from running four chains concurrently. Measured on Juno as
-    # ~20 s/it vectorized vs ~1.2 s/it parallel.
-    # Original CPU/GPU chain selection retained for reference:
     # chain_method = "sequential" if num_chains == 1 else ("vectorized" if jax.default_backend() == "gpu" else "parallel")
-    # Vectorized-only version retained for reference:
     # chain_method = "vectorized"
     chain_method = "sequential" if num_chains == 1 else "parallel"
-    # Progress bar kept on everywhere - it logs usefully into the .err file under SLURM.
-    # TTY-only version retained for reference:
-    # show_progress = sys.stdout.isatty()
-    # mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains,
-    #                   chain_method=chain_method, progress_bar=show_progress, jit_model_args=False)
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains,
                       chain_method=chain_method, progress_bar=True, jit_model_args=False)
     start_run = time.perf_counter()
@@ -909,10 +886,6 @@ def sample_posterior_params(DT, X, n_states, start_width, response_width, delta,
     divergences = np.asarray(mcmc_diagnostics["diverging"]) # num_chains*samples_n
     log.info(f"NUTS diagnostics - chains: {num_chains}, mean steps: {num_steps.mean():.2f}, max steps: {num_steps.max()}, divergences: {divergences.sum()}")
 
-    # One line to compare a Juno run against a laptop run. ms_per_it and us_per_grad are
-    # the numbers that matter: laptop reference is ~21 ms/it at n_states=51, I=1, J=30,
-    # 4 chains, chain_method=parallel. cores_allowed is what SLURM actually granted -
-    # if it is far below cpu_count then JAX/Eigen are oversubscribing the allocation.
     iters = num_warmup + samples_n
     cores_allowed = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
     log.info(
