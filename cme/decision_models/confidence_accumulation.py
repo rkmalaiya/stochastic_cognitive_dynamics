@@ -868,9 +868,9 @@ def sample_posterior_params(DT, X, n_states, start_width, response_width, delta,
                   dense_mass=True, init_strategy=init_to_median(num_samples=20),
                   target_accept_prob=0.8 if model_type=="Quantum" else 0.9,
                   max_tree_depth=max_tree_depth)
-    # chain_method = "sequential" if num_chains == 1 else ("vectorized" if jax.default_backend() == "gpu" else "parallel")
     # chain_method = "vectorized"
-    chain_method = "sequential" if num_chains == 1 else "parallel"
+    # chain_method = "sequential" if num_chains == 1 else "parallel"
+    chain_method = "sequential" if num_chains == 1 else ("vectorized" if jax.default_backend() == "gpu" else "parallel")
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains,
                       chain_method=chain_method, progress_bar=True, jit_model_args=False)
     start_run = time.perf_counter()

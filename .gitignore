@@ -11,3 +11,4 @@ examples/export
 *.gif
 *.venv_ds*
 *.png
+*.egg-info/
