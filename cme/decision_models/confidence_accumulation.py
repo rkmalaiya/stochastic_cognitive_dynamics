@@ -338,29 +338,57 @@ def _get_measurement_matrix(n_states, response_width, prob=0.5, model_type = "Ma
         raise Exception(f"Please select one of {model_type}")
     return Mcorr, Mincorr, Mnoresp
 
+PHI_CONC_BASE = 1.0
+PHI_CONC_AMP = 4.0
+
+def _initial_state_concentration(n_free, model_type):
+    x = npx.arange(n_free) - (n_free - 1) / 2
+    w = n_free / 6
+    if model_type == "Markov":
+        shape = npx.exp(-0.5 * (x / w) ** 2)
+    elif model_type == "Quantum":
+        e = (n_free - 1) / 2
+        shape = npx.exp(-0.5 * ((x - e) / w) ** 2) + npx.exp(-0.5 * ((x + e) / w) ** 2)
+    else:
+        raise Exception(f"Please select one of {model_type}")
+    return PHI_CONC_BASE + PHI_CONC_AMP * shape
+
 def _get_initial_state(n_states, start_width, response_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Upper|Lower|Centered|All|Model"):
     if prior_type == "Model":
+        # if model_type == "Markov":
+        #     with npy.plate('I1', I, dim=-4):
+        #         with npy.plate('S', n_states - 2*response_width, dim=-1):
+        #             conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
+        #
+        #     with npy.plate('I2', I, dim=-3):
+        #         p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+        #     p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
+        #     phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)
+        # elif model_type == "Quantum":
+        #     with npy.plate('I1', I, dim=-4):
+        #         with npy.plate('S', n_states - 2*response_width, dim=-1):
+        #             conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
+        #
+        #     with npy.plate('I2', I, dim=-3):
+        #         p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+        #
+        #     p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
+        #     phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)**(1/2))
+        # else:
+        #     raise Exception(f"Please select one of {model_type}")
+        n_free = n_states - 2*response_width
+        conc = npx.broadcast_to(_initial_state_concentration(n_free, model_type), (I, 1, 1, n_free))
+        npy.deterministic("phi_conc", conc)
+
+        with npy.plate('I2', I, dim=-3):
+            p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+
+        p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
+
         if model_type == "Markov":
-            with npy.plate('I1', I, dim=-4):
-                with npy.plate('S', n_states - 2*response_width, dim=-1):
-                    conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
-
-            with npy.plate('I2', I, dim=-3):
-                p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
-            p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
-            phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)  
-        elif model_type == "Quantum":
-            with npy.plate('I1', I, dim=-4):
-                with npy.plate('S', n_states - 2*response_width, dim=-1):
-                    conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
-
-            with npy.plate('I2', I, dim=-3):
-                p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
-                
-            p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
-            phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)**(1/2))
+            phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2))
         else:
-            raise Exception(f"Please select one of {model_type}")
+            phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)**(1/2))
     else:
         width = start_width #choose odd number
         if prior_type == "Upper":
@@ -879,27 +907,14 @@ def sample_posterior_params(DT, X, n_states, start_width, response_width, delta,
                    likelihood_type=likelihood_type, model_type=model_type,
                    # extra_fields=('potential_energy',)
                    extra_fields=('potential_energy', 'num_steps', 'accept_prob', 'diverging', 'adapt_state.step_size'))
-    run_secs = time.perf_counter() - start_run
 
     mcmc_diagnostics = mcmc_chain.get_extra_fields()
     num_steps = np.asarray(mcmc_diagnostics["num_steps"]) # num_chains*samples_n
     divergences = np.asarray(mcmc_diagnostics["diverging"]) # num_chains*samples_n
-    log.info(f"NUTS diagnostics - chains: {num_chains}, mean steps: {num_steps.mean():.2f}, max steps: {num_steps.max()}, divergences: {divergences.sum()}")
-
+    run_secs = time.perf_counter() - start_run
     iters = num_warmup + samples_n
-    cores_allowed = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
-    log.info(
-        "PERF: model=%s method=%s chains=%s iters=%s wall=%.1fs %.1f ms/it "
-        "%.0f us/grad steps_mean=%.0f steps_max=%s div=%s | devices=%s "
-        "cores_allowed=%s cpu_count=%s OMP=%s XLA_FLAGS=%s",
-        model_type, chain_method, num_chains, iters, run_secs,
-        run_secs / iters * 1e3,
-        run_secs / iters / max(num_steps.mean(), 1) * 1e6,
-        num_steps.mean(), num_steps.max(), divergences.sum(),
-        jax.local_device_count(), cores_allowed, os.cpu_count(),
-        os.environ.get("OMP_NUM_THREADS", "unset"),
-        os.environ.get("XLA_FLAGS", "unset"),
-    )
+    log.info(f"NUTS diagnostics - chains: {num_chains}, mean steps: {num_steps.mean():.2f}, max steps: {num_steps.max()}, divergences: {divergences.sum()}")
+    log.info(f"PERF: model={model_type} method={chain_method} devices={jax.local_device_count()} cores={os.process_cpu_count()} iters={iters} wall={run_secs/60:.2f} mins {run_secs/iters*1e3:.1f} ms/it {run_secs/iters/num_steps.mean()*1e6:.0f} us/grad")
 
     return mcmc_chain#, post_likl
 
