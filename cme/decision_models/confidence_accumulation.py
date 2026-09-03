@@ -1,49 +1,21 @@
 #from turtle import width
-from turtle import pos
 import jax.numpy as npx
 import jax.scipy as sci
-import numpyro as pyro
-import numpyro as npy
-import jax
-import numpyro.distributions as dist
-from numpyro.infer import MCMC, NUTS, Predictive, SVI, Trace_ELBO
-import numpyro.infer.autoguide as ag
 from jax import lax
-import arviz as az 
-from numpyro.distributions import constraints
-from numpyro.infer.initialization import init_to_median
 
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
-import sys
-import os
-import time
-from joblib import Parallel, delayed
-
-
-from numpyro import enable_validation
-# Validation adds distribution argument checks into every model trace. Useful while
-# developing the model, pure overhead once it is fixed. Flip back to True if a new
-# prior or distribution misbehaves.
-# Original always-on validation retained for reference:
-# enable_validation(True)
-enable_validation(False)
 
 from cme.utils import common_logging as cl
 from cme.utils import common_utils as cu
 log = cl.get_logger("confidence_accumulation")
 
-#pyro.set_platform("cpu")
-# One XLA CPU device per MCMC chain. chain_method="parallel" maps one chain onto one
-# device, so this must be >= num_chains or numpyro cannot run the chains in parallel.
-# More devices than chains does nothing - the extra ones just sit idle. 64 devices on
-# a 10-core SLURM allocation was the oversubscription; commenting it out left only 1
-# device, which is what forced chain_method="vectorized".
-# Original 64-device configuration retained for reference:
-# pyro.set_host_device_count(64)
-pyro.set_host_device_count(4)
-#pyro.enable_x64()
+# This module is the model: it builds the intensity and measurement matrices,
+# evolves the state, generates response data, and evaluates the likelihood.
+# It holds no inference machinery and imports no numpyro - everything that
+# estimates parameters from data lives in `cme.inference`.
+
 
 def diffusion_buildK(n_states, mu, sigma=1, delta=0.01, boundary_type = "External"): 
     mu = npx.asarray(mu) #Ix1
@@ -133,99 +105,6 @@ def quantum_buildH(n_states, mu, sigma, delta=0.001, n_trials = None):
 
     return -1j * params["H"] # The -1j is being multiplied here to simplify the transaction multiplication operations.
 
-
-def centralized_parameters(I):
-    """
-    I: Number of participants
-    
-    """
-    mu_m =  pyro.sample(f"mu_m", dist.Normal(0,1))
-    mu_s =  pyro.sample(f"mu_s", dist.HalfNormal(2))
-    with pyro.plate('I6', I, dim=-2):
-        mu = pyro.sample("mu", dist.Normal(mu_m,mu_s)) # Drift Rate
-        sigma = pyro.sample("sigma", dist.Normal(1,0.1)) # Diffusion Rate
-    return mu, sigma
-
-# def non_centralized_parameters(model_type, I):
-#     """
-#     I: Number of participants
-#     Model-specific priors for improved numerical stability
-#     """
-#     m = pyro.sample("m", dist.Normal(0.1,0.1))
-#     #m = pyro.deterministic("m", 0.1)
-#     s = pyro.sample("s", dist.HalfNormal(0.1))
-
-#     # Quantum models need tighter prior control on sigma scale
-#     if model_type == "Quantum":
-#         m_si = pyro.sample("m_si", dist.Normal(0.5, 0.5))  # Shifted to ensure positive softplus output
-#         s_si = pyro.sample("s_si", dist.HalfNormal(0.05))  # Tighter to prevent extreme values
-#     else:  # Markov
-#         m_si = pyro.sample("m_si", dist.Normal(0, 1))
-#         s_si = pyro.sample("s_si", dist.HalfNormal(0.1))
-
-#     with pyro.plate('I3', I, dim=-2):
-#         if model_type == "Markov":
-#             mu_r = pyro.sample("mu_r", dist.Normal(0.1,1)) # Drift Rate
-#             mu = pyro.deterministic("mu", m + s * mu_r)
-#         elif model_type == "Quantum":
-#             mu_r = pyro.sample("mu_r", dist.Normal(0.1,1)) # Drift Rate
-#             mu = pyro.deterministic("mu", jax.nn.softplus(m + s * mu_r))
-       
-#         if model_type == "Markov":
-#             sigma_r = pyro.sample("sigma_r", dist.Normal(0,0.1)) # Diffusion Rate
-#         elif model_type == "Quantum":
-#             sigma_r = pyro.sample("sigma_r", dist.Normal(0,0.1)) # Diffusion Rate
-
-        
-#         sigma_base = jax.nn.softplus(m_si + s_si * sigma_r)
-        
-#         # Ensure minimum floor for numerical stability in Quantum likelihood
-#         if model_type == "Quantum":
-#             sigma = pyro.deterministic("sigma", npx.clip(sigma_base, 0.01, None))
-#         else:
-#             sigma = pyro.deterministic("sigma", sigma_base)
-    
-#     return mu, sigma
-
-
-def non_centralized_parameters(model_type, I):
-    # Fixed prior location/scale for drift
-    m = pyro.deterministic("m", npx.asarray(0.1))
-    s = pyro.deterministic("s", npx.asarray(0.1))
-
-    # Fixed prior location/scale for sigma
-    if model_type == "Quantum":
-        m_si = pyro.deterministic("m_si", npx.asarray(0.5))
-        s_si = pyro.deterministic("s_si", npx.asarray(0.05))
-    else:  # Markov
-        m_si = pyro.deterministic("m_si", npx.asarray(0.0))
-        s_si = pyro.deterministic("s_si", npx.asarray(0.1))
-
-    with pyro.plate("I3", I, dim=-2):
-
-        # Drift
-        if model_type == "Markov":
-            mu_r = pyro.sample("mu_r", dist.Normal(0.1, 1.0))
-            mu = pyro.deterministic("mu", m + s * mu_r)
-
-        elif model_type == "Quantum":
-            mu_r = pyro.sample("mu_r", dist.Normal(0.1, 1.0))
-            mu = pyro.deterministic("mu", jax.nn.softplus(m + s * mu_r))
-
-        else:
-            raise Exception(f"Please select one of {model_type}")
-
-        # Diffusion
-        sigma_r = pyro.sample("sigma_r", dist.Normal(0.0, 0.1))
-
-        sigma_base = jax.nn.softplus(m_si + s_si * sigma_r)
-
-        if model_type == "Quantum":
-            sigma = pyro.deterministic("sigma", npx.clip(sigma_base, 0.01, None))
-        else:
-            sigma = pyro.deterministic("sigma", sigma_base)
-
-    return mu, sigma
 
 
 def _timestep_transition_matrix(n, T_delta, Mn):
@@ -351,27 +230,10 @@ def _get_measurement_matrix(n_states, response_width, prob=0.5, model_type = "Ma
 
 def _get_initial_state(n_states, start_width, response_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Upper|Lower|Centered|All|Model"):
     if prior_type == "Model":
-        if model_type == "Markov":
-            with npy.plate('I1', I, dim=-4):
-                with npy.plate('S', n_states - 2*response_width, dim=-1):
-                    conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
-
-            with npy.plate('I2', I, dim=-3):
-                p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
-            p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
-            phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)  
-        elif model_type == "Quantum":
-            with npy.plate('I1', I, dim=-4):
-                with npy.plate('S', n_states - 2*response_width, dim=-1):
-                    conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
-
-            with npy.plate('I2', I, dim=-3):
-                p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
-                
-            p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
-            phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)**(1/2))
-        else:
-            raise Exception(f"Please select one of {model_type}")
+        raise Exception(
+            'prior_type="Model" draws phi_0 as a latent variable and belongs to '
+            "inference: use cme.inference.priors.sample_initial_state instead."
+        )
     else:
         width = start_width #choose odd number
         if prior_type == "Upper":
@@ -555,32 +417,6 @@ def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=No
     return ret_val
 
 
-def transformed_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
-    
-    return estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-
-def estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
-    P_t = likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-    #P_t = npx.where(P_t <= 0, 0.00001, npx.log(P_t))
-    # P_t = npx.where(P_t <= 0, 10e-12, P_t)
-    # P_t = npx.where(npx.isnan(P_t), 10e-12, P_t)
-    # P_t = npx.log(P_t)
-    # #pyro.deterministic("loglikl", P_t.sum(axis=-1)) #summing over trials
-    # return P_t.sum(axis=-1)
-    eps = 1e-15
-    eps_nan = 1e-12 # having two different eps for debugging purposes.
-
-    pyro.deterministic("P_min", npx.min(P_t))
-    pyro.deterministic("P_max", npx.max(P_t))
-    pyro.deterministic("P_clip_low", npx.mean(P_t <= eps))
-    pyro.deterministic("P_clip_high", npx.mean(P_t >= 1.0))
-
-    P_t = npx.where(npx.isnan(P_t), eps_nan, P_t)
-    P_t = npx.clip(P_t, eps, 1.0)
-    P_t = npx.log(P_t)
-    #pyro.deterministic("loglikl", P_t.sum(axis=-1))
-    return P_t#.sum(axis=-1) For LOO and other model comparison, I need trialvise log-likelihood.
-
 def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", model_type="Markov|Quantum"):
 
     phi_t = perform_state_transition(intensity_matrix, RT_s, RA_s, Mc, Mw, Mn, phi_0, delta, 
@@ -618,50 +454,6 @@ def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transitio
         raise Exception(f"Please select one of {model_type}")
   
     return P_t #npx.log(npx.sum(P_t)) # summing over all participants and trials
-
-def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
-    
-    if likelihood_type == "SINGLE":
-        I, _ = RA_s.shape
-    elif likelihood_type == "JOINT":
-        if RA_s[0].shape != RA_s[1].shape:
-            raise Exception("All Responses should be equal shaped")
-        I, _ = RA_s[0].shape
-    else:
-        raise Exception(f"Please select one of {likelihood_type} for likelihood")
-
-    if params_type == "Centralized":
-        mu, sigma = centralized_parameters(I)
-    elif params_type == "NonCentralized":
-        mu, sigma = non_centralized_parameters(model_type, I)
-    #elif params_type == "ParticipantLevel":
-    #    mu, sigma = participant_parameters(model_type, I)
-    else:
-        raise Exception(f"Please select one of {params_type}")
-
-    if model_type == "Markov":
-        sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
-                # removed sigma**2 to allow stability in parameter estimates. Negative values are avoided through softplus now
-        intensity_matrix = diffusion_buildK(n_states, mu, sigma, delta)
-
-    elif model_type == "Quantum":
-        # For Quantum: ensure sigma > 0 and has numerical stability
-        # Consider making sigma magnitude scale with mu for better parameter coupling
-        sigma_quantum = npx.clip(npx.abs(mu) * 0.5 + sigma, 0.01, None)
-        sigma = pyro.deterministic("sigma_final", sigma_quantum)
-        intensity_matrix = quantum_buildH(n_states, mu, sigma, delta)
-    else:
-        raise Exception(f"Please select one of {model_type}")
-
-    phi_0 = _get_initial_state(n_states, start_width, response_width, I = I, prob=1, model_type = model_type, prior_type="Model")
-    Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, response_width=response_width, prob=measurement_prob, model_type = model_type)
-
-    if RT_s is not None:
-        likl = estimation_likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, 
-                          transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-        #likl = npx.log(likl)
-        pyro.deterministic("likl_rt", likl)
-        pyro.factor("likelihood", likl) #.sum()
 
 # def gen_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
 #                      drift_rate, diffusion_rate, phi_0, data_samples = (1,10), 
@@ -759,280 +551,6 @@ def simulate_likelihood(RT_pred, n_states, response_width, delta, measurement_pr
                       transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
     
     return likl
-
-def predictive_model(RT_pred, n_states, response_width, delta, measurement_prob, phi_0, RA, 
-                     drift_rate, diffusion_rate, 
-                     model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
-    
-    Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, response_width=response_width, prob=measurement_prob, model_type = model_type)
-    
-    if model_type == "Markov":
-        intensity_matrix = diffusion_buildK(n_states, drift_rate, diffusion_rate)
-
-    elif model_type == "Quantum":
-        intensity_matrix = quantum_buildH(n_states, drift_rate, diffusion_rate)
-    else:
-        raise Exception(f"Please select one of {model_type}")
-    
-    likl = transformed_likelihood(intensity_matrix, phi_0, delta, RT_pred, RA, Mc, Mw, Mn, 
-                      transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
-    return likl.sum()
-
-# def guide(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
-#     I, _ = RA_s.shape
-#     mu, sigma = non_centralized_parameters_VI(I)
-#     if model_type == "Markov":
-#         sigma = pyro.deterministic("sigma_final",npx.abs(mu) + sigma) # Sigma needs to be larger than mu and Sigma cannot be negative
-#         intensity_matrix = diffusion_buildK(n_states, mu, sigma, delta)
-
-#     elif model_type == "Quantum":
-#         sigma = pyro.deterministic("sigma_final",sigma) # Sigma cannot be negative
-#         intensity_matrix = quantum_buildH(n_states, mu, sigma, delta)
-#     else:
-#         raise Exception(f"Please select one of {model_type}")
-
-#     phi_0 = _get_initial_state(n_states, start_width, I = I, prob=1, model_type = model_type, prior_type="Model")
-
-
-def get_original_params(posterior_samples, response_width, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum"):
-    if params_type == "Centralized":
-        pass
-    elif params_type == "NonCentralized":
-        m = posterior_samples["m"]
-        s = posterior_samples["s"]
-
-        m_si = posterior_samples["m_si"]
-        s_si = posterior_samples["s_si"]
-
-
-        mu_r = posterior_samples["mu_r"]
-        sigma_r = posterior_samples["sigma_r"]
-
-        posterior_samples["mu"] = m[:,None,None] + s[:,None,None] * mu_r
-        posterior_samples["sigma"] = jax.nn.softplus(m_si[:,None,None] + s_si[:,None,None] * sigma_r) #(m[:,None,None] + s[:,None,None] * sigma_r)**2 
-    
-    p_0 = posterior_samples["phi_init"]
-
-    if model_type == "Markov":
-        p_0 = p_0.transpose(0, 1, 2, 4, 3)
-        posterior_samples["sigma_final"] = npx.abs(posterior_samples["mu"]) + posterior_samples["sigma"] 
-
-    elif model_type == "Quantum":
-        p_0 = p_0.transpose(0, 1, 2, 4, 3)**(1/2)
-        posterior_samples["sigma_final"] = posterior_samples["sigma"]
-
-    posterior_samples["phi_0"] = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width),(0,0)))
-
-    # Commenting these out so that point estimate is not calculated. That way Bayesian model checks can be used.
-    # posterior_samples["mu"] = posterior_samples["mu"].mean(axis=0, keepdims=True)
-    # posterior_samples["sigma_final"] = posterior_samples["sigma_final"].mean(axis=0, keepdims=True)
-    # posterior_samples["phi_0"] = posterior_samples["phi_0"].mean(axis=0, keepdims=True)
-
-    return posterior_samples
-
-from optax import adam, chain, clip
-def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, delta, measurement_prob,
-                            num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  
-                            params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
-    #guide = ag.AutoNormal(model)
-    #guide = ag.AutoDiagonalNormal(model)
-    #guide = ag.AutoMultivariateNormal(model)
-    guide = ag.AutoLowRankMultivariateNormal(model)
-    #guide = ag.AutoDAIS(model)
-    #guide = ag.AutoDelta(model)
-
-    #optimizer = Adam(step_size=0.5)
-    #svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
-    svi = SVI(model, guide, chain(clip(10.0), adam(1e-3)), loss=Trace_ELBO())
-    svi_result = svi.run(cu.get_rng(), num_warmup + samples_n, n_states, start_width, 
-                        response_width, delta, X, DT, measurement_prob, 
-                        params_type = params_type, transition_type=transition_type, 
-                        likelihood_type=likelihood_type, model_type=model_type, stable_update=True)
-
-    predictive = Predictive(guide, params=svi_result.params, num_samples=samples_n, parallel=True)
-    posterior_samples = predictive(cu.get_rng(),n_states, start_width, response_width, delta, X, DT, measurement_prob, 
-                   params_type = params_type, transition_type=transition_type, 
-                   likelihood_type=likelihood_type, model_type=model_type)
-    
-    posterior_samples = get_original_params(posterior_samples, response_width, params_type, model_type)
-    return posterior_samples
-
-
-def sample_posterior_params(DT, X, n_states, start_width, response_width, delta, measurement_prob,
-                            num_warmup=100, samples_n=500, num_chains=4, batch_size=2, max_tree_depth=10,
-                            params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
-
-    #kernel = HMCECS(NUTS(model), num_blocks=10)
-    #mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains)
-    #mcmc_chain.run(cu.get_rng(), n_states, start_width,  sigma, tau, DT, X, I, J, s_0, batch_size=batch_size, extra_fields=('hmc_state',))
-
-    # Adaptive mass matrix and increased target_accept_prob for better convergence with non-centered params
-    # Previous NUTS configuration retained for reference:
-    # kernel = NUTS(model, forward_mode_differentiation=False, adapt_mass_matrix=True, adapt_step_size = True,
-    #               dense_mass=True, init_strategy=init_to_median(num_samples=20),
-    #               target_accept_prob=0.8 if model_type=="Quantum" else 0.9)
-    # mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains,
-    #                   chain_method="vectorized" if jax.default_backend() == "gpu" else "parallel",
-    #                   progress_bar=True, jit_model_args=False)
-
-    kernel = NUTS(model, forward_mode_differentiation=False, adapt_mass_matrix=True, adapt_step_size = True,
-                  dense_mass=True, init_strategy=init_to_median(num_samples=20),
-                  target_accept_prob=0.8 if model_type=="Quantum" else 0.9,
-                  max_tree_depth=max_tree_depth)
-    # "vectorized" vmaps the chains, so NUTS's tree-building while_loop runs until the
-    # SLOWEST chain finishes - every chain pays the maximum tree depth of the group,
-    # every iteration. With mean ~473 steps and max 1023 that alone is ~2x waste, on top
-    # of losing the 4x from running four chains concurrently. Measured on Juno as
-    # ~20 s/it vectorized vs ~1.2 s/it parallel.
-    # Original CPU/GPU chain selection retained for reference:
-    # chain_method = "sequential" if num_chains == 1 else ("vectorized" if jax.default_backend() == "gpu" else "parallel")
-    # Vectorized-only version retained for reference:
-    # chain_method = "vectorized"
-    chain_method = "sequential" if num_chains == 1 else "parallel"
-    # Progress bar kept on everywhere - it logs usefully into the .err file under SLURM.
-    # TTY-only version retained for reference:
-    # show_progress = sys.stdout.isatty()
-    # mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains,
-    #                   chain_method=chain_method, progress_bar=show_progress, jit_model_args=False)
-    mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains,
-                      chain_method=chain_method, progress_bar=True, jit_model_args=False)
-    start_run = time.perf_counter()
-    mcmc_chain.run(cu.get_rng(), n_states, start_width, response_width, delta, X, DT, measurement_prob,
-                   params_type = params_type, transition_type=transition_type,
-                   likelihood_type=likelihood_type, model_type=model_type,
-                   # extra_fields=('potential_energy',)
-                   extra_fields=('potential_energy', 'num_steps', 'accept_prob', 'diverging', 'adapt_state.step_size'))
-    run_secs = time.perf_counter() - start_run
-
-    mcmc_diagnostics = mcmc_chain.get_extra_fields()
-    num_steps = np.asarray(mcmc_diagnostics["num_steps"]) # num_chains*samples_n
-    divergences = np.asarray(mcmc_diagnostics["diverging"]) # num_chains*samples_n
-    log.info(f"NUTS diagnostics - chains: {num_chains}, mean steps: {num_steps.mean():.2f}, max steps: {num_steps.max()}, divergences: {divergences.sum()}")
-
-    # One line to compare a Juno run against a laptop run. ms_per_it and us_per_grad are
-    # the numbers that matter: laptop reference is ~21 ms/it at n_states=51, I=1, J=30,
-    # 4 chains, chain_method=parallel. cores_allowed is what SLURM actually granted -
-    # if it is far below cpu_count then JAX/Eigen are oversubscribing the allocation.
-    iters = num_warmup + samples_n
-    cores_allowed = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
-    log.info(
-        "PERF: model=%s method=%s chains=%s iters=%s wall=%.1fs %.1f ms/it "
-        "%.0f us/grad steps_mean=%.0f steps_max=%s div=%s | devices=%s "
-        "cores_allowed=%s cpu_count=%s OMP=%s XLA_FLAGS=%s",
-        model_type, chain_method, num_chains, iters, run_secs,
-        run_secs / iters * 1e3,
-        run_secs / iters / max(num_steps.mean(), 1) * 1e6,
-        num_steps.mean(), num_steps.max(), divergences.sum(),
-        jax.local_device_count(), cores_allowed, os.cpu_count(),
-        os.environ.get("OMP_NUM_THREADS", "unset"),
-        os.environ.get("XLA_FLAGS", "unset"),
-    )
-
-    return mcmc_chain#, post_likl
-
-def predictive_mcmc_fn(n_states, response_width, delta, measurement_prob, X, 
-                       drift_rate, diffusion_rate, phi_0,
-                       params_type, model_type, transition_type, likelihood_type):
-    
-    if likelihood_type == "SINGLE":
-        kernel = NUTS(potential_fn= lambda RT_pred: 
-                                    predictive_model(RT_pred, n_states, response_width, delta, measurement_prob, phi_0, 
-                                                    X, drift_rate, diffusion_rate,
-                                                    transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type,))
-        pred_shape = 4, *X.shape
-        predictive_mcmc = MCMC(kernel, num_warmup=10, num_samples=10, num_chains=4)
-        predictive_mcmc.run(cu.get_rng(), init_params=stats.lognorm(s=1).rvs((pred_shape)),
-                        extra_fields=('potential_energy',)
-                        )
-        
-
-    elif likelihood_type == "JOINT":
-        kernel = NUTS(potential_fn= lambda RT_pred_s: 
-                        predictive_model(RT_pred_s, n_states, response_width, delta, measurement_prob, phi_0, 
-                                        X, drift_rate, diffusion_rate,
-                                        transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type,))
-        pred_shape = 4, 2, *X[0].shape
-        predictive_mcmc = MCMC(kernel, num_warmup=30, num_samples=20, num_chains=4)
-        predictive_mcmc.run(cu.get_rng(), init_params=stats.lognorm(s=1).rvs((pred_shape)),
-                    extra_fields=('potential_energy',)
-                    )
-
-    return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "predictive_chain":az.from_numpyro(predictive_mcmc)} #predictive_samples
-
-def sample_prior_pred_params(n_states, start_width, response_width, delta, measurement_prob, X, RT=None,  
-                        n_samples=10, data_samples=(1,10), min_RT_sec = 0, max_RT_sec = 10,
-                        params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
-                        transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN", n_jobs=1, key=None):
-
-    prior_predictive = Predictive(model, num_samples=n_samples, parallel=True)    
-    if X is None:
-        #X = np.ones(data_samples)
-        raise Exception("X cannot be missing")
-    prior_samples = prior_predictive(cu.get_rng() if key is None else key, n_states, start_width, response_width, delta, X, None, measurement_prob,
-                                    params_type = params_type, transition_type=transition_type, 
-                                    likelihood_type=likelihood_type, model_type=model_type)
-    
-    drift_rate_samples = prior_samples["mu"]
-    diffusion_rate_samples = prior_samples["sigma_final"]
-    phi_0_samples = prior_samples["phi_0"]
-    predictive_samples = []
-    parallel = Parallel(n_jobs=n_jobs)#drift_rate_samples.shape[0])
-
-    if sampling_type == "MCMC":
-        predictive_samples = parallel(delayed(predictive_mcmc_fn)(n_states, response_width, delta, measurement_prob, X, 
-                                                drift_rate, diffusion_rate, phi_0,
-                                                params_type = params_type, model_type = model_type, transition_type = transition_type, likelihood_type = likelihood_type)
-                                    for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
-                                    )
-    elif sampling_type == "GEN" or sampling_type == "SIM":
-            predictive_samples = parallel(delayed(get_RT)(RT, n_states, response_width, delta, measurement_prob, X, 
-                                                drift_rate, diffusion_rate, phi_0, min_RT_sec = min_RT_sec,  max_RT_sec = max_RT_sec,
-                                                param_sample_id = param_sample_id,
-                                                model_type = model_type, transition_type = transition_type, 
-                                                likelihood_type = likelihood_type, data_samples = data_samples,
-                                                sampling_type=sampling_type)
-                                    for param_sample_id, (drift_rate, diffusion_rate, phi_0) in 
-                                    enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
-                                    )
-    else:
-        predictive_samples = dict(drift_rate = drift_rate_samples, diffusion_rate = diffusion_rate_samples, phi_0 = phi_0_samples)
-    #return predictive_samples
-    return prior_samples, predictive_samples
-
-def sample_post_pred_params(n_states, response_width, delta, measurement_prob, X,
-                            drift_rate_samples, diffusion_rate_samples, phi_0_samples, RT=None, 
-                            data_samples=(1,10), min_RT_sec = 0, max_RT_sec=10,
-                            params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
-                            transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
-                            sampling_type = "MCMC|GEN", is_parallel=True):
-    if X is None:
-        raise Exception("X cannot be missing")
-    predictive_samples = []
-    n_jobs = drift_rate_samples.shape[0] if drift_rate_samples.shape[0] < 60 else 60
-    parallel = Parallel(n_jobs=1 if not is_parallel else n_jobs)
-    if sampling_type == "MCMC":
-        predictive_samples = parallel(delayed(predictive_mcmc_fn)(n_states, response_width, delta, measurement_prob, X, 
-                                                drift_rate, diffusion_rate, phi_0,
-                                                params_type, model_type, transition_type, likelihood_type)
-                                    for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
-                                    )
-    elif sampling_type == "GEN" or sampling_type == "SIM":
-            predictive_samples = parallel(delayed(get_RT)(RT, n_states, response_width, delta, measurement_prob, X, 
-                                                drift_rate, diffusion_rate, phi_0, min_RT_sec = min_RT_sec, max_RT_sec=max_RT_sec,
-                                                param_sample_id = param_sample_id,
-                                                model_type = model_type, transition_type = transition_type, 
-                                                likelihood_type = likelihood_type, data_samples = data_samples, 
-                                                sampling_type=sampling_type)
-                                    for param_sample_id, (drift_rate, diffusion_rate, phi_0) in 
-                                    enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
-                                    )
-    else:
-        predictive_samples = dict(drift_rate = drift_rate_samples, diffusion_rate = diffusion_rate_samples, phi_0 = phi_0_samples)
-    
-    return predictive_samples
-
-def get_arviz_model(mcmc_chain):
-    return az.from_numpyro(mcmc_chain)
 
 def get_intensity_matrix(n_states, mu, sigma, model_type="Markov|Quantum"):
     if model_type == "Markov":

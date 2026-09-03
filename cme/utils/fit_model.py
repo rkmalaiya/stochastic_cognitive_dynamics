@@ -14,6 +14,9 @@ import cme.decision_models.confidence_accumulation as ca
 import cme.decision_models.diffusion_discrete as dd
 import cme.decision_models.quantum_discrete as qd
 import cme.utils.post_process_model as ppm
+import cme.inference.mcmc as inf_mcmc
+import cme.inference.vi as inf_vi
+import cme.inference.predictive as inf_pred
 import jax.numpy as npx
 import pandas as pd
 import seaborn as sns
@@ -442,7 +445,7 @@ def _run_model(file_loc, data, version,
         min_RT_sec = np.clip(RT.min(), a_min=delta*2, a_max=None)
         max_RT_sec = RT.max()
         log.info(f"Starting Prior Predictive Sampling_{name}_{model_type}_{version}_{i} for {min_RT_sec} to {max_RT_sec} secs")
-        prior_samples, prior_pd_samples = ca.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
+        prior_samples, prior_pd_samples = inf_pred.sample_prior_pred_params(n_states=n_states,start_width=start_width, response_width=response_width,
                                                         delta=delta, data_samples=RT.shape, min_RT_sec = min_RT_sec, max_RT_sec = max_RT_sec,
                                                         measurement_prob=measurement_prob, X=X, RT=None, n_samples=predictive_n,
                                                         params_type=params_type, model_type=model_type, transition_type=transition_type, 
@@ -459,14 +462,14 @@ def _run_model(file_loc, data, version,
         
         if estimation_type == "MCMC":
             # Previous fixed four-chain call retained for reference:
-            # post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
+            # post_chain = inf_mcmc.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
             #                                         delta=delta,measurement_prob=measurement_prob,
             #                                         num_warmup=num_warmup, samples_n=samples_n,
             #                                         params_type=params_type, model_type=model_type, transition_type=transition_type,
             #                                         likelihood_type=likelihood_type, num_chains=4
             #                                         )
 
-            post_chain = ca.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
+            post_chain = inf_mcmc.sample_posterior_params(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
                                                     delta=delta,measurement_prob=measurement_prob,
                                                     num_warmup=num_warmup, samples_n=samples_n,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
@@ -518,7 +521,7 @@ def _run_model(file_loc, data, version,
             #        )
             
         elif estimation_type == "VI": 
-            post_samples = ca.sample_posterior_params_VI(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
+            post_samples = inf_vi.sample_posterior_params_VI(RT, X, n_states=n_states, start_width=start_width, response_width=response_width,
                                                     delta=delta,measurement_prob=measurement_prob,
                                                     num_warmup=num_warmup, samples_n=samples_n,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
@@ -598,7 +601,7 @@ def _run_model(file_loc, data, version,
         diffusion_rate_samples = post_samples["sigma_final"][pred_idx,...]
         phi_0_samples = post_samples["phi_0"][pred_idx,...]
 
-        post_pd_samples = ca.sample_post_pred_params(n_states=n_states, response_width=response_width, 
+        post_pd_samples = inf_pred.sample_post_pred_params(n_states=n_states, response_width=response_width, 
                                                      delta=delta,
                                                      measurement_prob=measurement_prob,
                                                     X=X, 

@@ -1,6 +1,7 @@
 import pytest
 import arviz as az
 import cme.decision_models.confidence_accumulation as ca
+import cme.inference.mcmc as inf_mcmc
 import scipy.stats as stats
 from collections import namedtuple
 import jax
@@ -213,7 +214,7 @@ def data_sim(data_shape):
 #     print(post_chain.keys())
 
 def test_MCMC(data_sim, model_constants):
-    post_chain = ca.sample_posterior_params( data_sim.RT, data_sim.X,
+    post_chain = inf_mcmc.sample_posterior_params( data_sim.RT, data_sim.X,
                                                 n_states=model_constants.n_states,
                                                 start_width=model_constants.start_width,
                                                 response_width=model_constants.response_width,
