@@ -459,3 +459,188 @@ class Test_Confidence:
                                      transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Quantum")
         assert npx.allclose(likl_quantum, npx.asarray([0.0209, 0.000307]), atol=1e-4), "Quantum Likelihood not as expected"
 
+
+
+@pytest.fixture
+def valid_model_constants():
+    """
+    Parameters inside the model's valid region, i.e. sigma >= |mu|.
+
+    `model_constants` deliberately uses mu=2, sigma=1 to reproduce a fixed
+    reference matrix, but that makes b1 = 0.5*(sigma-mu) negative, so the
+    generator has a negative off-diagonal rate and can return negative
+    probabilities. `model()` never hits this because it passes
+    sigma_final = |mu| + sigma. The property tests below need a generator that
+    is actually a generator, so they use these instead.
+    """
+    n_states = 7
+    response_width = 2
+    Model = namedtuple("Model", ["n_states", "start_width", "response_width",
+                                 "delta", "measurement_prob", "mu", "sigma"])
+    return Model(
+        n_states = n_states,
+        response_width = response_width,
+        start_width = (n_states - 2*response_width),
+        delta = 1,
+        measurement_prob = 0.25,
+        mu = npx.asarray([[0.5]]),
+        sigma = npx.asarray([[1.5]]),
+    )
+
+
+def _setup(mc, model_type, prior_type="Centered", mu=None, sigma=None):
+    """Intensity matrix, measurement operators and initial state for one model."""
+    intensity_matrix = ca.get_intensity_matrix(mc.n_states,
+                                               mc.mu if mu is None else mu,
+                                               mc.sigma if sigma is None else sigma,
+                                               model_type=model_type)
+    Mc, Mw, Mn = ca._get_measurement_matrix(mc.n_states, mc.response_width,
+                                            prob=mc.measurement_prob, model_type=model_type)
+    phi_0 = ca._get_initial_state(mc.n_states, mc.start_width, mc.response_width,
+                                  model_type=model_type, prior_type=prior_type)
+    return intensity_matrix, Mc, Mw, Mn, phi_0
+
+
+def _state_at(mc, intensity_matrix, Mc, Mw, Mn, phi_0, t):
+    return ca.perform_state_transition(intensity_matrix, RT_s=npx.asarray([[t]]), RA_s=None,
+                                       Mc=Mc, Mw=Mw, Mn=Mn, phi_0=phi_0, delta=mc.delta,
+                                       transition_type="TIMESTEP", likelihood_type="SINGLE")
+
+
+def _outcome_probabilities(mc, model_type, t, prior_type="Centered", mu=None, sigma=None):
+    """P(correct), P(incorrect), P(no response) at timestep t."""
+    intensity_matrix, Mc, Mw, Mn, phi_0 = _setup(mc, model_type, prior_type, mu, sigma)
+    phi_t = _state_at(mc, intensity_matrix, Mc, Mw, Mn, phi_0, t)
+    if model_type == "Markov":
+        born = lambda M: float((M @ phi_t).sum())
+        mass = float(phi_t.sum())
+    else:
+        born = lambda M: float((npx.abs(M @ phi_t)**2).sum())
+        mass = float((npx.abs(phi_t)**2).sum())
+    return born(Mc), born(Mw), born(Mn), mass
+
+
+class Test_Likelihood_Properties:
+    """
+    Properties the likelihood has to satisfy whatever the parameters are, as
+    opposed to the fixed reference values checked in Test_Confidence.
+    """
+
+    def test_markov_generator_conserves_probability(self, valid_model_constants):
+        """Columns of K sum to zero, so exp(K*delta) preserves total mass."""
+        K = ca.diffusion_buildK(valid_model_constants.n_states,
+                                valid_model_constants.mu, valid_model_constants.sigma)
+        assert npx.allclose(K[0, 0].sum(axis=0), 0, atol=1e-6), "Markov generator columns must sum to 0"
+
+    @pytest.mark.parametrize("mu,sigma,valid", [(0.5, 1.5, True), (1.0, 1.0, True), (2.0, 1.0, False)])
+    def test_transition_rates_are_non_negative_only_when_sigma_exceeds_mu(self, valid_model_constants, mu, sigma, valid):
+        """
+        Off-diagonal rates are b1 = (sigma-mu)/2 and b2 = (sigma+mu)/2, so the
+        generator is only a valid generator while sigma >= |mu|. This is the
+        constraint model() enforces by passing sigma_final = |mu| + sigma.
+        """
+        K = ca.diffusion_buildK(valid_model_constants.n_states,
+                                npx.asarray([[mu]]), npx.asarray([[sigma]]))
+        off_diagonal = np.asarray(K[0, 0])[~np.eye(valid_model_constants.n_states, dtype=bool)]
+        assert (off_diagonal.min() >= -1e-6) == valid, \
+            f"sigma={sigma}, mu={mu}: expected valid={valid}, min off-diagonal rate {off_diagonal.min()}"
+
+    def test_markov_measurement_operators_are_complete(self, valid_model_constants):
+        """Mc + Mw + Mn = I, so every trial ends in exactly one of the three outcomes."""
+        Mc, Mw, Mn = ca._get_measurement_matrix(valid_model_constants.n_states,
+                                                valid_model_constants.response_width,
+                                                prob=valid_model_constants.measurement_prob,
+                                                model_type="Markov")
+        assert npx.allclose(Mc + Mw + Mn, npx.eye(valid_model_constants.n_states), atol=1e-6)
+
+    def test_quantum_measurement_operators_are_complete(self, valid_model_constants):
+        """Mc^2 + Mw^2 + Mn^2 = I - the POVM completeness relation."""
+        Mc, Mw, Mn = ca._get_measurement_matrix(valid_model_constants.n_states,
+                                                valid_model_constants.response_width,
+                                                prob=valid_model_constants.measurement_prob,
+                                                model_type="Quantum")
+        assert npx.allclose(Mc**2 + Mw**2 + Mn**2, npx.eye(valid_model_constants.n_states), atol=1e-6)
+
+    @pytest.mark.parametrize("model_type", ["Markov", "Quantum"])
+    @pytest.mark.parametrize("t", [1, 2, 5, 10])
+    def test_outcome_probabilities_partition_surviving_mass(self, valid_model_constants, model_type, t):
+        """
+        P(correct) + P(incorrect) + P(no response) at t accounts for exactly the
+        mass that survived to t. Nothing is created or lost by the measurement.
+        """
+        correct, incorrect, no_response, mass = _outcome_probabilities(valid_model_constants, model_type, t)
+        assert correct + incorrect + no_response == pytest.approx(mass, rel=1e-5), \
+            f"{model_type} t={t}: outcomes sum to {correct+incorrect+no_response}, surviving mass is {mass}"
+
+    @pytest.mark.parametrize("model_type", ["Markov", "Quantum"])
+    def test_no_mass_is_lost_before_the_first_response_opportunity(self, valid_model_constants, model_type):
+        """At the first timestep nothing has leaked yet, so the outcomes sum to 1."""
+        correct, incorrect, no_response, _ = _outcome_probabilities(valid_model_constants, model_type, 1)
+        assert correct + incorrect + no_response == pytest.approx(1.0, rel=1e-5)
+
+    @pytest.mark.parametrize("model_type", ["Markov", "Quantum"])
+    @pytest.mark.parametrize("t", [1, 3, 7, 12])
+    def test_likelihood_is_a_probability(self, valid_model_constants, model_type, t):
+        """Inside the valid parameter region every outcome probability is in [0, 1]."""
+        correct, incorrect, no_response, _ = _outcome_probabilities(valid_model_constants, model_type, t)
+        for name, p in [("correct", correct), ("incorrect", incorrect), ("no response", no_response)]:
+            assert -1e-6 <= p <= 1.0 + 1e-6, f"{model_type} t={t}: P({name}) = {p} outside [0, 1]"
+
+    @pytest.mark.parametrize("model_type", ["Markov", "Quantum"])
+    @pytest.mark.parametrize("t", [1, 3, 7, 15])
+    def test_zero_drift_makes_the_two_responses_equally_likely(self, valid_model_constants, model_type, t):
+        """
+        With no drift and a symmetric starting distribution the model cannot
+        prefer either boundary, so the two response probabilities must match.
+        This exercises the whole path - generator, evolution, measurement - and
+        catches a sign flip or a swapped Mc/Mw that a golden value would not.
+        """
+        correct, incorrect, _, _ = _outcome_probabilities(
+            valid_model_constants, model_type, t,
+            mu=npx.asarray([[0.0]]), sigma=npx.asarray([[1.0]]))
+        assert correct == pytest.approx(incorrect, rel=1e-4), \
+            f"{model_type} t={t}: zero drift gave P(correct)={correct}, P(incorrect)={incorrect}"
+
+    @pytest.mark.parametrize("t", [2, 5, 10])
+    def test_positive_drift_favours_the_correct_boundary(self, valid_model_constants, t):
+        """Drift towards the upper boundary must make the correct response more likely."""
+        correct, incorrect, _, _ = _outcome_probabilities(valid_model_constants, "Markov", t)
+        assert correct > incorrect, f"t={t}: P(correct)={correct} not above P(incorrect)={incorrect}"
+
+    def test_surviving_mass_decreases_with_time(self, valid_model_constants):
+        """Each timestep applies Mn once more, so undecided mass can only shrink."""
+        intensity_matrix, Mc, Mw, Mn, phi_0 = _setup(valid_model_constants, "Markov")
+        masses = [float(_state_at(valid_model_constants, intensity_matrix, Mc, Mw, Mn, phi_0, t).sum())
+                  for t in range(1, 12)]
+        assert masses[0] == pytest.approx(1.0, rel=1e-5), "no mass should have leaked at t=1"
+        for earlier, later in zip(masses, masses[1:]):
+            assert later <= earlier + 1e-6, f"surviving mass rose from {earlier} to {later}"
+
+    def test_binary_response_coding_selects_correct_and_incorrect_operators(self, valid_model_constants):
+        """With two distinct response codes, 1 picks Mc and anything else picks Mw."""
+        intensity_matrix, Mc, Mw, Mn, phi_0 = _setup(valid_model_constants, "Markov")
+        t = 3
+        likl = ca.likelihood(intensity_matrix, phi_0, valid_model_constants.delta,
+                             RT_s=npx.asarray([[t, t]]), RA_s=npx.asarray([[1, 0]]),
+                             Mc=Mc, Mw=Mw, Mn=Mn,
+                             transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Markov")
+        phi_t = _state_at(valid_model_constants, intensity_matrix, Mc, Mw, Mn, phi_0, t)
+        assert float(likl[0, 0]) == pytest.approx(float((Mc @ phi_t).sum()), rel=1e-5)
+        assert float(likl[0, 1]) == pytest.approx(float((Mw @ phi_t).sum()), rel=1e-5)
+
+    def test_ternary_response_coding_adds_the_no_response_operator(self, valid_model_constants):
+        """
+        With three distinct codes the meaning of 0 changes: -1 becomes incorrect
+        and 0 becomes no response. The branch is chosen from how many distinct
+        values the response array happens to contain.
+        """
+        intensity_matrix, Mc, Mw, Mn, phi_0 = _setup(valid_model_constants, "Markov")
+        t = 3
+        likl = ca.likelihood(intensity_matrix, phi_0, valid_model_constants.delta,
+                             RT_s=npx.asarray([[t, t, t]]), RA_s=npx.asarray([[1, -1, 0]]),
+                             Mc=Mc, Mw=Mw, Mn=Mn,
+                             transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Markov")
+        phi_t = _state_at(valid_model_constants, intensity_matrix, Mc, Mw, Mn, phi_0, t)
+        assert float(likl[0, 0]) == pytest.approx(float((Mc @ phi_t).sum()), rel=1e-5)
+        assert float(likl[0, 1]) == pytest.approx(float((Mw @ phi_t).sum()), rel=1e-5)
+        assert float(likl[0, 2]) == pytest.approx(float((Mn @ phi_t).sum()), rel=1e-5)
