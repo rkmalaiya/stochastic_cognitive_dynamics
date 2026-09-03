@@ -1,4 +1,4 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.4
 Name: Stochastic-Cognitive-Dynamics
 Version: 0.1
 Summary: Drift diffusion model and Qauntum Probability models used in Psychology
@@ -6,3 +6,24 @@ Home-page:
 Author: Ritesh K Malaiya
 Author-email: ritesh.malaiya@gmail.com
 License: MIT
+Requires-Python: >=3.12
+Requires-Dist: arviz[h5netcdf,matplotlib]<2,>=1.2
+Requires-Dist: attrs
+Requires-Dist: jax
+Requires-Dist: joblib
+Requires-Dist: matplotlib
+Requires-Dist: numpy
+Requires-Dist: numpyro
+Requires-Dist: optax
+Requires-Dist: pandas
+Requires-Dist: polars
+Requires-Dist: pymc
+Requires-Dist: scipy
+Requires-Dist: seaborn
+Requires-Dist: xarray
+Dynamic: author
+Dynamic: author-email
+Dynamic: license
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

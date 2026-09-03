@@ -1,0 +1,14 @@
+arviz[h5netcdf,matplotlib]<2,>=1.2
+attrs
+jax
+joblib
+matplotlib
+numpy
+numpyro
+optax
+pandas
+polars
+pymc
+scipy
+seaborn
+xarray
