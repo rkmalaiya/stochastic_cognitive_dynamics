@@ -702,6 +702,9 @@ def _run_model(file_loc, data, version,
                 _get_memory_diagnostics(),
             )
             return False
+        finally:
+            jax.clear_caches()
+            gc.collect()
 
     # Original unpartitioned batch scheduling retained for reference:
     # batch_n = 0
