@@ -355,40 +355,40 @@ def _initial_state_concentration(n_free, model_type):
 
 def _get_initial_state(n_states, start_width, response_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Upper|Lower|Centered|All|Model"):
     if prior_type == "Model":
+        # n_free = n_states - 2*response_width
+        # conc = npx.broadcast_to(_initial_state_concentration(n_free, model_type), (I, 1, 1, n_free))
+        # npy.deterministic("phi_conc", conc)
+        #
+        # with npy.plate('I2', I, dim=-3):
+        #     p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+        #
+        # p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
+        #
         # if model_type == "Markov":
-        #     with npy.plate('I1', I, dim=-4):
-        #         with npy.plate('S', n_states - 2*response_width, dim=-1):
-        #             conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
-        #
-        #     with npy.plate('I2', I, dim=-3):
-        #         p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
-        #     p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
-        #     phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)
-        # elif model_type == "Quantum":
-        #     with npy.plate('I1', I, dim=-4):
-        #         with npy.plate('S', n_states - 2*response_width, dim=-1):
-        #             conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
-        #
-        #     with npy.plate('I2', I, dim=-3):
-        #         p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
-        #
-        #     p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
-        #     phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)**(1/2))
+        #     phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2))
         # else:
-        #     raise Exception(f"Please select one of {model_type}")
-        n_free = n_states - 2*response_width
-        conc = npx.broadcast_to(_initial_state_concentration(n_free, model_type), (I, 1, 1, n_free))
-        npy.deterministic("phi_conc", conc)
-
-        with npy.plate('I2', I, dim=-3):
-            p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
-
-        p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
-
+        #     phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)**(1/2))
         if model_type == "Markov":
-            phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2))
-        else:
+            with npy.plate('I1', I, dim=-4):
+                with npy.plate('S', n_states - 2*response_width, dim=-1):
+                    conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
+
+            with npy.plate('I2', I, dim=-3):
+                p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+            p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
+            phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)) #.transpose(0,1,3,2)
+        elif model_type == "Quantum":
+            with npy.plate('I1', I, dim=-4):
+                with npy.plate('S', n_states - 2*response_width, dim=-1):
+                    conc = npy.sample("phi_conc", dist.Beta(0.5,0.5))+0.01 #to avoid 0
+
+            with npy.plate('I2', I, dim=-3):
+                p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+
+            p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
             phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)**(1/2))
+        else:
+            raise Exception(f"Please select one of {model_type}")
     else:
         width = start_width #choose odd number
         if prior_type == "Upper":
