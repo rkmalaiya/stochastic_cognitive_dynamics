@@ -25,6 +25,7 @@ import pickle
 import time
 import itertools as iter
 from joblib import Parallel, delayed
+from joblib.externals.loky import get_reusable_executor
 from cme.utils import common_logging as cl
 log = cl.get_logger("fit_model")
 import jax
@@ -711,12 +712,13 @@ def _run_model(file_loc, data, version,
     # for i, (X, RT, ID) in enumerate(zip(X_split, RT_split, ID_split)):
     #     fn.append(delayed(run_half_model)(i, X, RT, ID))
     #     batch_n = batch_n + 1
-    for i, (X, RT, ID) in assigned_batches:
-        # Original unguarded participant execution retained for reference:
-        # fn.append(delayed(run_half_model)(i, X, RT, ID))
-        fn.append(delayed(run_half_model_safely)(i, X, RT, ID))
-
-    batch_n = len(fn)
+    # for i, (X, RT, ID) in assigned_batches:
+    #     # Original unguarded participant execution retained for reference:
+    #     # fn.append(delayed(run_half_model)(i, X, RT, ID))
+    #     fn.append(delayed(run_half_model_safely)(i, X, RT, ID))
+    #
+    # batch_n = len(fn)
+    batch_n = len(assigned_batches)
         #run_half_model()
         #if is_test:
         #    break
@@ -761,7 +763,13 @@ def _run_model(file_loc, data, version,
     )
     # Original result-discarding execution retained for reference:
     # Parallel(n_jobs=n_jobs1, prefer="processes", backend = "loky")(f for f in fn)
-    participant_results = Parallel(n_jobs=n_jobs1, prefer="processes", backend = "loky")(f for f in fn)
+    # participant_results = Parallel(n_jobs=n_jobs1, prefer="processes", backend = "loky")(f for f in fn)
+    participant_results = []
+    for start in range(0, len(assigned_batches), n_jobs1):
+        group = assigned_batches[start:start + n_jobs1]
+        executor = get_reusable_executor(max_workers=n_jobs1, reuse=False)
+        futures = [executor.submit(run_half_model_safely, i, X, RT, ID) for i, (X, RT, ID) in group]
+        participant_results.extend(f.result() for f in futures)
     failed_batches = participant_results.count(False)
     log.info(
         "Participant loop finished for %s, %s, %s: completed=%s, failed=%s",
