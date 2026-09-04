@@ -1,4 +1,10 @@
 #from turtle import width
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["XLA_FLAGS"] = "--xla_cpu_multi_thread_eigen=false"
+
 from turtle import pos
 import jax.numpy as npx
 import jax.scipy as sci
@@ -16,7 +22,6 @@ from numpyro.infer.initialization import init_to_median
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
-import os
 import time
 from joblib import Parallel, delayed
 
