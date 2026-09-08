@@ -3,7 +3,6 @@ import os
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["XLA_FLAGS"] = "--xla_cpu_multi_thread_eigen=false"
 
 from turtle import pos
 import jax.numpy as npx
@@ -36,7 +35,7 @@ log = cl.get_logger("confidence_accumulation")
 
 #pyro.set_platform("cpu")
 # pyro.set_host_device_count(64)
-pyro.set_host_device_count(4)
+pyro.set_host_device_count(1)
 #pyro.enable_x64()
 
 def diffusion_buildK(n_states, mu, sigma=1, delta=0.01, boundary_type = "External"): 
@@ -917,9 +916,9 @@ def sample_posterior_params(DT, X, n_states, start_width, response_width, delta,
                   dense_mass=True, init_strategy=init_to_median(num_samples=20),
                   target_accept_prob=0.8 if model_type=="Quantum" else 0.9,
                   max_tree_depth=max_tree_depth)
-    # chain_method = "vectorized"
     # chain_method = "sequential" if num_chains == 1 else "parallel"
-    chain_method = "sequential" if num_chains == 1 else ("vectorized" if jax.default_backend() == "gpu" else "parallel")
+    # chain_method = "sequential" if num_chains == 1 else ("vectorized" if jax.default_backend() == "gpu" else "parallel")
+    chain_method = "vectorized"
     mcmc_chain = MCMC(kernel, num_warmup=num_warmup, num_samples=samples_n, num_chains=num_chains,
                       chain_method=chain_method, progress_bar=True, jit_model_args=False)
     start_run = time.perf_counter()

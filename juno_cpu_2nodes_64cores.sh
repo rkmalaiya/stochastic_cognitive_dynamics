@@ -23,7 +23,6 @@ conda activate ds
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
-export XLA_FLAGS="--xla_cpu_multi_thread_eigen=false"
 
 cd "${SLURM_SUBMIT_DIR}"
 
