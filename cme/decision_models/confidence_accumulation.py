@@ -358,7 +358,12 @@ def _initial_state_concentration(n_free, model_type):
         raise Exception(f"Please select one of {model_type}")
     return PHI_CONC_BASE + PHI_CONC_AMP * shape
 
-def _get_initial_state(n_states, start_width, response_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Upper|Lower|Centered|All|Model"):
+def _expand_bins(p_bins, n_free, n_bins):
+    sizes = np.array([len(s) for s in np.array_split(np.arange(n_free), n_bins)])
+    idx = np.repeat(np.arange(n_bins), sizes)
+    return p_bins[..., idx] / sizes[idx]
+
+def _get_initial_state(n_states, start_width, response_width, I = 1, prob=1, model_type = "Markov|Quantum", prior_type="Upper|Lower|Centered|All|Model", phi_init_bins = None):
     if prior_type == "Model":
         # if model_type == "Markov":
         #     with npy.plate('I1', I, dim=-4):
@@ -381,13 +386,23 @@ def _get_initial_state(n_states, start_width, response_width, I = 1, prob=1, mod
         #     phi_0 = npy.deterministic("phi_0", p_0.transpose(0,1,3,2)**(1/2))
         # else:
         #     raise Exception(f"Please select one of {model_type}")
+        # n_free = n_states - 2*response_width
+        # conc = npx.broadcast_to(_initial_state_concentration(n_free, model_type), (I, 1, 1, n_free))
+        # npy.deterministic("phi_conc", conc)
+        #
+        # with npy.plate('I2', I, dim=-3):
+        #     p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+        #
+        # p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
         n_free = n_states - 2*response_width
-        conc = npx.broadcast_to(_initial_state_concentration(n_free, model_type), (I, 1, 1, n_free))
+        n_bins = phi_init_bins if phi_init_bins is not None else max(2, round(0.1 * n_states))
+        conc = npx.broadcast_to(_initial_state_concentration(n_bins, model_type), (I, 1, 1, n_bins))
         npy.deterministic("phi_conc", conc)
 
         with npy.plate('I2', I, dim=-3):
-            p_0 = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+            p_bins = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
 
+        p_0 = npy.deterministic("phi_binned", _expand_bins(p_bins, n_free, n_bins))
         p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
 
         if model_type == "Markov":
@@ -641,7 +656,7 @@ def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transitio
   
     return P_t #npx.log(npx.sum(P_t)) # summing over all participants and trials
 
-def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
+def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", phi_init_bins = None):
     
     if likelihood_type == "SINGLE":
         I, _ = RA_s.shape
@@ -675,7 +690,7 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
     else:
         raise Exception(f"Please select one of {model_type}")
 
-    phi_0 = _get_initial_state(n_states, start_width, response_width, I = I, prob=1, model_type = model_type, prior_type="Model")
+    phi_0 = _get_initial_state(n_states, start_width, response_width, I = I, prob=1, model_type = model_type, prior_type="Model", phi_init_bins = phi_init_bins)
     Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, response_width=response_width, prob=measurement_prob, model_type = model_type)
 
     if RT_s is not None:
@@ -854,7 +869,7 @@ def get_original_params(posterior_samples, response_width, params_type = "Centra
 
 from optax import adam, chain, clip
 def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, delta, measurement_prob,
-                            num_warmup=100, samples_n=500, num_chains=4, batch_size=2,  
+                            num_warmup=100, samples_n=500, num_chains=4, batch_size=2, phi_init_bins=None,  
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
     #guide = ag.AutoNormal(model)
     #guide = ag.AutoDiagonalNormal(model)
@@ -869,19 +884,19 @@ def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, del
     svi_result = svi.run(cu.get_rng(), num_warmup + samples_n, n_states, start_width, 
                         response_width, delta, X, DT, measurement_prob, 
                         params_type = params_type, transition_type=transition_type, 
-                        likelihood_type=likelihood_type, model_type=model_type, stable_update=True)
+                        likelihood_type=likelihood_type, model_type=model_type, phi_init_bins=phi_init_bins, stable_update=True)
 
     predictive = Predictive(guide, params=svi_result.params, num_samples=samples_n, parallel=True)
     posterior_samples = predictive(cu.get_rng(),n_states, start_width, response_width, delta, X, DT, measurement_prob, 
                    params_type = params_type, transition_type=transition_type, 
-                   likelihood_type=likelihood_type, model_type=model_type)
+                   likelihood_type=likelihood_type, model_type=model_type, phi_init_bins=phi_init_bins)
     
     posterior_samples = get_original_params(posterior_samples, response_width, params_type, model_type)
     return posterior_samples
 
 
 def sample_posterior_params(DT, X, n_states, start_width, response_width, delta, measurement_prob,
-                            num_warmup=100, samples_n=500, num_chains=4, batch_size=2, max_tree_depth=10,
+                            num_warmup=100, samples_n=500, num_chains=4, batch_size=2, max_tree_depth=10, phi_init_bins=None,
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
 
     #kernel = HMCECS(NUTS(model), num_blocks=10)
@@ -909,7 +924,7 @@ def sample_posterior_params(DT, X, n_states, start_width, response_width, delta,
     start_run = time.perf_counter()
     mcmc_chain.run(cu.get_rng(), n_states, start_width, response_width, delta, X, DT, measurement_prob,
                    params_type = params_type, transition_type=transition_type,
-                   likelihood_type=likelihood_type, model_type=model_type,
+                   likelihood_type=likelihood_type, model_type=model_type, phi_init_bins=phi_init_bins,
                    # extra_fields=('potential_energy',)
                    extra_fields=('potential_energy', 'num_steps', 'accept_prob', 'diverging', 'adapt_state.step_size'))
 
@@ -955,7 +970,7 @@ def predictive_mcmc_fn(n_states, response_width, delta, measurement_prob, X,
 def sample_prior_pred_params(n_states, start_width, response_width, delta, measurement_prob, X, RT=None,  
                         n_samples=10, data_samples=(1,10), min_RT_sec = 0, max_RT_sec = 10,
                         params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
-                        transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN", n_jobs=1, key=None):
+                        transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN", n_jobs=1, key=None, phi_init_bins=None):
 
     prior_predictive = Predictive(model, num_samples=n_samples, parallel=True)    
     if X is None:
@@ -963,7 +978,7 @@ def sample_prior_pred_params(n_states, start_width, response_width, delta, measu
         raise Exception("X cannot be missing")
     prior_samples = prior_predictive(cu.get_rng() if key is None else key, n_states, start_width, response_width, delta, X, None, measurement_prob,
                                     params_type = params_type, transition_type=transition_type, 
-                                    likelihood_type=likelihood_type, model_type=model_type)
+                                    likelihood_type=likelihood_type, model_type=model_type, phi_init_bins=phi_init_bins)
     
     drift_rate_samples = prior_samples["mu"]
     diffusion_rate_samples = prior_samples["sigma_final"]

@@ -458,3 +458,64 @@ class Test_Confidence:
                                      transition_type="TIMESTEP", likelihood_type="SINGLE", model_type="Quantum")
         assert npx.allclose(likl_quantum, npx.asarray([0.0209, 0.000307]), atol=1e-4), "Quantum Likelihood not as expected"
 
+
+
+from numpyro import handlers
+
+
+def _trace_initial_state(n_states, response_width, phi_init_bins, model_type, I=2):
+    def site():
+        return ca._get_initial_state(n_states, (n_states - 2*response_width)//2, response_width,
+                                     I=I, prob=1, model_type=model_type, prior_type="Model",
+                                     phi_init_bins=phi_init_bins)
+    return handlers.trace(handlers.seed(site, jax.random.PRNGKey(0))).get_trace()
+
+
+@pytest.mark.parametrize("n_free, n_bins", [(17, 5), (81, 9), (81, 5), (17, 2), (20, 4)])
+def test_expand_bins_preserves_total_probability(n_free, n_bins):
+    p_bins = npx.asarray(np.full((2, 1, 1, n_bins), 1.0/n_bins))
+    p_0 = ca._expand_bins(p_bins, n_free, n_bins)
+    assert p_0.shape == (2, 1, 1, n_free), "expanded initial state has the wrong shape"
+    assert npx.allclose(p_0.sum(axis=-1), 1.0, atol=1e-6), "expansion did not preserve total probability"
+
+
+def test_expand_bins_spreads_mass_evenly_within_a_bin():
+    n_free, n_bins = 12, 4
+    p_bins = npx.asarray([[[[0.0, 1.0, 0.0, 0.0]]]])
+    p_0 = np.asarray(ca._expand_bins(p_bins, n_free, n_bins))[0, 0, 0]
+    assert np.count_nonzero(p_0) == 3, "mass did not stay inside its own bin"
+    assert npx.allclose(p_0[3:6], 1/3, atol=1e-6), "mass was not spread evenly within the bin"
+
+
+@pytest.mark.parametrize("model_type", ["Markov", "Quantum"])
+def test_initial_state_uses_requested_bins(model_type):
+    n_states, response_width, n_bins = 51, 17, 5
+    trace = _trace_initial_state(n_states, response_width, n_bins, model_type)
+    assert np.asarray(trace["phi_init"]["value"]).shape[-1] == n_bins
+    assert np.asarray(trace["phi_binned"]["value"]).shape[-1] == n_states - 2*response_width
+    assert np.asarray(trace["phi_0"]["value"]).shape[-2] == n_states
+    assert npx.allclose(trace["phi_binned"]["value"].sum(axis=-1), 1.0, atol=1e-5)
+
+
+@pytest.mark.parametrize("n_states, expected_bins", [(51, 5), (21, 2), (101, 10)])
+def test_initial_state_defaults_bins_to_ten_percent_of_states(n_states, expected_bins):
+    trace = _trace_initial_state(n_states, 2, None, "Markov")
+    assert np.asarray(trace["phi_conc"]["value"]).shape[-1] == expected_bins
+
+
+def test_markov_concentration_peaks_at_centre_and_quantum_at_edges():
+    n_bins = 5
+    markov = np.asarray(ca._initial_state_concentration(n_bins, "Markov"))
+    quantum = np.asarray(ca._initial_state_concentration(n_bins, "Quantum"))
+    assert markov.argmax() == n_bins // 2, "Markov bump is not centred"
+    assert quantum[0] == quantum.max() and quantum[-1] == quantum.max(), "Quantum bumps are not at the edges"
+    assert quantum.argmin() == n_bins // 2, "Quantum trough is not centred"
+
+
+def test_initial_state_leaves_response_zones_empty():
+    n_states, response_width = 51, 17
+    trace = _trace_initial_state(n_states, response_width, 5, "Markov")
+    phi_0 = np.asarray(trace["phi_0"]["value"])[0, 0, :, 0]
+    assert np.count_nonzero(phi_0[:response_width]) == 0, "initial state leaked into the lower response zone"
+    assert np.count_nonzero(phi_0[-response_width:]) == 0, "initial state leaked into the upper response zone"
+    assert np.count_nonzero(phi_0) == n_states - 2*response_width

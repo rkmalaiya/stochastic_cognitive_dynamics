@@ -192,6 +192,7 @@ class ModelDetails:
     max_tree_depth: int = 10
     predictive_n: int = None
     batch_size: int = None
+    phi_init_bins: int = None
     params_type:str = "Centralized|NonCentralized"
     model_type:list = ["Markov","Quantum"]
     transition_type:str = "RT|TIMESTEP"
@@ -228,6 +229,7 @@ _FIT_CONFIGURATION_COLUMNS = [
     "max_tree_depth",
     "predictive_n",
     "batch_size",
+    "phi_init_bins",
 ]
 
 def _configuration_value(value):
@@ -367,7 +369,8 @@ def fit_model(model: ModelDetails):
                                     model.sampling_type, model.estimation_type, model.execution_type,
                                     model.num_warmup, model.samples_n, model.num_chains, model.max_tree_depth,
                                     model.predictive_n, model.batch_size, model.is_test,
-                                    model.scale, conf_scale, model.csv_header, model.is_parallel) 
+                                    model.scale, conf_scale, model.csv_header, model.is_parallel,
+                                    model.phi_init_bins) 
                                                 
                                     # Original unpartitioned dataset/model product retained for reference:
                                     # for data, (model_type, n_states, response_width, conf_scale) in iter.product(model.data, zip(model.model_type, model.n_states, model.response_width, model.conf_scale)))
@@ -380,7 +383,8 @@ def fit_model(model: ModelDetails):
 def _run_model(file_loc, data, version, 
             n_states, start_width, response_width, delta, measurement_prob, 
             params_type, model_type, transition_type, likelihood_type, sampling_type, estimation_type,execution_type,
-            num_warmup, samples_n, num_chains, max_tree_depth, predictive_n, batch_size, is_test, scale, conf_scale, csv_header, is_parallel):
+            num_warmup, samples_n, num_chains, max_tree_depth, predictive_n, batch_size, is_test, scale, conf_scale, csv_header, is_parallel,
+            phi_init_bins=None):
     
     start_width1 = (n_states-2*response_width)//2
     if start_width == None or start_width == 0:
@@ -448,6 +452,7 @@ def _run_model(file_loc, data, version,
                                                         measurement_prob=measurement_prob, X=X, RT=None, n_samples=predictive_n,
                                                         params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                         likelihood_type=likelihood_type, sampling_type=sampling_type, 
+                                                        phi_init_bins=phi_init_bins,
                                                     )
         df_prior_pred_all = pd.concat([samples["Samples"] for samples in prior_pd_samples])
         df_prior_pred_all.to_csv(f"export/prior_predictive_{name}_{model_type}_{version}_{i}.csv")
@@ -472,7 +477,7 @@ def _run_model(file_loc, data, version,
                                                     num_warmup=num_warmup, samples_n=samples_n,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                     likelihood_type=likelihood_type, num_chains=num_chains,
-                                                    max_tree_depth=max_tree_depth
+                                                    max_tree_depth=max_tree_depth, phi_init_bins=phi_init_bins
                                                     )
             
             post_samples = post_chain.get_samples()
@@ -496,6 +501,7 @@ def _run_model(file_loc, data, version,
                         "phi_conc": ["part_id"],
                         "sigma": ["part_id"],
                         "phi_init": ["part_id"],
+                        "phi_binned": ["part_id"],
                         "likelihood": ["part_id"],
                         "RT":["part_id"]
                     }
@@ -510,7 +516,8 @@ def _run_model(file_loc, data, version,
             arviz_data["observed_data"] = obs_idata["observed_data"]
             # Previous display-oriented summary call retained for reference:
             # df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"]) #"sigma_final", "likl_rt", using phi_init instead of phi_0 because phi_0 is padded with zeros for response states. If unpadded, the likelihood function gives a high likelihood for even 0 (or delta) response times.
-            df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"], round_to="none") # Keep raw numeric values for downstream calculations; phi_init is used because phi_0 is padded with zeros for response states.
+            # df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"], round_to="none") # Keep raw numeric values for downstream calculations; phi_init is used because phi_0 is padded with zeros for response states.
+            df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "phi_binned", "sigma_final"], round_to="none")
             
             #df_summary = (df_summary.reset_index(names="params")
                             #.assign(param_name = lambda df: df.params.str.split("[",expand=True)[0])
@@ -552,7 +559,8 @@ def _run_model(file_loc, data, version,
         pred_idx = np.random.default_rng().choice(total_samples, predictive_n, replace=False)
         log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i} after {((time.perf_counter() - start_time_sampling)/60):.2f} mins")
         
-        df_phi = df_summary.filter(like="phi_init",axis=0)[["mean"]].reset_index(names="idx")
+        # df_phi = df_summary.filter(like="phi_init",axis=0)[["mean"]].reset_index(names="idx")
+        df_phi = df_summary.filter(like="phi_binned",axis=0)[["mean"]].reset_index(names="idx")
         try:
             df_t = df_phi.idx.str.split("[", expand=True).loc[:,1].str.split(",", expand=True)
         except:
