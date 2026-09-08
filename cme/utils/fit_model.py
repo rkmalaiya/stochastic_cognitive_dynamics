@@ -501,7 +501,6 @@ def _run_model(file_loc, data, version,
                         "phi_conc": ["part_id"],
                         "sigma": ["part_id"],
                         "phi_init": ["part_id"],
-                        "phi_binned": ["part_id"],
                         "likelihood": ["part_id"],
                         "RT":["part_id"]
                     }
@@ -516,8 +515,7 @@ def _run_model(file_loc, data, version,
             arviz_data["observed_data"] = obs_idata["observed_data"]
             # Previous display-oriented summary call retained for reference:
             # df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"]) #"sigma_final", "likl_rt", using phi_init instead of phi_0 because phi_0 is padded with zeros for response states. If unpadded, the likelihood function gives a high likelihood for even 0 (or delta) response times.
-            # df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"], round_to="none") # Keep raw numeric values for downstream calculations; phi_init is used because phi_0 is padded with zeros for response states.
-            df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "phi_binned", "sigma_final"], round_to="none")
+            df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"], round_to="none") # Keep raw numeric values for downstream calculations; phi_init is used because phi_0 is padded with zeros for response states.
             
             #df_summary = (df_summary.reset_index(names="params")
                             #.assign(param_name = lambda df: df.params.str.split("[",expand=True)[0])
@@ -559,8 +557,7 @@ def _run_model(file_loc, data, version,
         pred_idx = np.random.default_rng().choice(total_samples, predictive_n, replace=False)
         log.info(f"Ending Posterior Sampling_{name}_{model_type}_{version}_{i} after {((time.perf_counter() - start_time_sampling)/60):.2f} mins")
         
-        # df_phi = df_summary.filter(like="phi_init",axis=0)[["mean"]].reset_index(names="idx")
-        df_phi = df_summary.filter(like="phi_binned",axis=0)[["mean"]].reset_index(names="idx")
+        df_phi = df_summary.filter(like="phi_init",axis=0)[["mean"]].reset_index(names="idx")
         try:
             df_t = df_phi.idx.str.split("[", expand=True).loc[:,1].str.split(",", expand=True)
         except:
