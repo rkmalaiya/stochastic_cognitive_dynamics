@@ -7,9 +7,9 @@
 # #SBATCH --cpus-per-task=10
 # #SBATCH --mem=32G
 #SBATCH --nodes=8
-#SBATCH --ntasks=128
-#SBATCH --ntasks-per-node=16
-#SBATCH --cpus-per-task=4
+#SBATCH --ntasks=64
+#SBATCH --ntasks-per-node=8
+#SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=4G
 #SBATCH --time=2-00:00:00
 #SBATCH --output=cme_cpu_%j.out
