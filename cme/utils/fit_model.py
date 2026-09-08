@@ -501,6 +501,7 @@ def _run_model(file_loc, data, version,
                         "phi_conc": ["part_id"],
                         "sigma": ["part_id"],
                         "phi_init": ["part_id"],
+                        "phi_bins": ["part_id"],
                         "likelihood": ["part_id"],
                         "RT":["part_id"]
                     }

@@ -400,9 +400,9 @@ def _get_initial_state(n_states, start_width, response_width, I = 1, prob=1, mod
         npy.deterministic("phi_conc", conc)
 
         with npy.plate('I2', I, dim=-3):
-            p_bins = npy.sample("phi_init", dist.Dirichlet(conc)) # Initial State
+            p_bins = npy.sample("phi_bins", dist.Dirichlet(conc))
 
-        p_0 = _expand_bins(p_bins, n_free, n_bins)
+        p_0 = npy.deterministic("phi_init", _expand_bins(p_bins, n_free, n_bins)) # Initial State
         p_0 = npx.pad(p_0, ((0,0),(0,0),(0,0),(response_width,response_width)))
 
         if model_type == "Markov":

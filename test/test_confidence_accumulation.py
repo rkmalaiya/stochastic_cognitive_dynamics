@@ -491,7 +491,8 @@ def test_expand_bins_spreads_mass_evenly_within_a_bin():
 def test_initial_state_uses_requested_bins(model_type):
     n_states, response_width, n_bins = 51, 17, 5
     trace = _trace_initial_state(n_states, response_width, n_bins, model_type)
-    assert np.asarray(trace["phi_init"]["value"]).shape[-1] == n_bins
+    assert np.asarray(trace["phi_bins"]["value"]).shape[-1] == n_bins
+    assert np.asarray(trace["phi_init"]["value"]).shape[-1] == n_states - 2*response_width
     assert np.asarray(trace["phi_0"]["value"]).shape[-2] == n_states
     assert npx.allclose(trace["phi_init"]["value"].sum(axis=-1), 1.0, atol=1e-5)
 
