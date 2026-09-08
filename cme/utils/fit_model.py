@@ -498,6 +498,7 @@ def _run_model(file_loc, data, version,
                         "sigma_final": ["part_id"],
                         "phi_0": ["part_id"],
                         "likl_rt": ["part_id"],
+                        "likl_total": ["part_id"],
                         "phi_conc": ["part_id"],
                         "sigma": ["part_id"],
                         "phi_init": ["part_id"],
@@ -516,7 +517,8 @@ def _run_model(file_loc, data, version,
             arviz_data["observed_data"] = obs_idata["observed_data"]
             # Previous display-oriented summary call retained for reference:
             # df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"]) #"sigma_final", "likl_rt", using phi_init instead of phi_0 because phi_0 is padded with zeros for response states. If unpadded, the likelihood function gives a high likelihood for even 0 (or delta) response times.
-            df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"], round_to="none") # Keep raw numeric values for downstream calculations; phi_init is used because phi_0 is padded with zeros for response states.
+            # df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "sigma_final"], round_to="none") # Keep raw numeric values for downstream calculations; phi_init is used because phi_0 is padded with zeros for response states.
+            df_summary = az.summary(arviz_data, var_names=["mu", "phi_init", "likl_total", "sigma_final"], round_to="none")
             
             #df_summary = (df_summary.reset_index(names="params")
                             #.assign(param_name = lambda df: df.params.str.split("[",expand=True)[0])

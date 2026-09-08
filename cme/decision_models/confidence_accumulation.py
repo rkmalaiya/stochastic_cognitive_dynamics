@@ -698,6 +698,7 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
                           transition_type=transition_type, likelihood_type=likelihood_type, model_type=model_type)
         #likl = npx.log(likl)
         pyro.deterministic("likl_rt", likl)
+        pyro.deterministic("likl_total", likl.sum(axis=-1))
         pyro.factor("likelihood", likl) #.sum()
 
 # def gen_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
