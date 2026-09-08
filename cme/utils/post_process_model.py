@@ -62,7 +62,7 @@ def collect_dataframes(file_pre, file_post, data_mod_ver, size=None, batch_size=
                             .assign(model=m)
                             #.assign(dims = lambda df:df.params.str.split("[", expand=True)[1].str.removesuffix("]")) 
                             #.sort_values(["subfile_id", "part_id", "items"])
-                            .assign(part_id = lambda df: df.part_id.astype(str).str.removesuffix("]") if "part_id" in df.columns else df.index)
+                            .assign(part_id = lambda df: df.part_id if "part_id" in df.columns else df.index)
                             .assign(id = lambda df: df.part_id.astype(int) + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0))
                             .reset_index(drop=True)
                             )
