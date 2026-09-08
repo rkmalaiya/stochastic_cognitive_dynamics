@@ -552,7 +552,7 @@ def _run_model(file_loc, data, version,
         df_summary_csv = (df_summary
                             .reset_index(names="params")
                             .assign(param_name = lambda df: df.params.str.split("[",expand=True)[0])
-                            .assign(part_id = lambda df: df.params.str.split("[",expand=True)[1].str.split(",",expand=True)[0])
+                            .assign(part_id = lambda df: df.params.str.split("[",expand=True)[1].str.split(",",expand=True)[0].str.removesuffix("]"))
                             .assign(dims = lambda df:df.params.str.split("[", expand=True)[1].str.removesuffix("]")) 
                     )
         df_summary_csv.to_csv(f"export/posterior_summary_{name}_{model_type}_{version}_{i}.csv")
