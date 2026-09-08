@@ -259,7 +259,7 @@ def _write_fit_configuration_csv(model):
     if os.path.exists(csv_path):
         configurations = pd.read_csv(
             csv_path, dtype=str, keep_default_na=False
-        )
+        ).reindex(columns=columns, fill_value="")
         matching = pd.Series(True, index=configurations.index)
         for column, value in configuration.items():
             matching &= configurations[column].eq(value)
