@@ -1,0 +1,1 @@
+arviz[h5netcdf,matplotlib]<2,>=1.2
