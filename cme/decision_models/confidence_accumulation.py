@@ -779,6 +779,70 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
 
     return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "initial_state":phi_0, "Likelihood":df_sim_RT, "Samples":df_samples}
 
+def joint_response_pmf(n_states, response_width, delta, measurement_prob, phi_0,
+                       drift_rate, diffusion_rate, n_max, model_type="Markov|Quantum"):
+    Mc, Mw, Mn = _get_measurement_matrix(n_states = n_states, response_width=response_width, prob=measurement_prob, model_type = model_type)
+
+    if model_type == "Markov":
+        intensity_matrix = diffusion_buildK(n_states, drift_rate, diffusion_rate, delta)
+    elif model_type == "Quantum":
+        intensity_matrix = quantum_buildH(n_states, drift_rate, diffusion_rate, delta)
+    else:
+        raise Exception(f"Please select one of {model_type}")
+
+    T_delta = sci.linalg.expm(intensity_matrix * delta)
+    phi_0 = phi_0.astype(npx.result_type(T_delta, phi_0))
+
+    def _prob(phi):
+        if model_type == "Markov":
+            return phi.sum(axis=(-3,-2,-1))
+        return (npx.abs(phi)**2).sum(axis=(-3,-2,-1))
+
+    def _step(phi, _):
+        phi = T_delta @ phi
+        P_c = _prob(Mc @ phi)
+        P_w = _prob(Mw @ phi)
+        phi = Mn @ phi
+        return phi, npx.stack([P_c, P_w], axis=-1)
+
+    _, P = lax.scan(_step, phi_0, None, length=n_max)
+    return P.transpose(1, 2, 0)
+
+def get_joint_RT_RA(n_states, response_width, delta, measurement_prob,
+                    drift_rate, diffusion_rate, phi_0, data_samples = (1,10), max_RT_sec=10, n_max=None,
+                    tail_factor=10, param_sample_id=-1, model_type="Markov|Quantum", seed=None):
+    part_I, part_J = data_samples
+    if n_max is None:
+        n_max = int(np.ceil(max_RT_sec / delta)) * tail_factor
+
+    P = joint_response_pmf(n_states, response_width, delta, measurement_prob, phi_0,
+                           drift_rate, diffusion_rate, n_max, model_type=model_type)
+    P = np.asarray(P, dtype=np.float64)
+    P_flat = P.reshape(P.shape[0], -1)
+    tail = np.clip(1 - P_flat.sum(axis=-1), 0, None)
+    weights = np.concatenate([P_flat, tail[:, None]], axis=-1)
+
+    rng = np.random.default_rng(seed)
+    idx = np.stack([rng.choice(weights.shape[-1], size=part_J, p=w / w.sum()) for w in weights])
+
+    is_correct = idx < n_max
+    is_wrong = (idx >= n_max) & (idx < 2 * n_max)
+    n = np.where(is_correct, idx + 1, np.where(is_wrong, idx - n_max + 1, np.nan))
+    RT = n * delta
+    RA = np.where(is_correct, 1.0, np.where(is_wrong, -1.0, np.nan))
+    prob = np.take_along_axis(weights, idx, axis=-1)
+
+    df_samples = (pd.DataFrame(RT)
+        .assign(drift_rate=np.asarray(drift_rate).reshape(-1), diffusion_rate=np.asarray(diffusion_rate).reshape(-1))
+        .reset_index(names="part_id")
+        .melt(id_vars=["part_id", "drift_rate", "diffusion_rate"], var_name="pseudo_item_id", value_name="RT")
+        .assign(RA = RA.flatten(order="F"), prob = prob.flatten(order="F"), param_sample_id = param_sample_id)
+        .set_index(["part_id","pseudo_item_id"])
+        )
+
+    return {"drift_rate":drift_rate, "diffusion_rate":diffusion_rate, "initial_state":phi_0,
+            "pmf":P, "tail_mass":tail, "n_max":n_max, "Samples":df_samples}
+
 def simulate_likelihood(RT_pred, n_states, response_width, delta, measurement_prob, phi_0, RA, 
                      drift_rate, diffusion_rate, 
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
@@ -1002,6 +1066,13 @@ def sample_prior_pred_params(n_states, start_width, response_width, delta, measu
                                     for param_sample_id, (drift_rate, diffusion_rate, phi_0) in 
                                     enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
                                     )
+    elif sampling_type == "JOINT":
+            predictive_samples = parallel(delayed(get_joint_RT_RA)(n_states, response_width, delta, measurement_prob,
+                                                drift_rate, diffusion_rate, phi_0, data_samples = data_samples, max_RT_sec = max_RT_sec,
+                                                param_sample_id = param_sample_id, model_type = model_type)
+                                    for param_sample_id, (drift_rate, diffusion_rate, phi_0) in 
+                                    enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
+                                    )
     else:
         predictive_samples = dict(drift_rate = drift_rate_samples, diffusion_rate = diffusion_rate_samples, phi_0 = phi_0_samples)
     #return predictive_samples
@@ -1031,6 +1102,13 @@ def sample_post_pred_params(n_states, response_width, delta, measurement_prob, X
                                                 model_type = model_type, transition_type = transition_type, 
                                                 likelihood_type = likelihood_type, data_samples = data_samples, 
                                                 sampling_type=sampling_type)
+                                    for param_sample_id, (drift_rate, diffusion_rate, phi_0) in 
+                                    enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
+                                    )
+    elif sampling_type == "JOINT":
+            predictive_samples = parallel(delayed(get_joint_RT_RA)(n_states, response_width, delta, measurement_prob,
+                                                drift_rate, diffusion_rate, phi_0, data_samples = data_samples, max_RT_sec = max_RT_sec,
+                                                param_sample_id = param_sample_id, model_type = model_type)
                                     for param_sample_id, (drift_rate, diffusion_rate, phi_0) in 
                                     enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
                                     )
