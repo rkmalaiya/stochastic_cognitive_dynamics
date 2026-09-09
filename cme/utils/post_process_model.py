@@ -70,7 +70,7 @@ def collect_dataframes(file_pre, file_post, data_mod_ver, size=None, batch_size=
 
         return pd.concat(df_arr).reset_index(drop=True)
 
-def collect_response_from_model_output(folder, data_mod_ver, batch_size=0):
+def collect_response_from_model_output(folder, data_mod_ver, batch_size=0, n_jobs=4):
     def make_dataframe(arr, indicator, folder, dataset, model, version):
 
         return (pd.DataFrame(np.atleast_1d(arr.squeeze()))
@@ -87,67 +87,94 @@ def collect_response_from_model_output(folder, data_mod_ver, batch_size=0):
     keys_process_dict = {key: [] for key in keys}
     dataset_dict = {}
 
-    def process_dataset(dataset, m_v):
-        dataset_processed_values = {key: [] for key in keys}
-        dataset_model_values = {}
-
-        for model, version in m_v:
-            keys_dict = {key: [] for key in keys}
-
-            pkl_file = (
-                f"{folder}/mcmc_samples_"
-                f"{dataset}_{model}_{version}_*.pkl"
-            )
-            pkl_files = gl.glob(pkl_file)
-
-            for file in pkl_files:
-                with open(file, "rb") as pkl:
-                    model_out = pickle.load(pkl)
-
-                for key in keys:
-                    if key in keys_process:
-                        dataset_processed_values[key].append(
-                            make_dataframe(
-                                model_out[key],
-                                file,
-                                folder,
-                                dataset,
-                                model,
-                                version,
-                            )
-                        )
-                    else:
-                        keys_dict[key].append(model_out[key])
-
-            dataset_model_values[model + "_" + dataset] = keys_dict
-
-        return dataset_processed_values, dataset_model_values
-
-    # Original serial dataset/model/file processing retained for reference:
-    # for dataset, m_v in data_mod_ver.items():
+    # Previous version parallelised over datasets (only 2 items), reading the pkl files
+    # serially inside each worker and pickling every result back through a process pipe:
+    # def process_dataset(dataset, m_v):
+    #     dataset_processed_values = {key: [] for key in keys}
+    #     dataset_model_values = {}
+    # 
     #     for model, version in m_v:
     #         keys_dict = {key: [] for key in keys}
-    #         pkl_file = f"{folder}/mcmc_samples_{dataset}_{model}_{version}_*.pkl"
+    # 
+    #         pkl_file = (
+    #             f"{folder}/mcmc_samples_"
+    #             f"{dataset}_{model}_{version}_*.pkl"
+    #         )
     #         pkl_files = gl.glob(pkl_file)
+    # 
     #         for file in pkl_files:
     #             with open(file, "rb") as pkl:
-    #                     model_out = pickle.load(pkl)
-    #                     for key in keys:
-    #                         if key in keys_process:
-    #                             keys_process_dict[key].append(make_dataframe(model_out[key], file, folder, dataset, model, version))
-    #                         else:
-    #                             keys_dict[key].append(model_out[key])
-    #         dataset_dict[model+"_"+dataset] = keys_dict
-    dataset_results = Parallel(n_jobs=6)(
-        delayed(process_dataset)(dataset, m_v)
-        for dataset, m_v in data_mod_ver.items()
+    #                 model_out = pickle.load(pkl)
+    # 
+    #             for key in keys:
+    #                 if key in keys_process:
+    #                     dataset_processed_values[key].append(
+    #                         make_dataframe(
+    #                             model_out[key],
+    #                             file,
+    #                             folder,
+    #                             dataset,
+    #                             model,
+    #                             version,
+    #                         )
+    #                     )
+    #                 else:
+    #                     keys_dict[key].append(model_out[key])
+    # 
+    #         dataset_model_values[model + "_" + dataset] = keys_dict
+    # 
+    #     return dataset_processed_values, dataset_model_values
+    # 
+    # # Original serial dataset/model/file processing retained for reference:
+    # # for dataset, m_v in data_mod_ver.items():
+    # #     for model, version in m_v:
+    # #         keys_dict = {key: [] for key in keys}
+    # #         pkl_file = f"{folder}/mcmc_samples_{dataset}_{model}_{version}_*.pkl"
+    # #         pkl_files = gl.glob(pkl_file)
+    # #         for file in pkl_files:
+    # #             with open(file, "rb") as pkl:
+    # #                     model_out = pickle.load(pkl)
+    # #                     for key in keys:
+    # #                         if key in keys_process:
+    # #                             keys_process_dict[key].append(make_dataframe(model_out[key], file, folder, dataset, model, version))
+    # #                         else:
+    # #                             keys_dict[key].append(model_out[key])
+    # #         dataset_dict[model+"_"+dataset] = keys_dict
+    # dataset_results = Parallel(n_jobs=6)(
+    #     delayed(process_dataset)(dataset, m_v)
+    #     for dataset, m_v in data_mod_ver.items()
+    # )
+    # 
+    # for dataset_processed_values, dataset_model_values in dataset_results:
+    #     for key in keys_process:
+    #         keys_process_dict[key].extend(dataset_processed_values[key])
+    # 
+    #     dataset_dict.update(dataset_model_values)
+
+    def process_file(file, dataset, model, version):
+        with open(file, "rb") as pkl:
+            model_out = pickle.load(pkl)
+        processed = {key: make_dataframe(model_out[key], file, folder, dataset, model, version)
+                     for key in keys if key in keys_process}
+        values = {key: model_out[key] for key in keys if key not in keys_process}
+        return processed, values
+
+    tasks = [(dataset, model, version, file)
+             for dataset, m_v in data_mod_ver.items()
+             for model, version in m_v
+             for file in gl.glob(f"{folder}/mcmc_samples_{dataset}_{model}_{version}_*.pkl")]
+
+    file_results = Parallel(n_jobs=n_jobs, prefer="threads")(
+        delayed(process_file)(file, dataset, model, version)
+        for dataset, model, version, file in tasks
     )
 
-    for dataset_processed_values, dataset_model_values in dataset_results:
+    for (dataset, model, version, file), (processed, values) in zip(tasks, file_results):
         for key in keys_process:
-            keys_process_dict[key].extend(dataset_processed_values[key])
-
-        dataset_dict.update(dataset_model_values)
+            keys_process_dict[key].append(processed[key])
+        keys_dict = dataset_dict.setdefault(model + "_" + dataset, {key: [] for key in keys})
+        for key, value in values.items():
+            keys_dict[key].append(value)
 
     df_observed_rt = pd.concat(keys_process_dict["RT"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)
     df_observed_ra = pd.concat(keys_process_dict["X"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)      
