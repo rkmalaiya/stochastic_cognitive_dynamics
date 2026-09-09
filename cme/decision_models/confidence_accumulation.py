@@ -183,16 +183,21 @@ def centralized_parameters(I):
 
 def non_centralized_parameters(model_type, I):
     # Fixed prior location/scale for drift
-    m = pyro.deterministic("m", npx.asarray(0.1))
-    s = pyro.deterministic("s", npx.asarray(0.1))
+    # m = pyro.deterministic("m", npx.asarray(0.1))
+    # s = pyro.deterministic("s", npx.asarray(0.1))
+    m = pyro.sample("m", dist.Normal(0.1, 1.0))
+    s = pyro.sample("s", dist.HalfNormal(0.5))
 
-    # Fixed prior location/scale for sigma
-    if model_type == "Quantum":
-        m_si = pyro.deterministic("m_si", npx.asarray(0.5))
-        s_si = pyro.deterministic("s_si", npx.asarray(0.05))
-    else:  # Markov
-        m_si = pyro.deterministic("m_si", npx.asarray(0.0))
-        s_si = pyro.deterministic("s_si", npx.asarray(0.1))
+    # Fixed prior location/scale for sigma. Now on a log scale, so m_si is log(rate):
+    # the rate needed spans 1.5 to 28.6 over 21 to 101 states, which is 0.4 to 3.4 in logs.
+    # if model_type == "Quantum":
+    #     m_si = pyro.deterministic("m_si", npx.asarray(0.5))
+    #     s_si = pyro.deterministic("s_si", npx.asarray(0.05))
+    # else:  # Markov
+    #     m_si = pyro.deterministic("m_si", npx.asarray(0.0))
+    #     s_si = pyro.deterministic("s_si", npx.asarray(0.1))
+    m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
+    s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
 
     with pyro.plate("I3", I, dim=-2):
 
@@ -209,9 +214,11 @@ def non_centralized_parameters(model_type, I):
             raise Exception(f"Please select one of {model_type}")
 
         # Diffusion
-        sigma_r = pyro.sample("sigma_r", dist.Normal(0.0, 0.1))
+        # sigma_r = pyro.sample("sigma_r", dist.Normal(0.0, 0.1))
+        sigma_r = pyro.sample("sigma_r", dist.Normal(0.0, 1.0))
 
-        sigma_base = jax.nn.softplus(m_si + s_si * sigma_r)
+        # sigma_base = jax.nn.softplus(m_si + s_si * sigma_r)
+        sigma_base = npx.exp(m_si + s_si * sigma_r)
 
         if model_type == "Quantum":
             sigma = pyro.deterministic("sigma", npx.clip(sigma_base, 0.01, None))
@@ -998,6 +1005,14 @@ def sample_posterior_params(DT, X, n_states, start_width, response_width, delta,
     run_secs = time.perf_counter() - start_run
     iters = num_warmup + samples_n
     log.info(f"NUTS diagnostics - chains: {num_chains}, mean steps: {num_steps.mean():.2f}, max steps: {num_steps.max()}, divergences: {divergences.sum()}")
+
+    post = mcmc_chain.get_samples()
+    sig = np.asarray(post["sigma_final"]); mu_p = np.asarray(post["mu"])
+    hyp = " ".join(f"{k}={np.asarray(post[k]).mean():.3f}" for k in ("m","s","m_si","s_si") if k in post)
+    log.info(f"RATES: model={model_type} n_states={n_states} mu={mu_p.mean():.3f}+-{mu_p.std():.3f} "
+             f"sigma_final={sig.mean():.3f}+-{sig.std():.3f} "
+             f"[{np.quantile(sig,0.05):.3f},{np.quantile(sig,0.95):.3f}] {hyp}")
+
     log.info(f"PERF: model={model_type} method={chain_method} devices={jax.local_device_count()} cores={os.process_cpu_count()} iters={iters} wall={run_secs/60:.2f} mins {run_secs/iters*1e3:.1f} ms/it {run_secs/iters/num_steps.mean()*1e6:.0f} us/grad")
 
     return mcmc_chain#, post_likl
