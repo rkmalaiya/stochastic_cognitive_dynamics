@@ -186,7 +186,11 @@ def non_centralized_parameters(model_type, I):
     # m = pyro.deterministic("m", npx.asarray(0.1))
     # s = pyro.deterministic("s", npx.asarray(0.1))
     m = pyro.sample("m", dist.Normal(0.1, 1.0))
-    s = pyro.sample("s", dist.HalfNormal(0.5))
+    # s * mu_r is a product of two unidentified scalars at I=1, which is a funnel.
+    # Posterior for s matched its prior, so freezing it at that mean costs no information
+    # and turns the funnel into an additive ridge that dense_mass absorbs.
+    # s = pyro.sample("s", dist.HalfNormal(0.5))
+    s = pyro.deterministic("s", npx.asarray(0.4))
 
     # Fixed prior location/scale for sigma. Now on a log scale, so m_si is log(rate):
     # the rate needed spans 1.5 to 28.6 over 21 to 101 states, which is 0.4 to 3.4 in logs.
@@ -202,10 +206,12 @@ def non_centralized_parameters(model_type, I):
         # Likelihood oscillates in sigma (the hopping amplitude), so keep the tail bounded.
         # Needed rate at 51 states is ~7.07, i.e. log 1.96, reached at ~1.9 sd.
         m_si = pyro.sample("m_si", dist.Normal(0.5, 0.75))
-        s_si = pyro.sample("s_si", dist.HalfNormal(0.25))
+        # s_si = pyro.sample("s_si", dist.HalfNormal(0.25))
+        s_si = pyro.deterministic("s_si", npx.asarray(0.2))
     else:  # Markov - likelihood is monotone in sigma, so a wide prior costs nothing
         m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
-        s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
+        # s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
+        s_si = pyro.deterministic("s_si", npx.asarray(0.4))
 
     with pyro.plate("I3", I, dim=-2):
 
