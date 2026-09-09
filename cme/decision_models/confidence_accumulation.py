@@ -196,8 +196,16 @@ def non_centralized_parameters(model_type, I):
     # else:  # Markov
     #     m_si = pyro.deterministic("m_si", npx.asarray(0.0))
     #     s_si = pyro.deterministic("s_si", npx.asarray(0.1))
-    m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
-    s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
+    # m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
+    # s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
+    if model_type == "Quantum":
+        # Likelihood oscillates in sigma (the hopping amplitude), so keep the tail bounded.
+        # Needed rate at 51 states is ~7.07, i.e. log 1.96, reached at ~1.9 sd.
+        m_si = pyro.sample("m_si", dist.Normal(0.5, 0.75))
+        s_si = pyro.sample("s_si", dist.HalfNormal(0.25))
+    else:  # Markov - likelihood is monotone in sigma, so a wide prior costs nothing
+        m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
+        s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
 
     with pyro.plate("I3", I, dim=-2):
 
