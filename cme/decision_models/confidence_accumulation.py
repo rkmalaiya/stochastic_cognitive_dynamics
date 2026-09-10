@@ -203,9 +203,12 @@ def non_centralized_parameters(model_type, I):
     # m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
     # s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
     if model_type == "Quantum":
-        # Likelihood oscillates in sigma (the hopping amplitude), so keep the tail bounded.
-        # Needed rate at 51 states is ~7.07, i.e. log 1.96, reached at ~1.9 sd.
-        m_si = pyro.sample("m_si", dist.Normal(0.5, 0.75))
+        # Likelihood oscillates in sigma (the hopping amplitude). Measured at 51 states over
+        # 3 datasets, the dominant peak beats the runner-up by 19.96 nats for sigma in [2,5]
+        # and by only 0.32-0.57 nats above 5. 21 states gives the same band. mu carries the
+        # per-participant timing, so nothing needs sigma outside it.
+        # m_si = pyro.sample("m_si", dist.Normal(0.5, 0.75))
+        m_si = pyro.sample("m_si", dist.Normal(1.15, 0.23))   # sigma in [2.0, 5.0] at +-2 sd
         # s_si = pyro.sample("s_si", dist.HalfNormal(0.25))
         s_si = pyro.deterministic("s_si", npx.asarray(0.2))
     else:  # Markov - likelihood is monotone in sigma, so a wide prior costs nothing
