@@ -181,7 +181,7 @@ def centralized_parameters(I):
 #     return mu, sigma
 
 
-def non_centralized_parameters(model_type, I):
+def non_centralized_parameters(model_type, I, n_states=None):
     # Fixed prior location/scale for drift
     # m = pyro.deterministic("m", npx.asarray(0.1))
     # s = pyro.deterministic("s", npx.asarray(0.1))
@@ -203,14 +203,18 @@ def non_centralized_parameters(model_type, I):
     # m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
     # s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
     if model_type == "Quantum":
-        # Likelihood oscillates in sigma (the hopping amplitude). Measured at 51 states over
-        # 3 datasets, the dominant peak beats the runner-up by 19.96 nats for sigma in [2,5]
-        # and by only 0.32-0.57 nats above 5. 21 states gives the same band. mu carries the
-        # per-participant timing, so nothing needs sigma outside it.
+        # Likelihood oscillates in sigma (the hopping amplitude), and mu trades against it for
+        # response timing, so a free sigma leaves a ridge broken into islands: 58-62 of 93
+        # above r_hat 1.05 at 51 states, whether the prior was wide or the [2,5] band.
+        # Frozen sigma was the only configuration that ever converged there (d_45, 4/93), so
+        # fix it - at the value the data found rather than d_45's starved 1.35.
         # m_si = pyro.sample("m_si", dist.Normal(0.5, 0.75))
-        m_si = pyro.sample("m_si", dist.Normal(1.15, 0.23))   # sigma in [2.0, 5.0] at +-2 sd
+        # m_si = pyro.sample("m_si", dist.Normal(1.15, 0.23))   # sigma in [2.0, 5.0] at +-2 sd
         # s_si = pyro.sample("s_si", dist.HalfNormal(0.25))
-        s_si = pyro.deterministic("s_si", npx.asarray(0.2))
+        # s_si = pyro.deterministic("s_si", npx.asarray(0.2))
+        scale = 1.0 if n_states is None else (n_states / QUANTUM_N_REF) ** QUANTUM_SIGMA_EXP
+        m_si = pyro.deterministic("m_si", npx.log(QUANTUM_SIGMA_51 * scale))
+        s_si = pyro.deterministic("s_si", npx.asarray(0.0))
     else:  # Markov - likelihood is monotone in sigma, so a wide prior costs nothing
         m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
         # s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
@@ -368,6 +372,10 @@ def _get_measurement_matrix(n_states, response_width, prob=0.5, model_type = "Ma
 
 PHI_CONC_BASE = 1.0
 PHI_CONC_AMP = 4.0
+
+QUANTUM_SIGMA_51 = 4.84   # sigma_base found by d_50 at 51 states, 186 fits
+QUANTUM_N_REF = 51
+QUANTUM_SIGMA_EXP = 0.48  # from d_50 at 21 and 51 states (3.17 vs 4.84)
 
 def _initial_state_concentration(n_free, model_type):
     x = npx.arange(n_free) - (n_free - 1) / 2
@@ -693,7 +701,7 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
     if params_type == "Centralized":
         mu, sigma = centralized_parameters(I)
     elif params_type == "NonCentralized":
-        mu, sigma = non_centralized_parameters(model_type, I)
+        mu, sigma = non_centralized_parameters(model_type, I, n_states)
     #elif params_type == "ParticipantLevel":
     #    mu, sigma = participant_parameters(model_type, I)
     else:
