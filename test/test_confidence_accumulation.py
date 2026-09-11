@@ -503,13 +503,30 @@ def test_initial_state_defaults_bins_to_ten_percent_of_states(n_states, expected
     assert np.asarray(trace["phi_conc"]["value"]).shape[-1] == expected_bins
 
 
-def test_markov_concentration_peaks_at_centre_and_quantum_at_edges():
+# Quantum used to bump at both edges; that split mu, so both models now bump at the centre.
+# def test_markov_concentration_peaks_at_centre_and_quantum_at_edges():
+#     n_bins = 5
+#     markov = np.asarray(ca._initial_state_concentration(n_bins, "Markov"))
+#     quantum = np.asarray(ca._initial_state_concentration(n_bins, "Quantum"))
+#     assert markov.argmax() == n_bins // 2, "Markov bump is not centred"
+#     assert quantum[0] == quantum.max() and quantum[-1] == quantum.max(), "Quantum bumps are not at the edges"
+#     assert quantum.argmin() == n_bins // 2, "Quantum trough is not centred"
+
+
+@pytest.mark.parametrize("model_type", ["Markov", "Quantum"])
+def test_concentration_peaks_at_centre(model_type):
     n_bins = 5
-    markov = np.asarray(ca._initial_state_concentration(n_bins, "Markov"))
-    quantum = np.asarray(ca._initial_state_concentration(n_bins, "Quantum"))
-    assert markov.argmax() == n_bins // 2, "Markov bump is not centred"
-    assert quantum[0] == quantum.max() and quantum[-1] == quantum.max(), "Quantum bumps are not at the edges"
-    assert quantum.argmin() == n_bins // 2, "Quantum trough is not centred"
+    conc = np.asarray(ca._initial_state_concentration(n_bins, model_type))
+    assert conc.argmax() == n_bins // 2, f"{model_type} bump is not centred"
+    np.testing.assert_allclose(conc, conc[::-1], rtol=1e-6)
+
+
+def test_markov_and_quantum_share_the_same_concentration():
+    n_bins = 5
+    np.testing.assert_allclose(
+        np.asarray(ca._initial_state_concentration(n_bins, "Markov")),
+        np.asarray(ca._initial_state_concentration(n_bins, "Quantum")),
+        rtol=1e-6)
 
 
 def test_initial_state_leaves_response_zones_empty():

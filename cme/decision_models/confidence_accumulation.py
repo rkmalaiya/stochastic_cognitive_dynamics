@@ -383,8 +383,12 @@ def _initial_state_concentration(n_free, model_type):
     if model_type == "Markov":
         shape = npx.exp(-0.5 * (x / w) ** 2)
     elif model_type == "Quantum":
-        e = (n_free - 1) / 2
-        shape = npx.exp(-0.5 * ((x - e) / w) ** 2) + npx.exp(-0.5 * ((x + e) / w) ** 2)
+        # Bumps at both edges give two routes to a response boundary, so two mu values
+        # explain the same data. Median dominance of the best mu peak over the runner-up:
+        # edge 6.44 nats vs centre 19.34 at 51 states, 18.61 vs 63.13 at 21.
+        # e = (n_free - 1) / 2
+        # shape = npx.exp(-0.5 * ((x - e) / w) ** 2) + npx.exp(-0.5 * ((x + e) / w) ** 2)
+        shape = npx.exp(-0.5 * (x / w) ** 2)
     else:
         raise Exception(f"Please select one of {model_type}")
     return PHI_CONC_BASE + PHI_CONC_AMP * shape
