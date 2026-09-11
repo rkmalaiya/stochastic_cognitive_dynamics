@@ -763,6 +763,7 @@ def _simulate_likelihood_batch(RT_pred, n_states, response_width, delta, measure
 def get_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
                      drift_rate, diffusion_rate, phi_0, data_samples = (1,10), min_RT_sec = 0, max_RT_sec=10, param_sample_id=-1,
                      model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", 
+                     # sampling_type = "GEN|SIM", is_test=False, key=None
                      sampling_type = "GEN|SIM", is_test=False, key=None, likl=None
                      ):
     
@@ -786,6 +787,7 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         .melt(id_vars=["part_id", "drift_rate", "diffusion_rate"], var_name="pseudo_item_id", value_name="RT")
         .assign(RA = RA.flatten())
         .set_index(["part_id","pseudo_item_id"])
+        # .join(pd.DataFrame(likl)
         .join(pd.DataFrame(likl_)
             .reset_index(names="part_id")
             .melt(id_vars="part_id", var_name="pseudo_item_id", value_name="logp")
@@ -1112,8 +1114,16 @@ def sample_prior_pred_params(n_states, start_width, response_width, delta, measu
                                     )
     elif sampling_type == "GEN" or sampling_type == "SIM":
             # The likelihood is the only jax work per draw, so batch it once and leave the
-            # per-draw pandas in a plain loop.
-            # predictive_samples = parallel(delayed(get_RT)(RT, ...) for ...)
+            # per-draw pandas in a plain loop. Original per-draw call retained for reference:
+            # predictive_samples = parallel(delayed(get_RT)(RT, n_states, response_width, delta, measurement_prob, X,
+            #                                     drift_rate, diffusion_rate, phi_0, min_RT_sec = min_RT_sec,  max_RT_sec = max_RT_sec,
+            #                                     param_sample_id = param_sample_id,
+            #                                     model_type = model_type, transition_type = transition_type,
+            #                                     likelihood_type = likelihood_type, data_samples = data_samples,
+            #                                     sampling_type=sampling_type)
+            #                         for param_sample_id, (drift_rate, diffusion_rate, phi_0) in
+            #                         enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
+            #                         )
             part_I, part_J = data_samples
             RT_pred = RT if RT is not None else np.tile(np.linspace(min_RT_sec, max_RT_sec, part_J), (part_I, 1))
             likl_all = _simulate_likelihood_batch(RT_pred, n_states, response_width, delta, measurement_prob, X,
@@ -1158,8 +1168,16 @@ def sample_post_pred_params(n_states, response_width, delta, measurement_prob, X
                                     )
     elif sampling_type == "GEN" or sampling_type == "SIM":
             # The likelihood is the only jax work per draw, so batch it once and leave the
-            # per-draw pandas in a plain loop.
-            # predictive_samples = parallel(delayed(get_RT)(RT, ...) for ...)
+            # per-draw pandas in a plain loop. Original per-draw call retained for reference:
+            # predictive_samples = parallel(delayed(get_RT)(RT, n_states, response_width, delta, measurement_prob, X,
+            #                                     drift_rate, diffusion_rate, phi_0, min_RT_sec = min_RT_sec, max_RT_sec=max_RT_sec,
+            #                                     param_sample_id = param_sample_id,
+            #                                     model_type = model_type, transition_type = transition_type,
+            #                                     likelihood_type = likelihood_type, data_samples = data_samples,
+            #                                     sampling_type=sampling_type)
+            #                         for param_sample_id, (drift_rate, diffusion_rate, phi_0) in
+            #                         enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
+            #                         )
             part_I, part_J = data_samples
             RT_pred = RT if RT is not None else np.tile(np.linspace(min_RT_sec, max_RT_sec, part_J), (part_I, 1))
             likl_all = _simulate_likelihood_batch(RT_pred, n_states, response_width, delta, measurement_prob, X,
