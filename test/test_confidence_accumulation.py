@@ -519,3 +519,85 @@ def test_initial_state_leaves_response_zones_empty():
     assert np.count_nonzero(phi_0[:response_width]) == 0, "initial state leaked into the lower response zone"
     assert np.count_nonzero(phi_0[-response_width:]) == 0, "initial state leaked into the upper response zone"
     assert np.count_nonzero(phi_0) == n_states - 2*response_width
+
+
+@pytest.fixture
+def gen_samples(model_constants):
+    I, J, draws = 2, 3, 4
+    n_states = model_constants.n_states
+    rw = model_constants.response_width
+    n_free = n_states - 2 * rw
+    base = np.zeros(n_states)
+    base[rw:rw + n_free] = 1.0 / n_free
+    rng = np.random.default_rng(0)
+    Samples = namedtuple("Samples", ["I", "J", "draws", "X", "mu", "sigma", "phi_0"])
+    return Samples(
+        I=I, J=J, draws=draws,
+        X=rng.binomial(1, 0.5, (I, J)),
+        mu=rng.uniform(0.5, 1.5, (draws, I, 1)),
+        sigma=rng.uniform(0.5, 1.5, (draws, I, 1)),
+        phi_0=np.tile(base, (draws, I, 1, 1))[..., None],
+    )
+
+
+@pytest.mark.parametrize("model_type", ["Markov", "Quantum"])
+def test_simulate_likelihood_batch_matches_per_draw(model_constants, gen_samples, model_type):
+    s = gen_samples
+    phi_0 = s.phi_0 ** 0.5 if model_type == "Quantum" else s.phi_0
+    RT_pred = np.tile(np.linspace(1.0, 3.0, s.J), (s.I, 1))
+
+    batched = ca._simulate_likelihood_batch(
+        RT_pred, model_constants.n_states, model_constants.response_width,
+        model_constants.delta, model_constants.measurement_prob, s.X,
+        s.mu, s.sigma, phi_0, model_type, "TIMESTEP", "SINGLE")
+
+    assert batched.shape == (s.draws, s.I, s.J)
+
+    for k in range(s.draws):
+        one = ca.simulate_likelihood(
+            RT_pred, model_constants.n_states, model_constants.response_width,
+            model_constants.delta, model_constants.measurement_prob, phi_0[k], s.X,
+            s.mu[k], s.sigma[k],
+            model_type=model_type, transition_type="TIMESTEP", likelihood_type="SINGLE")
+        np.testing.assert_allclose(batched[k], np.asarray(one), rtol=1e-5, atol=1e-6)
+
+
+@pytest.mark.parametrize("model_type", ["Markov", "Quantum"])
+def test_post_pred_gen_returns_one_sample_set_per_draw(model_constants, gen_samples, model_type):
+    s = gen_samples
+    phi_0 = s.phi_0 ** 0.5 if model_type == "Quantum" else s.phi_0
+
+    out = ca.sample_post_pred_params(
+        n_states=model_constants.n_states, response_width=model_constants.response_width,
+        delta=model_constants.delta, measurement_prob=model_constants.measurement_prob,
+        X=s.X, drift_rate_samples=s.mu, diffusion_rate_samples=s.sigma,
+        phi_0_samples=phi_0, RT=None, data_samples=(s.I, s.J),
+        min_RT_sec=1.0, max_RT_sec=3.0,
+        params_type="NonCentralized", model_type=model_type,
+        transition_type="TIMESTEP", likelihood_type="SINGLE",
+        sampling_type="GEN", is_parallel=False)
+
+    assert len(out) == s.draws
+    for k, draw in enumerate(out):
+        assert draw["Samples"].shape[0] == s.I * s.J
+        assert draw["Likelihood"].shape[0] == s.I * s.J
+        assert set(draw["Samples"].param_sample_id) == {k}
+
+
+@pytest.mark.parametrize("model_type", ["Markov", "Quantum"])
+def test_prior_pred_gen_returns_one_sample_set_per_draw(model_constants, gen_samples, model_type):
+    s = gen_samples
+
+    prior_samples, out = ca.sample_prior_pred_params(
+        n_states=model_constants.n_states, start_width=model_constants.start_width,
+        response_width=model_constants.response_width, delta=model_constants.delta,
+        measurement_prob=model_constants.measurement_prob, X=s.X, RT=None,
+        n_samples=s.draws, data_samples=(s.I, s.J), min_RT_sec=1.0, max_RT_sec=3.0,
+        params_type="NonCentralized", model_type=model_type,
+        transition_type="TIMESTEP", likelihood_type="SINGLE", sampling_type="GEN")
+
+    assert prior_samples["mu"].shape == (s.draws, s.I, 1)
+    assert len(out) == s.draws
+    for draw in out:
+        assert draw["Samples"].shape[0] == s.I * s.J
+        assert draw["Likelihood"].shape[0] == s.I * s.J
