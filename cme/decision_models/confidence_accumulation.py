@@ -203,18 +203,18 @@ def non_centralized_parameters(model_type, I, n_states=None):
     # m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
     # s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
     if model_type == "Quantum":
-        # Likelihood oscillates in sigma (the hopping amplitude), and mu trades against it for
-        # response timing, so a free sigma leaves a ridge broken into islands: 58-62 of 93
-        # above r_hat 1.05 at 51 states, whether the prior was wide or the [2,5] band.
-        # Frozen sigma was the only configuration that ever converged there (d_45, 4/93), so
-        # fix it - at the value the data found rather than d_45's starved 1.35.
+        # Under the edge-bump initial state a free sigma left a ridge broken into islands
+        # (58-62 of 93 above r_hat 1.05 at 51 states) and freezing was the only fix. With
+        # the centre bump the joint mu-sigma surface has one peak 13 nats clear over
+        # sigma in [1,12] at the real config, so sigma is learnable again.
         # m_si = pyro.sample("m_si", dist.Normal(0.5, 0.75))
         # m_si = pyro.sample("m_si", dist.Normal(1.15, 0.23))   # sigma in [2.0, 5.0] at +-2 sd
         # s_si = pyro.sample("s_si", dist.HalfNormal(0.25))
-        # s_si = pyro.deterministic("s_si", npx.asarray(0.2))
-        scale = 1.0 if n_states is None else (n_states / QUANTUM_N_REF) ** QUANTUM_SIGMA_EXP
-        m_si = pyro.deterministic("m_si", npx.log(QUANTUM_SIGMA_51 * scale))
-        s_si = pyro.deterministic("s_si", npx.asarray(0.0))
+        # scale = 1.0 if n_states is None else (n_states / QUANTUM_N_REF) ** QUANTUM_SIGMA_EXP
+        # m_si = pyro.deterministic("m_si", npx.log(QUANTUM_SIGMA_51 * scale))
+        # s_si = pyro.deterministic("s_si", npx.asarray(0.0))
+        m_si = pyro.sample("m_si", dist.Normal(1.58, 0.5))    # sigma in [1.8, 13.2] at +-2 sd
+        s_si = pyro.deterministic("s_si", npx.asarray(0.2))
     else:  # Markov - likelihood is monotone in sigma, so a wide prior costs nothing
         m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
         # s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
