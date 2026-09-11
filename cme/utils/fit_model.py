@@ -754,7 +754,7 @@ def _run_model(file_loc, data, version,
         # SLURM already distributes batches between nodes. Run one JAX
         # process per node and let JAX/native math use the allocated cores.
         n_jobs1 = 1
-    elif estimation_type == "MCMC":
+    elif estimation_type == "MCMC" and not is_test and is_parallel and jax.default_backend() != "gpu":
         # One node (interactive salloc, or no SLURM at all): pack the cores here. Each fit
         # uses num_chains single-threaded XLA devices, plus one core during the predictive
         # phases - the +1 fills those gaps.
