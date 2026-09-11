@@ -739,7 +739,9 @@ def _run_model(file_loc, data, version,
     #     n_jobs1 = 1
     # Original multi-process SLURM check retained for reference:
     # if process_count > 1:
-    if os.environ.get("SLURM_PROCID") is not None:
+    # Original SLURM_PROCID switch retained for reference:
+    # if os.environ.get("SLURM_PROCID") is not None:
+    if int(os.environ.get("SLURM_NTASKS", "1")) > 1:
         # Original cores-per-batch SLURM scheduling retained for reference:
         # cores_per_batch = int(os.environ.get("CME_CORES_PER_BATCH", "10"))
         # allocated_cores = int(os.environ.get(
@@ -753,7 +755,12 @@ def _run_model(file_loc, data, version,
         # process per node and let JAX/native math use the allocated cores.
         n_jobs1 = 1
     elif estimation_type == "MCMC":
-        n_jobs1 = min(3, batch_n) if not is_test and is_parallel and jax.default_backend() != "gpu" else 1
+        # One node (interactive salloc, or no SLURM at all): pack the cores here. Each fit
+        # uses num_chains single-threaded XLA devices, plus one core during the predictive
+        # phases - the +1 fills those gaps.
+        # n_jobs1 = min(3, batch_n) if not is_test and is_parallel and jax.default_backend() != "gpu" else 1
+        cores = os.process_cpu_count() or 1
+        n_jobs1 = max(1, min(cores // max(num_chains, 1) + 1, batch_n))
     else:
         n_jobs1 = 1
 
