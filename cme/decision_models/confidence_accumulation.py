@@ -388,11 +388,12 @@ def _initial_state_concentration(n_free, model_type):
         # Bumps at both edges give two routes to a response boundary, so two mu values
         # explain the same data. Median dominance of the best mu peak over the runner-up:
         # edge 6.44 nats vs centre 19.34 at 51 states, 18.61 vs 63.13 at 21.
-        # Centre bump with learned sigma came back worse on real data (mu 68/93 at 51 states).
-        # Edge bumps with frozen sigma are the configuration that converged: 2-7 of 93 at 21.
-        # shape = npx.exp(-0.5 * (x / w) ** 2)
-        e = (n_free - 1) / 2
-        shape = npx.exp(-0.5 * ((x - e) / w) ** 2) + npx.exp(-0.5 * ((x + e) / w) ** 2)
+        # Edge bumps with frozen sigma converge at 21 states (2-7 of 93) but not at 51
+        # (23-50 of 93, twice). Centre bump WITH frozen sigma was never run - the one centre
+        # run learned sigma and that is what failed. Testing centre + frozen at 51.
+        # e = (n_free - 1) / 2
+        # shape = npx.exp(-0.5 * ((x - e) / w) ** 2) + npx.exp(-0.5 * ((x + e) / w) ** 2)
+        shape = npx.exp(-0.5 * (x / w) ** 2)
     else:
         raise Exception(f"Please select one of {model_type}")
     return PHI_CONC_BASE + PHI_CONC_AMP * shape
