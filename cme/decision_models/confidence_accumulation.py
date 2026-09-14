@@ -210,11 +210,13 @@ def non_centralized_parameters(model_type, I, n_states=None):
         # m_si = pyro.sample("m_si", dist.Normal(0.5, 0.75))
         # m_si = pyro.sample("m_si", dist.Normal(1.15, 0.23))   # sigma in [2.0, 5.0] at +-2 sd
         # s_si = pyro.sample("s_si", dist.HalfNormal(0.25))
-        # scale = 1.0 if n_states is None else (n_states / QUANTUM_N_REF) ** QUANTUM_SIGMA_EXP
-        # m_si = pyro.deterministic("m_si", npx.log(QUANTUM_SIGMA_51 * scale))
-        # s_si = pyro.deterministic("s_si", npx.asarray(0.0))
-        m_si = pyro.sample("m_si", dist.Normal(1.58, 0.5))    # sigma in [1.8, 13.2] at +-2 sd
-        s_si = pyro.deterministic("s_si", npx.asarray(0.2))
+        # Learned sigma under the centre bump came back worse on real data (mu 68/93 at 51
+        # states), so back to the frozen value: 2-7 of 93 at 21 states, 23-43 at 51.
+        # m_si = pyro.sample("m_si", dist.Normal(1.58, 0.5))    # sigma in [1.8, 13.2] at +-2 sd
+        # s_si = pyro.deterministic("s_si", npx.asarray(0.2))
+        scale = 1.0 if n_states is None else (n_states / QUANTUM_N_REF) ** QUANTUM_SIGMA_EXP
+        m_si = pyro.deterministic("m_si", npx.log(QUANTUM_SIGMA_51 * scale))
+        s_si = pyro.deterministic("s_si", npx.asarray(0.0))
     else:  # Markov - likelihood is monotone in sigma, so a wide prior costs nothing
         m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
         # s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
@@ -386,9 +388,11 @@ def _initial_state_concentration(n_free, model_type):
         # Bumps at both edges give two routes to a response boundary, so two mu values
         # explain the same data. Median dominance of the best mu peak over the runner-up:
         # edge 6.44 nats vs centre 19.34 at 51 states, 18.61 vs 63.13 at 21.
-        # e = (n_free - 1) / 2
-        # shape = npx.exp(-0.5 * ((x - e) / w) ** 2) + npx.exp(-0.5 * ((x + e) / w) ** 2)
-        shape = npx.exp(-0.5 * (x / w) ** 2)
+        # Centre bump with learned sigma came back worse on real data (mu 68/93 at 51 states).
+        # Edge bumps with frozen sigma are the configuration that converged: 2-7 of 93 at 21.
+        # shape = npx.exp(-0.5 * (x / w) ** 2)
+        e = (n_free - 1) / 2
+        shape = npx.exp(-0.5 * ((x - e) / w) ** 2) + npx.exp(-0.5 * ((x + e) / w) ** 2)
     else:
         raise Exception(f"Please select one of {model_type}")
     return PHI_CONC_BASE + PHI_CONC_AMP * shape
