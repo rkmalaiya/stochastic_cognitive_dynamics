@@ -214,8 +214,9 @@ def non_centralized_parameters(model_type, I, n_states=None):
         # states), so back to the frozen value: 2-7 of 93 at 21 states, 23-43 at 51.
         # m_si = pyro.sample("m_si", dist.Normal(1.58, 0.5))    # sigma in [1.8, 13.2] at +-2 sd
         # s_si = pyro.deterministic("s_si", npx.asarray(0.2))
-        scale = 1.0 if n_states is None else (n_states / QUANTUM_N_REF) ** QUANTUM_SIGMA_EXP
-        m_si = pyro.deterministic("m_si", npx.log(QUANTUM_SIGMA_51 * scale))
+        # scale = 1.0 if n_states is None else (n_states / QUANTUM_N_REF) ** QUANTUM_SIGMA_EXP
+        # m_si = pyro.deterministic("m_si", npx.log(QUANTUM_SIGMA_51 * scale))
+        m_si = pyro.sample("m_si", dist.Normal(1.37, 0.3))    # sigma in [2.2, 7.2] at +-2 sd
         s_si = pyro.deterministic("s_si", npx.asarray(0.0))
     else:  # Markov - likelihood is monotone in sigma, so a wide prior costs nothing
         m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
@@ -375,9 +376,11 @@ def _get_measurement_matrix(n_states, response_width, prob=0.5, model_type = "Ma
 PHI_CONC_BASE = 1.0
 PHI_CONC_AMP = 4.0
 
-QUANTUM_SIGMA_51 = 4.84   # sigma_base found by d_50 at 51 states, 186 fits
-QUANTUM_N_REF = 51
-QUANTUM_SIGMA_EXP = 0.48  # from d_50 at 21 and 51 states (3.17 vs 4.84)
+# Grid-scaled sigma retained for reference. Replaced by a grid-free prior: the rate needed
+# across 11 to 101 states spans only 2.3 to 6.7, which one tight prior covers.
+# QUANTUM_SIGMA_51 = 4.84   # sigma_base found by d_50 at 51 states, 186 fits
+# QUANTUM_N_REF = 51
+# QUANTUM_SIGMA_EXP = 0.48  # from d_50 at 21 and 51 states (3.17 vs 4.84)
 
 def _initial_state_concentration(n_free, model_type):
     x = npx.arange(n_free) - (n_free - 1) / 2
@@ -724,7 +727,10 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
     elif model_type == "Quantum":
         # For Quantum: ensure sigma > 0 and has numerical stability
         # Consider making sigma magnitude scale with mu for better parameter coupling
-        sigma_quantum = npx.clip(npx.abs(mu) * 0.5 + sigma, 0.01, None)
+        # Hopping (sigma) and potential (mu) are independent terms in the Hamiltonian, so the
+        # 0.5*|mu| coupling has no justification here; it also made sigma_final track mu exactly.
+        # sigma_quantum = npx.clip(npx.abs(mu) * 0.5 + sigma, 0.01, None)
+        sigma_quantum = npx.clip(sigma, 0.01, None)
         sigma = pyro.deterministic("sigma_final", sigma_quantum)
         intensity_matrix = quantum_buildH(n_states, mu, sigma, delta)
     else:
