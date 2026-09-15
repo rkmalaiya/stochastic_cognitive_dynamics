@@ -185,12 +185,21 @@ def non_centralized_parameters(model_type, I, n_states=None):
     # Fixed prior location/scale for drift
     # m = pyro.deterministic("m", npx.asarray(0.1))
     # s = pyro.deterministic("s", npx.asarray(0.1))
-    m = pyro.sample("m", dist.Normal(0.1, 1.0))
     # s * mu_r is a product of two unidentified scalars at I=1, which is a funnel.
     # Posterior for s matched its prior, so freezing it at that mean costs no information
     # and turns the funnel into an additive ridge that dense_mass absorbs.
     # s = pyro.sample("s", dist.HalfNormal(0.5))
-    s = pyro.deterministic("s", npx.asarray(0.4))
+    # Shared drift prior retained for reference:
+    # m = pyro.sample("m", dist.Normal(0.1, 1.0))
+    # s = pyro.deterministic("s", npx.asarray(0.4))
+    if model_type == "Quantum":
+        # The original m=0.1, s=0.1 pinned mu at 0.75 +- 0.05, so it could not be multimodal.
+        # Widening it 11x is what made mu split. Narrow again, but keep mu estimated.
+        m = pyro.sample("m", dist.Normal(0.1, 0.3))
+        s = pyro.deterministic("s", npx.asarray(0.1))
+    else:  # Markov converges 0/93 on the wide prior and its posterior mu spans [-3.3, 4.4]
+        m = pyro.sample("m", dist.Normal(0.1, 1.0))
+        s = pyro.deterministic("s", npx.asarray(0.4))
 
     # Fixed prior location/scale for sigma. Now on a log scale, so m_si is log(rate):
     # the rate needed spans 1.5 to 28.6 over 21 to 101 states, which is 0.4 to 3.4 in logs.
