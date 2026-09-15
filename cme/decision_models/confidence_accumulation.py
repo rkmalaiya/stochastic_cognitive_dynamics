@@ -225,7 +225,8 @@ def non_centralized_parameters(model_type, I, n_states=None):
         # s_si = pyro.deterministic("s_si", npx.asarray(0.2))
         # scale = 1.0 if n_states is None else (n_states / QUANTUM_N_REF) ** QUANTUM_SIGMA_EXP
         # m_si = pyro.deterministic("m_si", npx.log(QUANTUM_SIGMA_51 * scale))
-        m_si = pyro.sample("m_si", dist.Normal(1.37, 0.3))    # sigma in [2.2, 7.2] at +-2 sd
+        # m_si = pyro.sample("m_si", dist.Normal(1.37, 0.3))    # sigma in [2.2, 7.2] at +-2 sd
+        m_si = pyro.deterministic("m_si", npx.asarray(1.15))    # sigma = 3.16
         s_si = pyro.deterministic("s_si", npx.asarray(0.0))
     else:  # Markov - likelihood is monotone in sigma, so a wide prior costs nothing
         m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
