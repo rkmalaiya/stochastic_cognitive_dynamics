@@ -557,26 +557,28 @@ def gen_samples(model_constants):
     )
 
 
-@pytest.mark.parametrize("model_type", ["Markov", "Quantum"])
-def test_simulate_likelihood_batch_matches_per_draw(model_constants, gen_samples, model_type):
-    s = gen_samples
-    phi_0 = s.phi_0 ** 0.5 if model_type == "Quantum" else s.phi_0
-    RT_pred = np.tile(np.linspace(1.0, 3.0, s.J), (s.I, 1))
-
-    batched = ca._simulate_likelihood_batch(
-        RT_pred, model_constants.n_states, model_constants.response_width,
-        model_constants.delta, model_constants.measurement_prob, s.X,
-        s.mu, s.sigma, phi_0, model_type, "TIMESTEP", "SINGLE")
-
-    assert batched.shape == (s.draws, s.I, s.J)
-
-    for k in range(s.draws):
-        one = ca.simulate_likelihood(
-            RT_pred, model_constants.n_states, model_constants.response_width,
-            model_constants.delta, model_constants.measurement_prob, phi_0[k], s.X,
-            s.mu[k], s.sigma[k],
-            model_type=model_type, transition_type="TIMESTEP", likelihood_type="SINGLE")
-        np.testing.assert_allclose(batched[k], np.asarray(one), rtol=1e-5, atol=1e-6)
+# Retired 2026-09-16 with _simulate_likelihood_batch. The batching was correct - this test
+# passed - but it was reverted on performance grounds at 51 states, so there is nothing to test.
+# @pytest.mark.parametrize("model_type", ["Markov", "Quantum"])
+# def test_simulate_likelihood_batch_matches_per_draw(model_constants, gen_samples, model_type):
+#     s = gen_samples
+#     phi_0 = s.phi_0 ** 0.5 if model_type == "Quantum" else s.phi_0
+#     RT_pred = np.tile(np.linspace(1.0, 3.0, s.J), (s.I, 1))
+#
+#     batched = ca._simulate_likelihood_batch(
+#         RT_pred, model_constants.n_states, model_constants.response_width,
+#         model_constants.delta, model_constants.measurement_prob, s.X,
+#         s.mu, s.sigma, phi_0, model_type, "TIMESTEP", "SINGLE")
+#
+#     assert batched.shape == (s.draws, s.I, s.J)
+#
+#     for k in range(s.draws):
+#         one = ca.simulate_likelihood(
+#             RT_pred, model_constants.n_states, model_constants.response_width,
+#             model_constants.delta, model_constants.measurement_prob, phi_0[k], s.X,
+#             s.mu[k], s.sigma[k],
+#             model_type=model_type, transition_type="TIMESTEP", likelihood_type="SINGLE")
+#         np.testing.assert_allclose(batched[k], np.asarray(one), rtol=1e-5, atol=1e-6)
 
 
 @pytest.mark.parametrize("model_type", ["Markov", "Quantum"])

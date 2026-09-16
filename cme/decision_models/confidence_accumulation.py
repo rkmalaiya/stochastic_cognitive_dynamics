@@ -777,14 +777,15 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
         
 #     return RT, RA, None
 
-def _simulate_likelihood_batch(RT_pred, n_states, response_width, delta, measurement_prob, X,
-                               drift_rate_samples, diffusion_rate_samples, phi_0_samples,
-                               model_type, transition_type, likelihood_type):
-    fn = lambda drift_rate, diffusion_rate, phi_0: simulate_likelihood(
-            RT_pred, n_states, response_width, delta, measurement_prob, phi_0, X,
-            drift_rate, diffusion_rate,
-            model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
-    return np.asarray(jax.jit(jax.vmap(fn))(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
+# Unused after the 2026-09-16 revert; kept for the record.
+# def _simulate_likelihood_batch(RT_pred, n_states, response_width, delta, measurement_prob, X,
+#                                drift_rate_samples, diffusion_rate_samples, phi_0_samples,
+#                                model_type, transition_type, likelihood_type):
+#     fn = lambda drift_rate, diffusion_rate, phi_0: simulate_likelihood(
+#             RT_pred, n_states, response_width, delta, measurement_prob, phi_0, X,
+#             drift_rate, diffusion_rate,
+#             model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type)
+#     return np.asarray(jax.jit(jax.vmap(fn))(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
 
 
 def get_RT(RT, n_states, response_width, delta, measurement_prob, RA, 
@@ -1140,30 +1141,33 @@ def sample_prior_pred_params(n_states, start_width, response_width, delta, measu
                                     for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
                                     )
     elif sampling_type == "GEN" or sampling_type == "SIM":
-            # The likelihood is the only jax work per draw, so batch it once and leave the
-            # per-draw pandas in a plain loop. Original per-draw call retained for reference:
-            # predictive_samples = parallel(delayed(get_RT)(RT, n_states, response_width, delta, measurement_prob, X,
-            #                                     drift_rate, diffusion_rate, phi_0, min_RT_sec = min_RT_sec,  max_RT_sec = max_RT_sec,
-            #                                     param_sample_id = param_sample_id,
-            #                                     model_type = model_type, transition_type = transition_type,
-            #                                     likelihood_type = likelihood_type, data_samples = data_samples,
-            #                                     sampling_type=sampling_type)
-            #                         for param_sample_id, (drift_rate, diffusion_rate, phi_0) in
-            #                         enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
-            #                         )
-            part_I, part_J = data_samples
-            RT_pred = RT if RT is not None else np.tile(np.linspace(min_RT_sec, max_RT_sec, part_J), (part_I, 1))
-            likl_all = _simulate_likelihood_batch(RT_pred, n_states, response_width, delta, measurement_prob, X,
-                                                  drift_rate_samples, diffusion_rate_samples, phi_0_samples,
-                                                  model_type, transition_type, likelihood_type)
-            predictive_samples = [get_RT(RT_pred, n_states, response_width, delta, measurement_prob, X,
-                                         drift_rate, diffusion_rate, phi_0, min_RT_sec=min_RT_sec, max_RT_sec=max_RT_sec,
-                                         param_sample_id=param_sample_id,
-                                         model_type=model_type, transition_type=transition_type,
-                                         likelihood_type=likelihood_type, data_samples=data_samples,
-                                         sampling_type=sampling_type, likl=likl_all[param_sample_id])
-                                  for param_sample_id, (drift_rate, diffusion_rate, phi_0) in
-                                  enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))]
+            predictive_samples = parallel(delayed(get_RT)(RT, n_states, response_width, delta, measurement_prob, X, 
+                                                drift_rate, diffusion_rate, phi_0, min_RT_sec = min_RT_sec,  max_RT_sec = max_RT_sec,
+                                                param_sample_id = param_sample_id,
+                                                model_type = model_type, transition_type = transition_type, 
+                                                likelihood_type = likelihood_type, data_samples = data_samples,
+                                                sampling_type=sampling_type)
+                                    for param_sample_id, (drift_rate, diffusion_rate, phi_0) in 
+                                    enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
+                                    )
+            # Batched version reverted 2026-09-16. It measured 11x faster on the laptop at
+            # 21 states, but at 51 states inside an 8-core SLURM slice it runs a 93-wide
+            # vmapped scan on a single XLA device and takes longer than the fit itself.
+            # py-spy showed every worker parked in np.asarray on the jit result at 50% of
+            # one core. The per-draw call below compiles get_RT once and reuses it.
+            #             part_I, part_J = data_samples
+            #             RT_pred = RT if RT is not None else np.tile(np.linspace(min_RT_sec, max_RT_sec, part_J), (part_I, 1))
+            #             likl_all = _simulate_likelihood_batch(RT_pred, n_states, response_width, delta, measurement_prob, X,
+            #                                                   drift_rate_samples, diffusion_rate_samples, phi_0_samples,
+            #                                                   model_type, transition_type, likelihood_type)
+            #             predictive_samples = [get_RT(RT_pred, n_states, response_width, delta, measurement_prob, X,
+            #                                          drift_rate, diffusion_rate, phi_0, min_RT_sec=min_RT_sec, max_RT_sec=max_RT_sec,
+            #                                          param_sample_id=param_sample_id,
+            #                                          model_type=model_type, transition_type=transition_type,
+            #                                          likelihood_type=likelihood_type, data_samples=data_samples,
+            #                                          sampling_type=sampling_type, likl=likl_all[param_sample_id])
+            #                                   for param_sample_id, (drift_rate, diffusion_rate, phi_0) in
+            #                                   enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))]
     elif sampling_type == "JOINT":
             predictive_samples = parallel(delayed(get_joint_RT_RA)(n_states, response_width, delta, measurement_prob,
                                                 drift_rate, diffusion_rate, phi_0, data_samples = data_samples, max_RT_sec = max_RT_sec,
@@ -1194,30 +1198,33 @@ def sample_post_pred_params(n_states, response_width, delta, measurement_prob, X
                                     for drift_rate, diffusion_rate, phi_0 in zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples)
                                     )
     elif sampling_type == "GEN" or sampling_type == "SIM":
-            # The likelihood is the only jax work per draw, so batch it once and leave the
-            # per-draw pandas in a plain loop. Original per-draw call retained for reference:
-            # predictive_samples = parallel(delayed(get_RT)(RT, n_states, response_width, delta, measurement_prob, X,
-            #                                     drift_rate, diffusion_rate, phi_0, min_RT_sec = min_RT_sec, max_RT_sec=max_RT_sec,
-            #                                     param_sample_id = param_sample_id,
-            #                                     model_type = model_type, transition_type = transition_type,
-            #                                     likelihood_type = likelihood_type, data_samples = data_samples,
-            #                                     sampling_type=sampling_type)
-            #                         for param_sample_id, (drift_rate, diffusion_rate, phi_0) in
-            #                         enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
-            #                         )
-            part_I, part_J = data_samples
-            RT_pred = RT if RT is not None else np.tile(np.linspace(min_RT_sec, max_RT_sec, part_J), (part_I, 1))
-            likl_all = _simulate_likelihood_batch(RT_pred, n_states, response_width, delta, measurement_prob, X,
-                                                  drift_rate_samples, diffusion_rate_samples, phi_0_samples,
-                                                  model_type, transition_type, likelihood_type)
-            predictive_samples = [get_RT(RT_pred, n_states, response_width, delta, measurement_prob, X,
-                                         drift_rate, diffusion_rate, phi_0, min_RT_sec=min_RT_sec, max_RT_sec=max_RT_sec,
-                                         param_sample_id=param_sample_id,
-                                         model_type=model_type, transition_type=transition_type,
-                                         likelihood_type=likelihood_type, data_samples=data_samples,
-                                         sampling_type=sampling_type, likl=likl_all[param_sample_id])
-                                  for param_sample_id, (drift_rate, diffusion_rate, phi_0) in
-                                  enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))]
+            predictive_samples = parallel(delayed(get_RT)(RT, n_states, response_width, delta, measurement_prob, X, 
+                                                drift_rate, diffusion_rate, phi_0, min_RT_sec = min_RT_sec, max_RT_sec=max_RT_sec,
+                                                param_sample_id = param_sample_id,
+                                                model_type = model_type, transition_type = transition_type, 
+                                                likelihood_type = likelihood_type, data_samples = data_samples, 
+                                                sampling_type=sampling_type)
+                                    for param_sample_id, (drift_rate, diffusion_rate, phi_0) in 
+                                    enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))
+                                    )
+            # Batched version reverted 2026-09-16. It measured 11x faster on the laptop at
+            # 21 states, but at 51 states inside an 8-core SLURM slice it runs a 93-wide
+            # vmapped scan on a single XLA device and takes longer than the fit itself.
+            # py-spy showed every worker parked in np.asarray on the jit result at 50% of
+            # one core. The per-draw call below compiles get_RT once and reuses it.
+            #             part_I, part_J = data_samples
+            #             RT_pred = RT if RT is not None else np.tile(np.linspace(min_RT_sec, max_RT_sec, part_J), (part_I, 1))
+            #             likl_all = _simulate_likelihood_batch(RT_pred, n_states, response_width, delta, measurement_prob, X,
+            #                                                   drift_rate_samples, diffusion_rate_samples, phi_0_samples,
+            #                                                   model_type, transition_type, likelihood_type)
+            #             predictive_samples = [get_RT(RT_pred, n_states, response_width, delta, measurement_prob, X,
+            #                                          drift_rate, diffusion_rate, phi_0, min_RT_sec=min_RT_sec, max_RT_sec=max_RT_sec,
+            #                                          param_sample_id=param_sample_id,
+            #                                          model_type=model_type, transition_type=transition_type,
+            #                                          likelihood_type=likelihood_type, data_samples=data_samples,
+            #                                          sampling_type=sampling_type, likl=likl_all[param_sample_id])
+            #                                   for param_sample_id, (drift_rate, diffusion_rate, phi_0) in
+            #                                   enumerate(zip(drift_rate_samples, diffusion_rate_samples, phi_0_samples))]
     elif sampling_type == "JOINT":
             predictive_samples = parallel(delayed(get_joint_RT_RA)(n_states, response_width, delta, measurement_prob,
                                                 drift_rate, diffusion_rate, phi_0, data_samples = data_samples, max_RT_sec = max_RT_sec,
