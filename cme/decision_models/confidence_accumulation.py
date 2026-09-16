@@ -228,7 +228,8 @@ def non_centralized_parameters(model_type, I, n_states=None):
         # m_si = pyro.sample("m_si", dist.Normal(1.37, 0.3))    # sigma in [2.2, 7.2] at +-2 sd
         # m_si = pyro.sample("m_si", dist.Normal(1.15, 0.3))    # sigma in [1.7, 5.7] at +-2 sd
         # m_si = pyro.deterministic("m_si", npx.asarray(1.15))    # sigma = 3.16, matched to 21 states
-        m_si = pyro.deterministic("m_si", npx.asarray(1.77))    # sigma = 5.87, matched to 51 states
+        # m_si = pyro.deterministic("m_si", npx.asarray(1.77))    # sigma = 5.87, matched median RT at mu 0.76
+        m_si = pyro.deterministic("m_si", npx.asarray(2.48))    # sigma = 12.0, one dominant bump in mu at 51 states
         s_si = pyro.deterministic("s_si", npx.asarray(0.0))
     else:  # Markov - likelihood is monotone in sigma, so a wide prior costs nothing
         m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
