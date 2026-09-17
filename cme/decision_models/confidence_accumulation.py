@@ -578,7 +578,7 @@ def perform_state_transition(intensity_matrix, RT_s, RA_s, Mc, Mw, Mn, phi_0, de
 
     return phi_t
 
-def get_mean_init_confidence(n_states, phi_0, model_type = "Markov|Quantum"):
+def get_mean_init_confidence(n_states, phi_0, model_type = "Markov|Quantum", return_type = "MeanConfidence|Entropy"):
     if model_type == "Markov":
         P_0 = phi_0
     elif model_type == "Quantum":
@@ -586,6 +586,10 @@ def get_mean_init_confidence(n_states, phi_0, model_type = "Markov|Quantum"):
 
     Mid = (n_states+1)//2
     mv = npx.arange(-(Mid-1), (Mid))
+
+    if return_type == "Entropy":
+        p = P_0 / P_0.sum(axis=-2, keepdims=True)
+        return -(p * npx.log(npx.clip(p, 1e-15, None))).sum(axis=-2)
 
     mean_conf_init = mv @ P_0
     return mean_conf_init
@@ -633,17 +637,32 @@ def get_mean_confidence(n_states, intensity_matrix, phi_0, delta, Mc=None, Mw=No
     elif return_type == "ResponseConfidence":
         phi_t_c = Mc @ phi_t
         phi_t_w = Mw @ phi_t
+        phi_t_n = Mn @ phi_t
         if model_type == "Markov":
             P_t_c = phi_t_c
             P_t_w = phi_t_w
+            P_t_n = phi_t_n
         elif model_type == "Quantum":
             P_t_c = npx.abs(phi_t_c)**2
             P_t_w = npx.abs(phi_t_w)**2
+            P_t_n = npx.abs(phi_t_n)**2
 
         #P_t = npx.where(x==1,P_t_c.sum(axis=(-1,-2)),P_t_w.sum(axis=(-1,-2)))
         ret_val_c = mv[None, None, None,:] @ P_t_c
         ret_val_w = mv[None, None, None,:] @ P_t_w
-        ret_val = npx.where(x[...,None,None]==1,ret_val_c,ret_val_w)
+        ret_val_n = mv[None, None, None,:] @ P_t_n
+        # Ternary RA: neutral (0) used to fall into the negative branch. Same three-way
+        # split, and the same np.unique guard, as likelihood().
+        # ret_val = npx.where(x[...,None,None]==1,ret_val_c,ret_val_w)
+        if (np.unique(x).shape[0] <= 2):
+            ret_val = npx.where(x[...,None,None]==1, ret_val_c, ret_val_w)
+        else:
+            ret_val = npx.where(x[...,None,None]==1, ret_val_c,
+                                npx.where(x[...,None,None]==-1, ret_val_w, ret_val_n))
+
+    elif return_type == "Entropy":
+        p = P_t / P_t.sum(axis=-2, keepdims=True)
+        ret_val = -(p * npx.log(npx.clip(p, 1e-15, None))).sum(axis=-2, keepdims=True)
 
     else: #if return_type == "MeanConfidence":
         ret_val = mv[None, None, None,:] @ P_t

@@ -275,7 +275,15 @@ def get_mean_confidence(n_states, response_width, measurement_prob, delta, X, RT
                             return_type = "ResponseConfidence"
                             )
                             
-        return mean_init_conf,mean_final_conf,mean_resp_conf
+        entropy_init = ca.get_mean_init_confidence(n_states=n_states, phi_0 = phi_0_est, model_type=model_type,
+                            return_type = "Entropy")
+        entropy_final = ca.get_mean_confidence(n_states=n_states, intensity_matrix=intensity_matrix,phi_0=phi_0_est,
+                            delta= delta, Mc = Mc, Mw=Mw, Mn=Mn, t=RT,x=X, conf_scale=conf_scale,
+                            model_type=model_type, transition_type=transition_type, likelihood_type=likelihood_type,
+                            return_type = "Entropy"
+                            )
+
+        return mean_init_conf,mean_final_conf,mean_resp_conf,entropy_init,entropy_final
 
 
 def get_all_stored_data(export_version, participant_folder, est_folder, data_mod_ver):

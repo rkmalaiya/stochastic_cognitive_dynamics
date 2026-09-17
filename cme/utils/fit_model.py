@@ -601,7 +601,7 @@ def _run_model(file_loc, data, version,
         diffusion_rate_est = post_samples["sigma_final"].mean(axis=0)
         phi_0_est = post_samples["phi_0"].mean(axis=0) #posterior mean
 
-        mean_init_conf, mean_final_conf, mean_resp_conf = ppm.get_mean_confidence(n_states, response_width, measurement_prob, delta, 
+        mean_init_conf, mean_final_conf, mean_resp_conf, entropy_init, entropy_final = ppm.get_mean_confidence(n_states, response_width, measurement_prob, delta, 
                                                                                   X, RT, drift_rate_est, diffusion_rate_est, phi_0_est, 
                                                                                   conf_scale, model_type, transition_type, likelihood_type)
 
@@ -614,6 +614,8 @@ def _run_model(file_loc, data, version,
         pd.DataFrame(mean_init_conf[...,0]).reset_index(names="part_id").to_csv(f"export/mean_init_conf_{name}_{model_type}_{version}_{i}.csv")
         pd.DataFrame(mean_final_conf[...,0,0]).reset_index(names="part_id").to_csv(f"export/mean_final_conf_{name}_{model_type}_{version}_{i}.csv")
         pd.DataFrame(mean_resp_conf[...,0,0]).reset_index(names="part_id").to_csv(f"export/mean_resp_conf_{name}_{model_type}_{version}_{i}.csv")
+        pd.DataFrame(entropy_init[...,0]).reset_index(names="part_id").to_csv(f"export/entropy_init_{name}_{model_type}_{version}_{i}.csv")
+        pd.DataFrame(entropy_final[...,0,0]).reset_index(names="part_id").to_csv(f"export/entropy_final_{name}_{model_type}_{version}_{i}.csv")
         
         if execution_type == "Posterior":
             arviz_data.to_netcdf(f"export/arviz_inferencedata_{name}_{model_type}_{version}_{i}.nc")
