@@ -181,7 +181,7 @@ def centralized_parameters(I):
 #     return mu, sigma
 
 
-def non_centralized_parameters(model_type, I, n_states=None):
+def non_centralized_parameters(model_type, I, n_states=None, q_sigma=3):
     # Fixed prior location/scale for drift
     # m = pyro.deterministic("m", npx.asarray(0.1))
     # s = pyro.deterministic("s", npx.asarray(0.1))
@@ -229,7 +229,8 @@ def non_centralized_parameters(model_type, I, n_states=None):
         # m_si = pyro.sample("m_si", dist.Normal(1.15, 0.3))    # sigma in [1.7, 5.7] at +-2 sd
         # m_si = pyro.deterministic("m_si", npx.asarray(1.15))    # sigma = 3.16, matched to 21 states
         # m_si = pyro.deterministic("m_si", npx.asarray(1.77))    # sigma = 5.87, matched median RT at mu 0.76
-        m_si = pyro.deterministic("m_si", npx.asarray(2.48))    # sigma = 12.0, one dominant bump in mu at 51 states
+        # m_si = pyro.deterministic("m_si", npx.asarray(2.48))    # sigma = 12.0, one dominant bump in mu at 51 states
+        m_si = pyro.deterministic("m_si", npx.log(q_sigma))
         s_si = pyro.deterministic("s_si", npx.asarray(0.0))
     else:  # Markov - likelihood is monotone in sigma, so a wide prior costs nothing
         m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
@@ -712,7 +713,7 @@ def likelihood(intensity_matrix, phi_0, delta, RT_s, RA_s, Mc, Mw, Mn, transitio
   
     return P_t #npx.log(npx.sum(P_t)) # summing over all participants and trials
 
-def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", phi_init_bins = None):
+def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_prob, params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", phi_init_bins = None, q_sigma = 3):
     
     if likelihood_type == "SINGLE":
         I, _ = RA_s.shape
@@ -726,7 +727,7 @@ def model(n_states, start_width, response_width, delta, RA_s, RT_s, measurement_
     if params_type == "Centralized":
         mu, sigma = centralized_parameters(I)
     elif params_type == "NonCentralized":
-        mu, sigma = non_centralized_parameters(model_type, I, n_states)
+        mu, sigma = non_centralized_parameters(model_type, I, n_states, q_sigma)
     #elif params_type == "ParticipantLevel":
     #    mu, sigma = participant_parameters(model_type, I)
     else:
@@ -1037,7 +1038,7 @@ def sample_posterior_params_VI(DT, X, n_states, start_width, response_width, del
 
 
 def sample_posterior_params(DT, X, n_states, start_width, response_width, delta, measurement_prob,
-                            num_warmup=100, samples_n=500, num_chains=4, batch_size=2, max_tree_depth=10, phi_init_bins=None,
+                            num_warmup=100, samples_n=500, num_chains=4, batch_size=2, max_tree_depth=10, phi_init_bins=None, q_sigma=3,
                             params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT"):
 
     #kernel = HMCECS(NUTS(model), num_blocks=10)
@@ -1065,7 +1066,7 @@ def sample_posterior_params(DT, X, n_states, start_width, response_width, delta,
     start_run = time.perf_counter()
     mcmc_chain.run(cu.get_rng(), n_states, start_width, response_width, delta, X, DT, measurement_prob,
                    params_type = params_type, transition_type=transition_type,
-                   likelihood_type=likelihood_type, model_type=model_type, phi_init_bins=phi_init_bins,
+                   likelihood_type=likelihood_type, model_type=model_type, phi_init_bins=phi_init_bins, q_sigma=q_sigma,
                    # extra_fields=('potential_energy',)
                    extra_fields=('potential_energy', 'num_steps', 'accept_prob', 'diverging', 'adapt_state.step_size'))
 
@@ -1119,7 +1120,7 @@ def predictive_mcmc_fn(n_states, response_width, delta, measurement_prob, X,
 def sample_prior_pred_params(n_states, start_width, response_width, delta, measurement_prob, X, RT=None,  
                         n_samples=10, data_samples=(1,10), min_RT_sec = 0, max_RT_sec = 10,
                         params_type = "Centralized|NonCentralized", model_type="Markov|Quantum", 
-                        transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN", n_jobs=1, key=None, phi_init_bins=None):
+                        transition_type="RT|TIMESTEP", likelihood_type="SINGLE|JOINT", sampling_type = "MCMC|GEN", n_jobs=1, key=None, phi_init_bins=None, q_sigma=3):
 
     prior_predictive = Predictive(model, num_samples=n_samples, parallel=True)    
     if X is None:
@@ -1127,7 +1128,7 @@ def sample_prior_pred_params(n_states, start_width, response_width, delta, measu
         raise Exception("X cannot be missing")
     prior_samples = prior_predictive(cu.get_rng() if key is None else key, n_states, start_width, response_width, delta, X, None, measurement_prob,
                                     params_type = params_type, transition_type=transition_type, 
-                                    likelihood_type=likelihood_type, model_type=model_type, phi_init_bins=phi_init_bins)
+                                    likelihood_type=likelihood_type, model_type=model_type, phi_init_bins=phi_init_bins, q_sigma=q_sigma)
     
     drift_rate_samples = prior_samples["mu"]
     diffusion_rate_samples = prior_samples["sigma_final"]

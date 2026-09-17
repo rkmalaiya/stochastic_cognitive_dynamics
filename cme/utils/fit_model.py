@@ -193,6 +193,7 @@ class ModelDetails:
     predictive_n: int = None
     batch_size: int = None
     phi_init_bins: int = None
+    q_sigma: float = 3
     params_type:str = "Centralized|NonCentralized"
     model_type:list = ["Markov","Quantum"]
     transition_type:str = "RT|TIMESTEP"
@@ -230,7 +231,10 @@ _FIT_CONFIGURATION_COLUMNS = [
     "predictive_n",
     "batch_size",
     "phi_init_bins",
+    "q_sigma",
 ]
+
+_FIT_CONFIGURATION_MODEL_COLUMNS = ["model_type", "n_states", "response_width"]
 
 def _configuration_value(value):
     if isinstance(value, dict):
@@ -247,36 +251,50 @@ def _write_fit_configuration_csv(model):
     if process_id != 0:
         return
 
-    configuration = {
-        column: _configuration_value(getattr(model, column))
-        for column in _FIT_CONFIGURATION_COLUMNS
-    }
-
     os.makedirs("export", exist_ok=True)
-    csv_path = os.path.join("export", "fit_model_configurations.csv")
     columns = ["created_date", *_FIT_CONFIGURATION_COLUMNS]
+    created_date = datetime.now().isoformat(timespec="seconds")
 
-    if os.path.exists(csv_path):
-        configurations = pd.read_csv(
-            csv_path, dtype=str, keep_default_na=False
-        ).reindex(columns=columns, fill_value="")
-        matching = pd.Series(True, index=configurations.index)
-        for column, value in configuration.items():
-            matching &= configurations[column].eq(value)
+    # Shared-file version retained for reference. Read-modify-write on one csv is not safe
+    # when several configs run at once: each job read the same file and the last to write
+    # kept only its own row. It also flattened the per-model arrays into one cell.
+    # configuration = {
+    #     column: _configuration_value(getattr(model, column))
+    #     for column in _FIT_CONFIGURATION_COLUMNS
+    # }
+    # csv_path = os.path.join("export", "fit_model_configurations.csv")
+    # if os.path.exists(csv_path):
+    #     configurations = pd.read_csv(
+    #         csv_path, dtype=str, keep_default_na=False
+    #     ).reindex(columns=columns, fill_value="")
+    #     matching = pd.Series(True, index=configurations.index)
+    #     for column, value in configuration.items():
+    #         matching &= configurations[column].eq(value)
+    #
+    #     if matching.any():
+    #         return
+    # else:
+    #     configurations = pd.DataFrame(columns=columns)
+    #
+    # configuration["created_date"] = datetime.now().isoformat(
+    #     timespec="seconds"
+    # )
+    # configurations = pd.concat(
+    #     [configurations, pd.DataFrame([configuration])],
+    #     ignore_index=True,
+    # )
+    # configurations[columns].to_csv(csv_path, index=False)
 
-        if matching.any():
-            return
-    else:
-        configurations = pd.DataFrame(columns=columns)
-
-    configuration["created_date"] = datetime.now().isoformat(
-        timespec="seconds"
-    )
-    configurations = pd.concat(
-        [configurations, pd.DataFrame([configuration])],
-        ignore_index=True,
-    )
-    configurations[columns].to_csv(csv_path, index=False)
+    for index, model_type in enumerate(model.model_type):
+        configuration = {
+            column: _configuration_value(getattr(model, column)[index]
+                                         if column in _FIT_CONFIGURATION_MODEL_COLUMNS
+                                         else getattr(model, column))
+            for column in _FIT_CONFIGURATION_COLUMNS
+        }
+        configuration["created_date"] = created_date
+        csv_path = os.path.join("export", f"fit_model_configuration_{model_type}_{model.version}.csv")
+        pd.DataFrame([configuration])[columns].to_csv(csv_path, index=False)
 
 
 def _add_prior_to_arviz_data(arviz_data, prior_samples, prior_pd_samples, RT, coords, dims):
@@ -370,7 +388,7 @@ def fit_model(model: ModelDetails):
                                     model.num_warmup, model.samples_n, model.num_chains, model.max_tree_depth,
                                     model.predictive_n, model.batch_size, model.is_test,
                                     model.scale, conf_scale, model.csv_header, model.is_parallel,
-                                    model.phi_init_bins) 
+                                    model.phi_init_bins, model.q_sigma) 
                                                 
                                     # Original unpartitioned dataset/model product retained for reference:
                                     # for data, (model_type, n_states, response_width, conf_scale) in iter.product(model.data, zip(model.model_type, model.n_states, model.response_width, model.conf_scale)))
@@ -384,7 +402,7 @@ def _run_model(file_loc, data, version,
             n_states, start_width, response_width, delta, measurement_prob, 
             params_type, model_type, transition_type, likelihood_type, sampling_type, estimation_type,execution_type,
             num_warmup, samples_n, num_chains, max_tree_depth, predictive_n, batch_size, is_test, scale, conf_scale, csv_header, is_parallel,
-            phi_init_bins=None):
+            phi_init_bins=None, q_sigma=3):
     
     start_width1 = (n_states-2*response_width)//2
     if start_width == None or start_width == 0:
@@ -452,7 +470,7 @@ def _run_model(file_loc, data, version,
                                                         measurement_prob=measurement_prob, X=X, RT=None, n_samples=predictive_n,
                                                         params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                         likelihood_type=likelihood_type, sampling_type=sampling_type, 
-                                                        phi_init_bins=phi_init_bins,
+                                                        phi_init_bins=phi_init_bins, q_sigma=q_sigma,
                                                     )
         df_prior_pred_all = pd.concat([samples["Samples"] for samples in prior_pd_samples])
         df_prior_pred_all.to_csv(f"export/prior_predictive_{name}_{model_type}_{version}_{i}.csv")
@@ -477,7 +495,7 @@ def _run_model(file_loc, data, version,
                                                     num_warmup=num_warmup, samples_n=samples_n,
                                                     params_type=params_type, model_type=model_type, transition_type=transition_type, 
                                                     likelihood_type=likelihood_type, num_chains=num_chains,
-                                                    max_tree_depth=max_tree_depth, phi_init_bins=phi_init_bins
+                                                    max_tree_depth=max_tree_depth, phi_init_bins=phi_init_bins, q_sigma=q_sigma
                                                     )
             
             post_samples = post_chain.get_samples()
