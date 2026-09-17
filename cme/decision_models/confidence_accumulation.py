@@ -230,8 +230,11 @@ def non_centralized_parameters(model_type, I, n_states=None, q_sigma=3):
         # m_si = pyro.deterministic("m_si", npx.asarray(1.15))    # sigma = 3.16, matched to 21 states
         # m_si = pyro.deterministic("m_si", npx.asarray(1.77))    # sigma = 5.87, matched median RT at mu 0.76
         # m_si = pyro.deterministic("m_si", npx.asarray(2.48))    # sigma = 12.0, one dominant bump in mu at 51 states
-        m_si = pyro.deterministic("m_si", npx.log(q_sigma))
-        s_si = pyro.deterministic("s_si", npx.asarray(0.0))
+        # Quantum sigma comes straight from the config now, so the m_si / s_si / sigma_r
+        # chain is dead weight - it took log(q_sigma) and exponentiated it straight back.
+        # m_si = pyro.deterministic("m_si", npx.log(q_sigma))
+        # s_si = pyro.deterministic("s_si", npx.asarray(0.0))
+        pass
     else:  # Markov - likelihood is monotone in sigma, so a wide prior costs nothing
         m_si = pyro.sample("m_si", dist.Normal(0.0, 2.0))
         # s_si = pyro.sample("s_si", dist.HalfNormal(0.5))
@@ -252,15 +255,14 @@ def non_centralized_parameters(model_type, I, n_states=None, q_sigma=3):
             raise Exception(f"Please select one of {model_type}")
 
         # Diffusion
-        # sigma_r = pyro.sample("sigma_r", dist.Normal(0.0, 0.1))
-        sigma_r = pyro.sample("sigma_r", dist.Normal(0.0, 1.0))
-
-        # sigma_base = jax.nn.softplus(m_si + s_si * sigma_r)
-        sigma_base = npx.exp(m_si + s_si * sigma_r)
-
         if model_type == "Quantum":
-            sigma = pyro.deterministic("sigma", npx.clip(sigma_base, 0.01, None))
+            sigma = pyro.deterministic("sigma", npx.full((I, 1), q_sigma))
         else:
+            # sigma_r = pyro.sample("sigma_r", dist.Normal(0.0, 0.1))
+            sigma_r = pyro.sample("sigma_r", dist.Normal(0.0, 1.0))
+
+            # sigma_base = jax.nn.softplus(m_si + s_si * sigma_r)
+            sigma_base = npx.exp(m_si + s_si * sigma_r)
             sigma = pyro.deterministic("sigma", sigma_base)
 
     return mu, sigma
