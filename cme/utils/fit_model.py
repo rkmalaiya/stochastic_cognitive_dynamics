@@ -286,15 +286,19 @@ def _write_fit_configuration_csv(model):
     # configurations[columns].to_csv(csv_path, index=False)
 
     for index, model_type in enumerate(model.model_type):
-        configuration = {
-            column: _configuration_value(getattr(model, column)[index]
-                                         if column in _FIT_CONFIGURATION_MODEL_COLUMNS
-                                         else getattr(model, column))
-            for column in _FIT_CONFIGURATION_COLUMNS
-        }
-        configuration["created_date"] = created_date
+        rows = []
+        for data in model.data:
+            configuration = {
+                column: _configuration_value(getattr(model, column)[index]
+                                             if column in _FIT_CONFIGURATION_MODEL_COLUMNS
+                                             else getattr(model, column))
+                for column in _FIT_CONFIGURATION_COLUMNS
+            }
+            configuration["data"] = data if isinstance(data, str) else data[0]
+            configuration["created_date"] = created_date
+            rows.append(configuration)
         csv_path = os.path.join("export", f"fit_model_configuration_{model_type}_{model.version}.csv")
-        pd.DataFrame([configuration])[columns].to_csv(csv_path, index=False)
+        pd.DataFrame(rows)[columns].to_csv(csv_path, index=False)
 
 
 def _add_prior_to_arviz_data(arviz_data, prior_samples, prior_pd_samples, RT, coords, dims):
