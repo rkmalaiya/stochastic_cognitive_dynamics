@@ -836,7 +836,7 @@ def get_RT(RT, n_states, response_width, delta, measurement_prob, RA,
         df_sim_RT = (pd.DataFrame(RT).assign(drift_rate=drift_rate, diffusion_rate=diffusion_rate)
         .reset_index(names="part_id")
         .melt(id_vars=["part_id", "drift_rate", "diffusion_rate"], var_name="pseudo_item_id", value_name="RT")
-        .assign(RA = RA.flatten())
+        .assign(RA = RA.flatten(order="F"))
         .set_index(["part_id","pseudo_item_id"])
         # .join(pd.DataFrame(likl)
         .join(pd.DataFrame(likl_)
