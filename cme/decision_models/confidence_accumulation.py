@@ -195,8 +195,12 @@ def non_centralized_parameters(model_type, I, n_states=None, q_sigma=3):
     if model_type == "Quantum":
         # The original m=0.1, s=0.1 pinned mu at 0.75 +- 0.05, so it could not be multimodal.
         # Widening it 11x is what made mu split. Narrow again, but keep mu estimated.
-        m = pyro.sample("m", dist.Normal(0.1, 0.3))
-        s = pyro.deterministic("s", npx.asarray(0.1))
+        # m = pyro.sample("m", dist.Normal(0.1, 0.3))
+        # s = pyro.deterministic("s", npx.asarray(0.1))
+        # The split was sigma, not mu. At q_sigma 12 the mu likelihood has one peak with
+        # the runner-up about 100 nats down, so the narrow prior is no longer needed.
+        m = pyro.sample("m", dist.Normal(0.1, 0.6))
+        s = pyro.deterministic("s", npx.asarray(0.2))
     else:  # Markov converges 0/93 on the wide prior and its posterior mu spans [-3.3, 4.4]
         m = pyro.sample("m", dist.Normal(0.1, 1.0))
         s = pyro.deterministic("s", npx.asarray(0.4))
