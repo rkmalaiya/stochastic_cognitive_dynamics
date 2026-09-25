@@ -155,10 +155,10 @@ def collect_response_from_model_output(folder, data_mod_ver, batch_size=0, n_job
         with open(file, "rb") as pkl:
             model_out = pickle.load(pkl)
         model_out["ID"] = pd.read_csv(file.replace("mcmc_samples_", "participants_id_")
-                                          .replace(".pkl", ".csv")).iloc[:, -1].astype(str).values
+                                          .replace(".pkl", ".csv")).iloc[:, -1].to_numpy(dtype=str)
         processed = {key: make_dataframe(model_out[key], file, folder, dataset, model, version)
                      for key in keys if key in keys_process}
-        values = {key: model_out[key] for key in keys if key not in keys_process}
+        values = {key: model_out[key] for key in keys}
         return processed, values
 
     tasks = [(dataset, model, version, file)
