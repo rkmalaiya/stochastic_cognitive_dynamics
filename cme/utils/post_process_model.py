@@ -82,7 +82,7 @@ def collect_response_from_model_output(folder, data_mod_ver, batch_size=0, n_job
     #dataset = indicator.split("_")[3], 
     #size = indicator.split("_")[4], 
     #subfile_id = indicator.split(f"{version}_")[1]
-    keys = ['post_samples', 'phi_t','phi_0', "mean_init_conf", "mean_final_conf", 'prior_pd_samples', 'post_pd_samples', 'RT', 'X'] #, 
+    keys = ['post_samples', 'phi_t','phi_0', "mean_init_conf", "mean_final_conf", 'prior_pd_samples', 'post_pd_samples', 'RT', 'X', 'ID'] #, 
     keys_process = ["RT", "X", "mean_init_conf", "mean_final_conf"]
     keys_process_dict = {key: [] for key in keys}
     dataset_dict = {}
@@ -154,6 +154,8 @@ def collect_response_from_model_output(folder, data_mod_ver, batch_size=0, n_job
     def process_file(file, dataset, model, version):
         with open(file, "rb") as pkl:
             model_out = pickle.load(pkl)
+        model_out["ID"] = pd.read_csv(file.replace("mcmc_samples_", "participants_id_")
+                                          .replace(".pkl", ".csv")).iloc[:, -1].astype(str).values
         processed = {key: make_dataframe(model_out[key], file, folder, dataset, model, version)
                      for key in keys if key in keys_process}
         values = {key: model_out[key] for key in keys if key not in keys_process}
@@ -175,6 +177,9 @@ def collect_response_from_model_output(folder, data_mod_ver, batch_size=0, n_job
         keys_dict = dataset_dict.setdefault(model + "_" + dataset, {key: [] for key in keys})
         for key, value in values.items():
             keys_dict[key].append(value)
+
+    for keys_dict in dataset_dict.values():
+        keys_dict["ID"] = np.concatenate(keys_dict["ID"])
 
     df_observed_rt = pd.concat(keys_process_dict["RT"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)
     df_observed_ra = pd.concat(keys_process_dict["X"]).reset_index(names="part_id").assign(id = lambda df: df.part_id + ((df.subfile_id.astype(int) * (batch_size)) if df.subfile_id.astype(int).max() > 0 else 0)).drop(["part_id", "subfile_id"], axis=1)      
